@@ -1,0 +1,6 @@
+# 插件本地配置(.claude/*.local.md 由各项目写入,不入库)
+.claude/*.local.md
+__pycache__/
+*.pyc
+.DS_Store
+*.log

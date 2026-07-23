@@ -1,0 +1,11 @@
+{
+  "name": "sdlc-pipeline",
+  "version": "0.2.0",
+  "description": "需求→设计→编码→测试 四阶段闭环研发流水线插件。以 manifest 派生路径、证据优先(evidence over claims)、hooks 守纪律为核心约束。",
+  "author": {
+    "name": "sdlc-pipeline"
+  },
+  "license": "MIT",
+  "keywords": ["sdlc", "pipeline", "workflow", "java", "spring", "vue"],
+  "hooks": "./hooks/hooks.json"
+}
