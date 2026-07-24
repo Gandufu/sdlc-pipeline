@@ -118,6 +118,15 @@ class InstallerTests(unittest.TestCase):
         for name in ("sdlc-main", "sdlc-coder", "sdlc-executor"):
             self.assertTrue((REPO / f".opencode/agents/{name}.md").exists())
 
+    def test_readme_describes_bootstrap_handoff_and_current_init(self) -> None:
+        readme = (REPO / "README.md").read_text(encoding="utf-8")
+        init_command = (
+            REPO / ".opencode/commands/sdlc-init.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("必须用 OpenCode 打开生成的目标项目", readme)
+        self.assertIn("/sdlc-init --current", readme)
+        self.assertIn("不得在插件仓库会话继续后续阶段", init_command)
+
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_plugin_javascript_syntax(self) -> None:
         subprocess.run(

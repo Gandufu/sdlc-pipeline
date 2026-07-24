@@ -22,6 +22,18 @@ uninitialized
                           └─ closed version
 ```
 
+bootstrap init 与后续研发阶段可能位于两个 OpenCode 项目会话：
+
+```text
+插件仓库会话：/sdlc-init <repo> <ref> <target> [template]
+                                  │
+                                  └─ 安装项目级 adapter
+目标项目会话：                    /sdlc-spec → /sdlc-code → /sdlc-test
+```
+
+init 后必须打开 target，以目标 Git worktree 作为后续 evidence root。已有项目已经具备
+lifecycle/scaffold 时，可以在目标项目直接运行 `/sdlc-init --current`。
+
 失败不会跳过门禁：
 
 - init 缺少系统工具时生成 blocked report；
