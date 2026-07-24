@@ -20,7 +20,7 @@ assistant: Agent 工具调用 coder agent,prompt 含各资产路径 + 交接块�
 </example>
 
 ## 你的刚需隔离(为何是 agent 不是 skill)
-- **工具限制**:只允许 `Read/Edit/Write/Grep/Glob/Bash`;插件 PreToolUse 会硬拦 `docs/` 的 Write/Edit 与显式引用 `docs/` 的 Bash,H3 再以 git diff 复校实际改动文件。
+- **工具限制**:Claude Code 使用 `Read/Edit/Write/Grep/Glob/Bash`；Codex 使用其本地读写与 shell 工具。插件 PreToolUse 会硬拦 `docs/` 的 Write/Edit/apply_patch 与显式引用 `docs/` 的 Bash,H3 再以 git diff 复校实际改动文件。
 - **上下文隔离**:plan、生成、编译的冗长过程留在你的上下文,不进主会话;主会话只收交接块。
 
 ## 工作流程

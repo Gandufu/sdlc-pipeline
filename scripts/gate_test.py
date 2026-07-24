@@ -9,6 +9,7 @@ PreToolUse,matcher=Agent。仅当派发的是测试 agent(subagent_type 含 test
 import sys
 
 import _lib  # type: ignore
+import _run_state  # type: ignore
 
 
 def main() -> int:
@@ -41,6 +42,7 @@ def main() -> int:
         })
         return 0
 
+    _run_state.update(_lib.project_dir(hook), phase="tester_spawning")
     _lib.emit({})
     return 0
 

@@ -14,7 +14,10 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from glob import glob
 from typing import Any
+
+import _run_state
 
 # Windows 控制台默认 GBK,强制 UTF-8 IO,保证 hook 输出(中文事实陈述)不乱码。
 for _stream in (sys.stdout, sys.stdin):
@@ -57,6 +60,12 @@ def emit(obj: dict[str, Any]) -> None:
 
 
 def project_dir(hook: dict[str, Any]) -> str:
+    # coder/tester 的真实执行根由 /code 在派单前登记。hook.cwd 仍用于定位
+    # 该登记，但不再被当作 worktree 身份的唯一证据。
+    if is_coder(hook) or is_tester(hook):
+        execution_root = _run_state.execution_root_for_hook(hook)
+        if execution_root:
+            return execution_root
     return hook.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
 
 
@@ -84,11 +93,15 @@ def product_exists(hook: dict[str, Any], name: str) -> bool:
 
 
 def is_initialized(hook: dict[str, Any]) -> bool:
-    """G0:CLAUDE.md 是否含 @docs/existing-framework.md。"""
+    """G0:Claude/Codex 的项目指令是否接入能力清单。"""
     root = project_dir(hook)
     for cand in (os.path.join(root, "CLAUDE.md"), os.path.join(root, ".claude", "CLAUDE.md")):
         text = read_text(cand)
         if text and "@docs/existing-framework.md" in text:
+            return True
+    for cand in (os.path.join(root, "AGENTS.md"), os.path.join(root, ".agents", "AGENTS.md")):
+        text = read_text(cand)
+        if text and "docs/existing-framework.md" in text:
             return True
     return False
 
@@ -152,7 +165,7 @@ def write_matrix(hook: dict[str, Any], matrix: Matrix) -> None:
     lines = [
         "# 追溯矩阵 (Traceability Matrix)",
         "",
-        "> 由 H3/H4 校验脚本 merge,零手改(设计文档 §5.1)。",
+        "> R→D 由 /design 生成；D→C 与走查状态由 H3/H4 校验脚本 merge。",
         "",
         "| R-id (需求) | D-id (设计) | C-id (代码模块/文件) | T-id (测试用例) | 状态 |",
         "|---|---|---|---|---|",
@@ -378,9 +391,15 @@ def derive_state(hook: dict[str, Any]) -> DerivedState:
     matrix = parse_matrix(hook)
     compiled = ""
     status_texts = " ".join(r.get("状态", "") for r in matrix.rows).lower()
-    if "编译通过" in status_texts or "compiled=pass" in status_texts:
+    tokens = _status_tokens(status_texts)
+    if tokens.get("compile") == "pass" or (
+        "compile" not in tokens
+        and (_legacy_status_marker(status_texts, "编译通过") or "compiled=pass" in status_texts)
+    ):
         compiled = "pass"
-    elif "编译失败" in status_texts:
+    elif tokens.get("compile") == "fail" or (
+        "compile" not in tokens and _legacy_status_marker(status_texts, "编译失败")
+    ):
         compiled = "fail"
 
     phase, missing = _derive_phase(hook, products, matrix, compiled)
@@ -409,11 +428,42 @@ def _derive_phase(hook, products, matrix, compiled) -> tuple[str, list[str]]:
         return "编码中", ["编码结果尚未同时满足编译通过与 D→C 闭合"]
     # 编译通过且 D→C 闭合 → 可测试
     status_texts = " ".join(r.get("状态", "") for r in matrix.rows)
-    if "走查发现阻塞" in status_texts:
+    tokens = _status_tokens(status_texts)
+    if tokens.get("review") == "blocked" or (
+        "review" not in tokens and _legacy_status_marker(status_texts, "走查发现阻塞")
+    ):
         return "测试未通过", ["仍存在 high/medium 走查发现"]
-    if "走查通过" not in status_texts and "review" not in status_texts.lower():
+    if tokens.get("review") != "pass" and (
+        "review" in tokens or not _legacy_status_marker(status_texts, "走查通过")
+    ):
         return "可测试", ["测试 agent 走查结果尚未形成"]
     return "闭环", []
+
+
+def _status_tokens(text: str) -> dict[str, str]:
+    """读取状态栏中的机器 token；自然语言仅作为旧矩阵兼容输入。"""
+    return {
+        key.lower(): value.lower()
+        for key, value in re.findall(r"\b(code|compile|review)=([a-z_]+)\b", text, re.IGNORECASE)
+    }
+
+
+def _legacy_status_marker(text: str, marker: str) -> bool:
+    """只兼容旧脚本生成的独立状态短语，避免“未编译通过”等备注误命中。"""
+    return re.search(
+        rf"(?<![\w\u4e00-\u9fff]){re.escape(marker)}(?![\w\u4e00-\u9fff])",
+        text,
+    ) is not None
+
+
+def code_status() -> str:
+    return "编码完成,编译通过 [code=complete;compile=pass;review=pending]"
+
+
+def review_status(blocking: bool) -> str:
+    if blocking:
+        return "走查发现阻塞,编译通过 [code=complete;compile=pass;review=blocked]"
+    return "走查通过,编译通过 [code=complete;compile=pass;review=pass]"
 
 
 # ---------------------------------------------------------------------------
@@ -444,6 +494,22 @@ def reset_retries(session_id: str, agent: str) -> None:
         os.remove(retry_file(session_id, agent))
     except OSError:
         pass
+
+
+def cleanup_stale_retries(max_age_days: int = 7) -> int:
+    """清理异常退出遗留的旧重试计数；当前会话的新文件不会被触碰。"""
+    import time
+
+    cutoff = time.time() - max_age_days * 24 * 60 * 60
+    removed = 0
+    for path in glob(os.path.join(tempfile.gettempdir(), "sdlc-retry-*-*.txt")):
+        try:
+            if os.path.getmtime(path) < cutoff:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -523,10 +589,12 @@ def extract_handoff_text(hook: dict[str, Any]) -> str:
 
 
 def agent_type_of(hook: dict[str, Any]) -> str:
-    """从 Agent 工具事件或 SubagentStop 输入推断 agent 类型。"""
+    """从 Claude Agent、Codex spawn_agent 或 Subagent 生命周期输入推断角色名。"""
     ti = hook.get("tool_input") or {}
-    if isinstance(ti, dict) and ti.get("subagent_type"):
-        return str(ti["subagent_type"])
+    if isinstance(ti, dict):
+        for key in ("subagent_type", "agent_type", "task_name", "name"):
+            if ti.get(key):
+                return str(ti[key])
     for key in ("agent_type", "subagent_type"):
         if hook.get(key):
             return str(hook[key])
@@ -539,11 +607,19 @@ def subagent_type_of(hook: dict[str, Any]) -> str:
 
 
 def is_coder(hook: dict[str, Any]) -> bool:
-    return "coder" in agent_type_of(hook).lower()
+    if "coder" in agent_type_of(hook).lower():
+        return True
+    record = _run_state.find_for_hook(hook)
+    agent_id = hook.get("agent_id")
+    return bool(record and agent_id and agent_id == record.get("coder_agent_id"))
 
 
 def is_tester(hook: dict[str, Any]) -> bool:
-    return "tester" in agent_type_of(hook).lower()
+    if "tester" in agent_type_of(hook).lower():
+        return True
+    record = _run_state.find_for_hook(hook)
+    agent_id = hook.get("agent_id")
+    return bool(record and agent_id and agent_id == record.get("tester_agent_id"))
 
 
 def additional_context(hook: dict[str, Any], text: str) -> dict[str, Any]:

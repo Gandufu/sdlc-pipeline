@@ -1,5 +1,5 @@
 {
-  "description": "sdlc-pipeline 四阶段流水线门禁、agent 写入保护与派生状态注入 hooks。工具事件使用当前 Claude Code 的 Agent 工具名;agent 身份由脚本兼容 tool_input.subagent_type 与 agent_type。所有注入文本为事实陈述,不含命令式(约束 #1)。",
+  "description": "sdlc-pipeline 四阶段流水线门禁、agent 写入保护与派生状态注入 hooks。兼容 Claude Code Agent 与 Codex spawn_agent/apply_patch；所有注入文本为事实陈述。",
   "hooks": {
     "PreToolUse": [
       {
@@ -41,6 +41,18 @@
             "type": "command",
             "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/validate_test_handoff.py\" subagentstop",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"${CLAUDE_PLUGIN_ROOT}/scripts/register_subagent.py\"",
+            "timeout": 15
           }
         ]
       }

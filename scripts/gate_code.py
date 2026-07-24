@@ -11,6 +11,7 @@ PreToolUse,matcher=Agent。仅当派发的是编码 agent(subagent_type 含 code
 import sys
 
 import _lib  # type: ignore
+import _run_state  # type: ignore
 
 
 def main() -> int:
@@ -55,6 +56,7 @@ def main() -> int:
         })
         return 0
 
+    _run_state.update(_lib.project_dir(hook), phase="coder_spawning")
     _lib.emit({})
     return 0
 

@@ -1,6 +1,6 @@
 ---
 name: design
-description: This skill should be used when the user asks to "写设计", "出设计文档", "design", "/design", or has finished /requirement and wants to proceed to design. It reads requirement-spec plus stack rules, writes docs/design-doc.md with D-ids, and fills the R→D column of the traceability matrix. Stays in the main session (no implementation code exists yet, so no isolation need for an agent).
+description: This skill should be used when the user asks to "写设计", "出设计文档", "design", "/design", "$design", or has finished requirement analysis. It reads requirement-spec, framework inventory, and stack rules; atomically publishes design-doc with D-ids and fills R→D. Compatible with Claude Code, Codex and OpenCode.
 ---
 
 # /design — 设计
@@ -17,8 +17,8 @@ description: This skill should be used when the user asks to "写设计", "出�
 1. **加载资产**:
    - `Read docs/requirement-spec.md`(需求)。
    - `Read ${CLAUDE_PLUGIN_ROOT}/templates/docs/design-doc.md`(填充模板)。
-   - 从 `templates/manifest.json` 取所选脚手架的 `stacks`,逐个 `Read ${CLAUDE_PLUGIN_ROOT}/rules/<stack>.md`(如 spring 脚手架 → java.md + spring.md)。**rules 按需 Read,不常驻**。
-   - 参考 `@docs/existing-framework.md`(已在上下文):复用已有模块,不重造。
+   - 从 `${CLAUDE_PLUGIN_ROOT}/templates/manifest.json` 取所选脚手架的 `stacks`,逐个 `Read ${CLAUDE_PLUGIN_ROOT}/rules/<stack>.md`(如 spring 脚手架 → java.md + spring.md)。**rules 按需 Read,不常驻**。
+   - 显式 `Read docs/existing-framework.md`:复用已有模块,不重造。
 
 2. **设计**(主会话推理):
    - 模块划分:每个模块分配 **D-id**(D1、D2…),并标注它满足哪个 R-id。
@@ -26,8 +26,8 @@ description: This skill should be used when the user asks to "写设计", "出�
    - 显式记录取舍与风险。
 
 3. **落盘**:
-   - 写 `docs/design-doc.md`,**"模块划分"章节必填**(G1 门禁 + 后续 G2 门禁都查它)。
-   - 更新 `docs/traceability-matrix.md` 的 D 列:每个 R 至少映射一个 D(R→D 闭合)。
+   - 把完整设计先写为 `docs/design-doc.md.sdlc-tmp`，再用 `${CLAUDE_PLUGIN_ROOT}/scripts/publish_artifact.py` 原子发布为 `docs/design-doc.md`;**"模块划分"章节必填**(G1 门禁 + 后续 G2 门禁都查它)。
+   - 把更新后的矩阵完整写为 `docs/traceability-matrix.md.sdlc-tmp`，再原子发布到正式矩阵；D 列中每个 R 至少映射一个 D(R→D 闭合)。
    - **矩阵一行只写一个 D-id**。一个 R 对应多个 D 时展开为多行（如 `R1 | D1`、`R1 | D3`），禁止把 `D1、D3` 或 `D1, D3` 写在同一单元格。校验脚本会兼容并展开旧格式，但新产物必须使用规范格式。
 
 4. **输出**:返回设计摘要(模块数、R→D 映射表),不返回全文。
@@ -36,4 +36,4 @@ description: This skill should be used when the user asks to "写设计", "出�
 设计阶段项目里尚无实现代码,"不该看到实现细节"的隔离理由不成立(设计文档 §2.2)。skill 直接 Write 落盘即可达成"大产物不进主会话"。
 
 ## 完成后
-当前派生阶段变为"可编码"。提示可执行 `/sdlc-pipeline:code`。G2 门禁(进入编码前的追溯闭合)由 PreToolUse hook 在派发编码 agent 时硬拦。
+当前派生阶段变为"可编码"。Claude Code 插件模式提示 `/sdlc-pipeline:code`（项目原生模式为 `/sdlc-pipeline-code`）；Codex 提示 `$sdlc-pipeline-code`；OpenCode 提示 `/sdlc-code`。G2 门禁由各宿主适配器在派发编码 agent 时硬拦。

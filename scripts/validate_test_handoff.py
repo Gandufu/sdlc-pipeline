@@ -13,6 +13,7 @@ import re
 import sys
 
 import _lib  # type: ignore
+import _run_state  # type: ignore
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "posttooluse"
 
@@ -57,16 +58,38 @@ def _validate(hook: dict, handoff: dict | None) -> list[str]:
                     facts.append(f"{prefix}.requirement 缺失")
                 elif requirement not in known_r:
                     facts.append(f"{prefix}.requirement 不是已知 R-id:{requirement}")
+
+    # Codex 没有独立 Read/Grep 工具，tester 需借助只读 shell。H4 用代码指纹和
+    # run baseline 复核其间没有修改已交付代码或新增额外文件。
+    run = _run_state.find_for_hook(hook)
+    if run:
+        execution_root = str(run.get("execution_root") or _lib.project_dir(hook))
+        ok, mismatches = _run_state.verify_target(_lib.project_dir(hook), execution_root)
+        if not ok:
+            facts.append("走查期间已交付代码指纹变化:" + ",".join(mismatches))
+        changed = _run_state.changed_since_start(hook)
+        evidence = set((run.get("evidence_files") or {}).keys())
+        if changed is not None:
+            allowed = evidence | {"docs/traceability-matrix.md"}
+            extras = sorted(changed - allowed)
+            if extras:
+                facts.append("走查期间出现非交付文件改动:" + ",".join(extras))
     return facts
 
 
 def main() -> int:
     hook = _lib.read_hook_input()
-    if not _lib.is_tester(hook):
+    candidate_text = _find_handoff_text(hook)
+    if not _lib.is_tester(hook) and "HANDOFF:test" not in candidate_text:
         _lib.emit({})
         return 0
+    _run_state.update(
+        _lib.project_dir(hook),
+        tester_session_id=hook.get("session_id"),
+        tester_agent_id=hook.get("agent_id"),
+    )
 
-    text = _find_handoff_text(hook)
+    text = candidate_text
     handoff = _lib.parse_handoff(text)
     facts = _validate(hook, handoff)
     session_id = hook.get("session_id", "session")
@@ -92,8 +115,14 @@ def main() -> int:
         for row in matrix.rows:
             # 保留"编译通过"标记(编译是既成事实,G4 门禁已保证走查前 compiled=pass),
             # 否则 derive_state 会因丢失编译标记而误判阶段。
-            row["状态"] = "走查发现阻塞,编译通过" if blocking else "走查通过,编译通过"
+            row["状态"] = _lib.review_status(blocking)
         _lib.write_matrix(hook, matrix)
+        run = _run_state.find_for_hook(hook)
+        if run:
+            next_phase = "review_blocked" if blocking else (
+                "merge_pending" if run.get("requires_merge") else "complete"
+            )
+            _run_state.update(_lib.project_dir(hook), phase=next_phase)
         spec = handoff.get("spec") or []
         deviate = sum(1 for s in spec if s.get("severity") in ("high", "medium"))
         phase = "测试未通过" if blocking else "闭环"

@@ -13,6 +13,7 @@ import os
 import sys
 
 import _lib  # type: ignore
+import _run_state  # type: ignore
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else "posttooluse"
 
@@ -55,11 +56,11 @@ def _validate(hook: dict, handoff: dict | None) -> list[str]:
             facts.append(f"files 列出但磁盘不存在:{f}")
     if not declared:
         facts.append("files 为空")
-    changed = _lib.git_changed_files(hook)
-    if changed is not None:
-        # requirement/design/matrix 由主会话和 hooks 拥有，不属于 coder 的 files 范围。
-        # 这些阶段产物可在进入 /code 时尚未提交，不能污染源码真实性比对。
-        changed = {path for path in changed if not _lib.is_docs_path(hook, path)}
+    # 有运行登记时只比较编码开始后的增量；既不会把阶段文档基线算给 coder，
+    # 也不会再无条件忽略 coder 在运行期间对 docs/ 的改动。
+    changed = _run_state.changed_since_start(hook)
+    if changed is None:
+        changed = _lib.git_changed_files(hook)
     if changed is not None and declared != changed:
         missing = sorted(changed - declared)
         extra = sorted(declared - changed)
@@ -72,11 +73,17 @@ def _validate(hook: dict, handoff: dict | None) -> list[str]:
 
 def main() -> int:
     hook = _lib.read_hook_input()
-    if not _lib.is_coder(hook):
+    candidate_text = _find_handoff_text(hook)
+    if not _lib.is_coder(hook) and "HANDOFF:code" not in candidate_text:
         _lib.emit({})
         return 0
+    _run_state.update(
+        _lib.project_dir(hook),
+        coder_session_id=hook.get("session_id"),
+        coder_agent_id=hook.get("agent_id"),
+    )
 
-    text = _find_handoff_text(hook)
+    text = candidate_text
     handoff = _lib.parse_handoff(text)
     facts = _validate(hook, handoff)
     session_id = hook.get("session_id", "session")
@@ -98,8 +105,11 @@ def main() -> int:
     # posttooluse (H3b): merge 矩阵 + 注入主会话摘要
     if not facts and handoff:
         trace = handoff.get("trace") or {}
-        status = "编码完成,编译通过"
+        status = _lib.code_status()
         _lib.merge_trace_into_matrix(hook, trace, status)
+        root = _lib.project_dir(hook)
+        evidence = _run_state.fingerprints(root, set(handoff.get("files") or []))
+        _run_state.update(root, phase="code_validated", evidence_files=evidence)
         state = _lib.derive_state(hook)
         d_total = len([r for r in _lib.parse_matrix(hook).rows if r.get("D")])
         d_mapped = len([r for r in _lib.parse_matrix(hook).rows if r.get("C")])

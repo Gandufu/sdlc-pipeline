@@ -10,10 +10,13 @@
 import sys
 
 import _lib  # type: ignore
+import _run_state  # type: ignore
 
 
 def main() -> int:
     hook = _lib.read_hook_input()
+    if hook.get("hook_event_name") == "SessionStart":
+        _lib.cleanup_stale_retries()
 
     # H5 专用过滤:仅当 Write|Edit 命中 docs/**/*.md 才注入
     tool_name = hook.get("tool_name", "")
@@ -25,7 +28,9 @@ def main() -> int:
             return 0
 
     state = _lib.derive_state(hook)
-    _lib.emit(_lib.additional_context(hook, state.render()))
+    runtime = _run_state.find_for_hook(hook)
+    suffix = _run_state.render(runtime) if runtime else ""
+    _lib.emit(_lib.additional_context(hook, state.render() + suffix))
     return 0
 
 

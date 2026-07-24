@@ -1,0 +1,35 @@
+{
+  "name": "sdlc-pipeline",
+  "version": "0.4.0",
+  "description": "需求、设计、编码、测试四阶段闭环研发流水线，支持 Claude Code、Codex 与 OpenCode，并提供门禁、追溯、崩溃现场接管和快速诊断。",
+  "author": {
+    "name": "SDLC Pipeline Team"
+  },
+  "license": "MIT",
+  "keywords": [
+    "sdlc",
+    "pipeline",
+    "workflow",
+    "traceability",
+    "recovery"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "SDLC Pipeline",
+    "shortDescription": "四阶段可追溯研发流水线",
+    "longDescription": "以需求、设计、编码、测试四阶段闭环驱动开发，通过 hooks、交接块、追溯矩阵和运行登记提供确定性门禁、崩溃现场接管与快速诊断。",
+    "developerName": "SDLC Pipeline Team",
+    "category": "Engineering",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "使用 SDLC Pipeline 初始化并梳理这个项目的需求",
+      "继续当前 SDLC 阶段并说明门禁状态",
+      "诊断当前流水线、残留 worktree 和未完成步骤"
+    ],
+    "brandColor": "#2563EB"
+  }
+}
