@@ -6,5 +6,13 @@
     "stacks": ["java", "spring"],
     "path": "templates/spring-boot-full",
     "conventions": "templates/conventions/spring-boot-full.md"
+  },
+  {
+    "id": "heli-terminal-client",
+    "name": "直升机会议终端桌面客户端",
+    "description": "Electron 30 + React 18 + TypeScript 5 + pnpm workspace 的 Windows 桌面客户端骨架，内置设备适配器、IPC 边界、鉴权、能力探测、网络诊断和单元测试样例。",
+    "stacks": ["typescript", "electron", "react"],
+    "path": "templates/heli-terminal-client",
+    "conventions": "templates/conventions/heli-terminal-client.md"
   }
 ]

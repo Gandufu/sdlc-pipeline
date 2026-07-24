@@ -28,6 +28,7 @@ description: This skill should be used when the user asks to "写设计", "出�
 3. **落盘**:
    - 写 `docs/design-doc.md`,**"模块划分"章节必填**(G1 门禁 + 后续 G2 门禁都查它)。
    - 更新 `docs/traceability-matrix.md` 的 D 列:每个 R 至少映射一个 D(R→D 闭合)。
+   - **矩阵一行只写一个 D-id**。一个 R 对应多个 D 时展开为多行（如 `R1 | D1`、`R1 | D3`），禁止把 `D1、D3` 或 `D1, D3` 写在同一单元格。校验脚本会兼容并展开旧格式，但新产物必须使用规范格式。
 
 4. **输出**:返回设计摘要(模块数、R→D 映射表),不返回全文。
 

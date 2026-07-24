@@ -111,6 +111,23 @@ def main() -> int:
     check("PostToolUse使用hookSpecificOutput", out.get("hookSpecificOutput", {}).get("hookEventName") == "PostToolUse", f"got {out}")
     m = _lib.parse_matrix({"cwd": proj})
     check("D→C已merge", m.d_to_c_closed(), "")
+    make_project(proj)
+    out = run_script(
+        "validate_code_handoff.py",
+        {"cwd": proj, "hook_event_name": "PostToolUse", "tool_name": "Agent",
+         "session_id": "agent-content-array",
+         "tool_input": {"subagent_type": "x:coder"},
+         "tool_response": {
+             "status": "completed",
+             "content": [
+                 {"type": "text", "text": f"核对完成。\n```markdown\n{handoff}\n```"},
+                 {"type": "text", "text": "agentId: agent-123"},
+             ],
+         }},
+        "posttooluse",
+    )
+    check("Claude Code 2.1 Agent content数组可提取交接块",
+          "交接块格式:合规" in context_text(out), f"got {out}")
     if shutil.which("git"):
         git_proj = make_project(tempfile.mkdtemp(prefix="sdlc-git-"))
         subprocess.run(["git", "init", "-q", git_proj], check=True)
@@ -132,6 +149,64 @@ def main() -> int:
         check("git diff漏报被拒", "漏报 git 改动:src/B.java" in context_text(out), f"got {out}")
     else:
         check("git diff漏报被拒(git不可用时跳过)", True, "")
+
+    print("=== 3b. 多 D-id 矩阵 + 未提交阶段 docs 不污染编码 diff ===")
+    if shutil.which("git"):
+        multi_proj = make_project(tempfile.mkdtemp(prefix="sdlc-multi-d-"))
+        matrix_path = os.path.join(multi_proj, "docs", "traceability-matrix.md")
+        with open(matrix_path, "w", encoding="utf-8") as f:
+            f.write("| R-id (需求) | D-id (设计) | C-id | T-id | 状态 |\n"
+                    "|---|---|---|---|---|\n"
+                    "| R1 | D1、D3 | | | |\n"
+                    "| R2 | D2, D3 | | | |\n")
+        subprocess.run(["git", "init", "-q", multi_proj], check=True)
+        subprocess.run(["git", "-C", multi_proj, "config", "user.email", "test@example.com"], check=True)
+        subprocess.run(["git", "-C", multi_proj, "config", "user.name", "SDLC Test"], check=True)
+        subprocess.run(["git", "-C", multi_proj, "add", "."], check=True)
+        subprocess.run(["git", "-C", multi_proj, "commit", "-qm", "baseline"], check=True)
+        # requirement/design 阶段产物允许在进入编码时尚未提交；H3 只复校源码改动。
+        with open(os.path.join(multi_proj, "docs", "design-doc.md"), "a", encoding="utf-8") as f:
+            f.write("\n阶段设计补充\n")
+        renderer = os.path.join(multi_proj, "packages", "renderer", "src")
+        os.makedirs(renderer, exist_ok=True)
+        for fn in ("Menu.tsx", "Settings.tsx", "Routes.tsx"):
+            with open(os.path.join(renderer, fn), "w", encoding="utf-8") as f:
+                f.write("// changed")
+        multi_handoff = (
+            "<!-- HANDOFF:code agent=c status=done -->\ncompiled: pass\nfiles:\n"
+            "  - packages/renderer/src/Menu.tsx\n"
+            "  - packages/renderer/src/Settings.tsx\n"
+            "  - packages/renderer/src/Routes.tsx\n"
+            "trace:\n"
+            "  D1: [C1 Menu]\n"
+            "  D2: [C2 Settings]\n"
+            "  D3: [C3 Routes]\n"
+            "open-issues: [基线工具链待处理]\n<!-- /HANDOFF -->"
+        )
+        parsed_multi_handoff = _lib.parse_handoff(multi_handoff)
+        check("非空open-issues不被解析为D-id",
+              parsed_multi_handoff is not None
+              and "open-issues" not in parsed_multi_handoff.get("trace", {}),
+              f"got {parsed_multi_handoff}")
+        out = run_script(
+            "validate_code_handoff.py",
+            {"cwd": multi_proj, "hook_event_name": "PostToolUse", "tool_name": "Agent",
+             "session_id": "multi-d", "tool_input": {"subagent_type": "x:coder"},
+             "tool_response": {"result": multi_handoff}},
+            "posttooluse",
+        )
+        check("中文/英文分隔的多D-id可merge",
+              "交接块格式:合规" in context_text(out), f"got {out}")
+        multi_matrix = _lib.parse_matrix({"cwd": multi_proj})
+        check("多D-id拆分为独立映射",
+              set(multi_matrix.d_ids()) == {"D1", "D2", "D3"}, f"got {multi_matrix.d_ids()}")
+        check("阶段docs不计入coder files且D→C闭合",
+              multi_matrix.d_to_c_closed(), f"got {multi_matrix.rows}")
+    else:
+        check("非空open-issues不被解析为D-id(git不可用时跳过)", True, "")
+        check("中文/英文分隔的多D-id可merge(git不可用时跳过)", True, "")
+        check("多D-id拆分为独立映射(git不可用时跳过)", True, "")
+        check("阶段docs不计入coder files且D→C闭合(git不可用时跳过)", True, "")
 
     print("=== 4. validate_test_handoff: schema/阻塞语义/merge ===")
     th = ("<!-- HANDOFF:test agent=t status=done -->\nreview-findings:\n  standards:\n"
@@ -195,10 +270,40 @@ def main() -> int:
     with open(os.path.join(PLUGIN_ROOT, "templates", "manifest.json"), encoding="utf-8") as f:
         mf = json.load(f)
     check("manifest非空", len(mf) >= 1, "")
-    e = mf[0]
-    check("含必备字段", all(k in e for k in ("id", "stacks", "path", "conventions")), f"keys={list(e.keys())}")
-    check("path目录存在", os.path.isdir(os.path.join(PLUGIN_ROOT, e["path"])), "")
-    check("conventions文件存在", os.path.isfile(os.path.join(PLUGIN_ROOT, e["conventions"])), "")
+    required = ("id", "name", "description", "stacks", "path", "conventions")
+    check("所有条目含必备字段",
+          all(all(k in entry for k in required) for entry in mf), "")
+    check("脚手架ID唯一", len({entry["id"] for entry in mf}) == len(mf), "")
+    check("所有path目录存在",
+          all(os.path.isdir(os.path.join(PLUGIN_ROOT, entry["path"])) for entry in mf), "")
+    check("所有conventions文件存在",
+          all(os.path.isfile(os.path.join(PLUGIN_ROOT, entry["conventions"])) for entry in mf), "")
+    check("所有stack规则存在",
+          all(os.path.isfile(os.path.join(PLUGIN_ROOT, "rules", f"{stack}.md"))
+              for entry in mf for stack in entry["stacks"]), "")
+
+    heli = next((entry for entry in mf if entry["id"] == "heli-terminal-client"), None)
+    check("heli脚手架已注册", heli is not None, "")
+    if heli:
+        heli_root = os.path.join(PLUGIN_ROOT, heli["path"])
+        check("heli含能力清单",
+              os.path.isfile(os.path.join(heli_root, "docs", "existing-framework.md")), "")
+        with open(os.path.join(heli_root, "package.json"), encoding="utf-8") as f:
+            heli_package = json.load(f)
+        scripts = heli_package.get("scripts", {})
+        check("heli根脚本固定使用packageManager版本",
+              heli_package.get("packageManager") == "pnpm@9.0.0"
+              and all("pnpm" not in command or "corepack pnpm" in command
+                      for command in scripts.values()),
+              f"scripts={scripts}")
+        forbidden_names = {".claude", "node_modules", "dist", "out", "dist-installer"}
+        forbidden = []
+        for current, dirs, _files in os.walk(heli_root):
+            for dirname in dirs:
+                if dirname in forbidden_names:
+                    forbidden.append(os.path.join(current, dirname))
+        check("heli资产不含本机设置/依赖/构建产物",
+              not forbidden, f"found={forbidden}")
 
     print(f"\n=== 结果: {PASS} passed, {FAIL} failed ===")
     return 1 if FAIL else 0

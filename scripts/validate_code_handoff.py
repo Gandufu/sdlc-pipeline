@@ -56,6 +56,10 @@ def _validate(hook: dict, handoff: dict | None) -> list[str]:
     if not declared:
         facts.append("files 为空")
     changed = _lib.git_changed_files(hook)
+    if changed is not None:
+        # requirement/design/matrix 由主会话和 hooks 拥有，不属于 coder 的 files 范围。
+        # 这些阶段产物可在进入 /code 时尚未提交，不能污染源码真实性比对。
+        changed = {path for path in changed if not _lib.is_docs_path(hook, path)}
     if changed is not None and declared != changed:
         missing = sorted(changed - declared)
         extra = sorted(declared - changed)

@@ -133,7 +133,18 @@ def parse_matrix(hook: dict[str, Any]) -> Matrix:
         if any("id" in c.lower() or "需求" in c or "设计" in c for c in cells[:2]):
             matrix.raw_header = matrix.raw_header or line
             continue
-        matrix.rows.append({"R": cells[0], "D": cells[1], "C": cells[2], "T": cells[3], "状态": cells[4]})
+        # 兼容设计阶段把一个 R 映射到多个 D 的写法（D1、D3 / D1, D3）。
+        # 内部统一展开为一行一个 R→D 映射，避免 H3 把整格误判成未知 D-id。
+        d_ids = list(dict.fromkeys(d.upper() for d in re.findall(r"D\d+", cells[1], re.IGNORECASE)))
+        if d_ids:
+            for d_id in d_ids:
+                matrix.rows.append(
+                    {"R": cells[0], "D": d_id, "C": cells[2], "T": cells[3], "状态": cells[4]}
+                )
+        else:
+            matrix.rows.append(
+                {"R": cells[0], "D": cells[1], "C": cells[2], "T": cells[3], "状态": cells[4]}
+            )
     return matrix
 
 
@@ -192,13 +203,20 @@ def parse_handoff(text: str) -> dict[str, Any] | None:
     if fm:
         result["files"] = re.findall(r"-\s*(.+)", fm.group(1))
     # trace
-    tm = re.search(r"trace:\s*\n((?:\s*.+:\s*\[.+?\].*\n?)+)", body)
+    tm = re.search(
+        r"(?m)^trace:[ \t]*\r?\n"
+        r"((?:^[ \t]+D\d+:[ \t]*\[[^\]\r\n]*\][ \t]*\r?\n?)+)",
+        body,
+        re.IGNORECASE,
+    )
     if tm:
         trace: dict[str, list[str]] = {}
         for line in tm.group(1).splitlines():
-            kv = re.match(r"\s*(\S+):\s*\[(.*)\]", line)
+            kv = re.match(r"\s*(D\d+):\s*\[(.*)\]", line, re.IGNORECASE)
             if kv:
-                trace[kv.group(1)] = [c.strip() for c in kv.group(2).split(",") if c.strip()]
+                trace[kv.group(1).upper()] = [
+                    c.strip() for c in kv.group(2).split(",") if c.strip()
+                ]
         result["trace"] = trace
     # review-findings (test)
     if kind == "test":
@@ -431,6 +449,27 @@ def reset_retries(session_id: str, agent: str) -> None:
 # ---------------------------------------------------------------------------
 # 交接块文本提取(兼容 PostToolUse 的 tool_response 与 SubagentStop 的 JSONL transcript)
 # ---------------------------------------------------------------------------
+def _text_chunks(value: Any) -> list[str]:
+    """递归提取 Agent/Task 工具响应中的文本块（兼容 Claude Code 2.1 content 数组）。"""
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list):
+        chunks: list[str] = []
+        for item in value:
+            chunks.extend(_text_chunks(item))
+        return chunks
+    if not isinstance(value, dict):
+        return []
+
+    # 按实际响应结构的优先级提取，避免把 status/agentId 等元数据字符串拼入正文。
+    for key in ("text", "result", "output", "content", "message"):
+        if key in value:
+            chunks = _text_chunks(value[key])
+            if chunks:
+                return chunks
+    return []
+
+
 def extract_handoff_text(hook: dict[str, Any]) -> str:
     """从 hook 输入中提取可能含交接块的文本。
 
@@ -446,12 +485,9 @@ def extract_handoff_text(hook: dict[str, Any]) -> str:
 
     for key in ("tool_response", "tool_result", "response"):
         val = hook.get(key)
-        if isinstance(val, str) and val:
-            return val
-        if isinstance(val, dict):
-            inner = val.get("result") or val.get("output") or val.get("text")
-            if inner:
-                return str(inner)
+        chunks = _text_chunks(val)
+        if chunks:
+            return "\n".join(chunks)
 
     for transcript_key in ("agent_transcript_path", "transcript_path"):
         tp = hook.get(transcript_key)

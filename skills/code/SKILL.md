@@ -24,13 +24,16 @@ G2 门禁(进入编码前)由 PreToolUse hook H1 在派发编码 agent 时硬拦
    - 项目内路径:`docs/design-doc.md`、`docs/requirement-spec.md`
 
 2. **开 git worktree 隔离**(抄 superpowers,设计文档 §2.3):
-   - 在工程内 `git worktree add` 一个隔离工作树(若无 git,跳过此步并告知)。
+   - 先检查 `git status --porcelain`。只有 git 工程且工作树干净（需求/设计/矩阵已进入当前 HEAD）时，才用 `git worktree add` 创建隔离工作树。
+   - 若不是 git 工程，或 requirement/design 产物尚未提交，**不得自动 commit/stash，也不得创建一个读不到阶段产物的 worktree**；退化为在当前项目树派发 coder，并在输出中明确标注隔离退化原因。
+   - 无论使用 worktree 还是当前树，都把实际执行根目录明确写入 Agent prompt；后续路径均相对此根目录解析。
    - 收益:产物可 `git diff`、可审查、可整体回滚;H3b 可比对 worktree diff 与交接块 `files:` 防谎报。
 
 3. **派发编码 agent**(Agent 工具,subagent_type 指向本插件的编码 agent):
    - Agent prompt **显式列出**需 Read 的路径:design-doc、requirement-spec、各 rules、conventions。
    - **把交接块格式文件路径 `${CLAUDE_PLUGIN_ROOT}/references/handoff-format.md` 拼入 Agent prompt**,让 agent 显式 Read 取得格式定义(agent 不会自动加载 skill 的 references,故必须传路径)。
    - 告知 agent:**只在源码范围 Edit/Write,禁碰 docs/**;插件 PreToolUse 做路径硬拦,H3 用 git diff 复校;交付机器可 parse 的**交接块**。
+   - 告知 agent:读取工程的 package manager 版本真值（如 `packageManager`），按 conventions 使用对应命令；**未在 design-doc 列出的工具链/构建/测试配置不得修改**，验证失败应进入 `open-issues` 而不是放宽门禁。
    - agent 正文零硬编码栈名,路径全由 prompt 派生。
 
 4. **收交接块**:编码 agent 返回交接块(`compiled` / `files:` / `trace:` / `open-issues`)。本 skill 不解析——交由 H3a(SubagentStop 自纠正)+ H3b(PostToolUse merge 矩阵 + 比对 worktree diff)处理。

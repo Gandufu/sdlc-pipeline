@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+coverage/
+.vite/
+*.log
+.env
+.env.*
+!.env.example
