@@ -1,6 +1,6 @@
 # TypeScript 栈规约
 
-> 由 `/design`、`/code`、`/test` 根据脚手架 manifest 的 `stacks` 按需读取。
+> 由 `/sdlc-spec` 选择 extension point，runner 在 code/test context pack 中按 manifest `stacks` 按需提供。
 
 ## 1. 类型边界
 

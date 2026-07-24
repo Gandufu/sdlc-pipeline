@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/scaffold.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version", "template_id", "template_version", "key_files",
+    "protected_paths", "extension_points", "allowed_paths", "lifecycle_hash",
+    "capabilities"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "template_id": {"type": "string", "minLength": 1},
+    "template_version": {"type": "string", "minLength": 1},
+    "key_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "properties": {
+          "path": {"type": "string"},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "protected_paths": {"type": "array", "items": {"type": "string"}},
+    "extension_points": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path"],
+        "properties": {"id": {"type": "string"}, "path": {"type": "string"}},
+        "additionalProperties": false
+      }
+    },
+    "allowed_paths": {"type": "array", "items": {"type": "string"}},
+    "lifecycle_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "capabilities": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

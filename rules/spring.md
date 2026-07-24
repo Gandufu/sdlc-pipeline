@@ -1,6 +1,6 @@
 # Spring 栈规约
 
-> 由 `/design`、`/code`、`/test` 阶段按 manifest `stacks` 字段**按需 Read**。与 `java.md` 配合使用(java 管语言,spring 管框架)。
+> runner 在 code/test context pack 中按 manifest `stacks` 按需提供。与 `java.md` 配合使用（Java 管语言，Spring 管框架）。
 
 ## 1. 分层与注解
 - Controller:`@RestController` + `@RequestMapping("/api/<resource>")`,方法用 `@GetMapping`/`@PostMapping` 等。

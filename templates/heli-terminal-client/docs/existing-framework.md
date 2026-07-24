@@ -2,8 +2,7 @@
 
 > 脚手架 ID：`heli-terminal-client`
 >
-> `/sdlc-pipeline:init` 会将本文件复制到目标项目，并把
-> `@docs/existing-framework.md` 加入目标项目的 `CLAUDE.md`。
+> `/sdlc-init` 会将本文件随模板复制到目标项目；runner 只在相关 context pack 中按需提供。
 
 ## 技术基线
 

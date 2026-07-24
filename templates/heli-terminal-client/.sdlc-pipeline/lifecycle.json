@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "project_type": "electron-react-pnpm",
+  "port": 5173,
+  "keep_running_after_init": false,
+  "tools": [
+    {
+      "name": "node",
+      "version": ">=20.11",
+      "required": true,
+      "probe": {"argv": ["node", "--version"], "timeout_seconds": 15},
+      "system_install": {
+        "argv": ["winget", "install", "--exact", "--id", "OpenJS.NodeJS.LTS", "--accept-source-agreements", "--accept-package-agreements"],
+        "timeout_seconds": 900,
+        "windows_only": true
+      }
+    },
+    {
+      "name": "corepack",
+      "version": "bundled-with-node",
+      "required": true,
+      "probe": {
+        "argv": ["corepack", "--version"],
+        "windows_argv": ["cmd.exe", "/d", "/c", "corepack", "--version"],
+        "timeout_seconds": 15
+      }
+    }
+  ],
+  "commands": {
+    "install": {
+      "argv": ["corepack", "pnpm", "install", "--frozen-lockfile"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "corepack", "pnpm", "install", "--frozen-lockfile"],
+      "timeout_seconds": 900
+    },
+    "compile": {
+      "argv": ["corepack", "pnpm", "run", "build"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "corepack", "pnpm", "run", "build"],
+      "timeout_seconds": 900
+    },
+    "start": {
+      "argv": ["corepack", "pnpm", "--filter", "@heli/renderer", "dev", "--host", "127.0.0.1"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "corepack", "pnpm", "--filter", "@heli/renderer", "dev", "--host", "127.0.0.1"],
+      "timeout_seconds": 60,
+      "startup_grace_seconds": 2,
+      "background": true
+    },
+    "stop": {
+      "argv": ["${PYTHON}", "-c", "print('runner-managed stop')"],
+      "timeout_seconds": 15
+    },
+    "restart": {
+      "argv": ["${PYTHON}", "-c", "print('runner-managed restart')"],
+      "timeout_seconds": 15
+    }
+  },
+  "health": [
+    {"type": "process", "timeout_seconds": 5},
+    {"type": "tcp", "host": "127.0.0.1", "port": "${PORT}", "timeout_seconds": 10},
+    {"type": "http", "url": "http://127.0.0.1:${PORT}", "contains": "root", "timeout_seconds": 15},
+    {"type": "browser", "url": "http://127.0.0.1:${PORT}", "contains": "root", "timeout_seconds": 15}
+  ],
+  "artifacts": [
+    "packages/main/dist/index.js",
+    "packages/renderer/dist/index.html",
+    "packages/shared/dist/index.js"
+  ],
+  "tests": {
+    "unit": {
+      "argv": ["corepack", "pnpm", "run", "test"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "corepack", "pnpm", "run", "test"],
+      "timeout_seconds": 900
+    },
+    "integration": {
+      "argv": ["corepack", "pnpm", "run", "typecheck"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "corepack", "pnpm", "run", "typecheck"],
+      "timeout_seconds": 600
+    },
+    "e2e": {
+      "argv": ["${PYTHON}", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5173', timeout=10)"],
+      "timeout_seconds": 20
+    },
+    "lint": {
+      "argv": ["corepack", "pnpm", "run", "typecheck"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "corepack", "pnpm", "run", "typecheck"],
+      "timeout_seconds": 600
+    },
+    "static_analysis": {
+      "argv": ["corepack", "pnpm", "run", "typecheck"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "corepack", "pnpm", "run", "typecheck"],
+      "timeout_seconds": 600
+    }
+  }
+}

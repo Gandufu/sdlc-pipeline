@@ -1,0 +1,93 @@
+{
+  "schema_version": "1.0",
+  "project_type": "spring-boot",
+  "port": 8080,
+  "keep_running_after_init": false,
+  "tools": [
+    {
+      "name": "java",
+      "version": ">=17",
+      "required": true,
+      "probe": {"argv": ["java", "-version"], "timeout_seconds": 15},
+      "system_install": {
+        "argv": ["winget", "install", "--exact", "--id", "EclipseAdoptium.Temurin.21.JDK", "--accept-source-agreements", "--accept-package-agreements"],
+        "timeout_seconds": 900,
+        "windows_only": true
+      }
+    },
+    {
+      "name": "maven",
+      "version": ">=3.9",
+      "required": true,
+      "probe": {
+        "argv": ["sh", "mvnw", "-version"],
+        "windows_argv": ["cmd.exe", "/d", "/c", "mvnw.cmd", "-version"],
+        "timeout_seconds": 30
+      },
+      "system_install": {
+        "argv": ["winget", "install", "--exact", "--id", "Apache.Maven", "--accept-source-agreements", "--accept-package-agreements"],
+        "timeout_seconds": 900,
+        "windows_only": true
+      }
+    }
+  ],
+  "commands": {
+    "install": {
+      "argv": ["sh", "mvnw", "-B", "-DskipTests", "dependency:go-offline"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "mvnw.cmd", "-B", "-DskipTests", "dependency:go-offline"],
+      "timeout_seconds": 600
+    },
+    "compile": {
+      "argv": ["sh", "mvnw", "-B", "-DskipTests", "package"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "mvnw.cmd", "-B", "-DskipTests", "package"],
+      "timeout_seconds": 600
+    },
+    "start": {
+      "argv": ["java", "-jar", "target/spring-boot-full-0.1.0.jar"],
+      "timeout_seconds": 60,
+      "startup_grace_seconds": 2,
+      "background": true
+    },
+    "stop": {
+      "argv": ["${PYTHON}", "-c", "print('runner-managed stop')"],
+      "timeout_seconds": 15
+    },
+    "restart": {
+      "argv": ["${PYTHON}", "-c", "print('runner-managed restart')"],
+      "timeout_seconds": 15
+    }
+  },
+  "health": [
+    {"type": "process", "timeout_seconds": 5},
+    {"type": "tcp", "host": "127.0.0.1", "port": "${PORT}", "timeout_seconds": 10},
+    {"type": "http", "url": "http://127.0.0.1:${PORT}/actuator/health", "contains": "UP", "timeout_seconds": 15},
+    {"type": "browser", "url": "http://127.0.0.1:${PORT}/actuator/health", "contains": "UP", "timeout_seconds": 15}
+  ],
+  "artifacts": ["target/spring-boot-full-0.1.0.jar"],
+  "tests": {
+    "unit": {
+      "argv": ["sh", "mvnw", "-B", "test"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "mvnw.cmd", "-B", "test"],
+      "timeout_seconds": 600
+    },
+    "integration": {
+      "argv": ["sh", "mvnw", "-B", "verify"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "mvnw.cmd", "-B", "verify"],
+      "timeout_seconds": 600
+    },
+    "e2e": {
+      "argv": ["${PYTHON}", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/actuator/health', timeout=10)"],
+      "timeout_seconds": 20
+    },
+    "lint": {
+      "argv": ["sh", "mvnw", "-B", "-DskipTests", "validate"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "mvnw.cmd", "-B", "-DskipTests", "validate"],
+      "timeout_seconds": 300
+    },
+    "static_analysis": {
+      "argv": ["sh", "mvnw", "-B", "-DskipTests", "compile"],
+      "windows_argv": ["cmd.exe", "/d", "/c", "mvnw.cmd", "-B", "-DskipTests", "compile"],
+      "timeout_seconds": 600
+    }
+  }
+}

@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/lifecycle.schema.json",
+  "type": "object",
+  "required": ["schema_version", "project_type", "tools", "commands", "health", "artifacts", "tests"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "project_type": {"type": "string", "minLength": 1},
+    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "keep_running_after_init": {"type": "boolean"},
+    "tools": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "version", "required", "probe"],
+        "properties": {
+          "name": {"type": "string"},
+          "version": {"type": "string"},
+          "required": {"type": "boolean"},
+          "probe": {"$ref": "#/$defs/command"},
+          "system_install": {"$ref": "#/$defs/command"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "commands": {
+      "type": "object",
+      "required": ["install", "compile", "start", "stop", "restart"],
+      "properties": {
+        "install": {"$ref": "#/$defs/command"},
+        "compile": {"$ref": "#/$defs/command"},
+        "start": {"$ref": "#/$defs/command"},
+        "stop": {"$ref": "#/$defs/command"},
+        "restart": {"$ref": "#/$defs/command"}
+      },
+      "additionalProperties": false
+    },
+    "health": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {"enum": ["process", "http", "tcp", "command", "file", "browser"]},
+          "url": {"type": "string"},
+          "host": {"type": "string"},
+          "port": {"type": ["integer", "string"]},
+          "path": {"type": "string"},
+          "contains": {"type": "string"},
+          "timeout_seconds": {"type": "integer", "minimum": 1},
+          "command": {"$ref": "#/$defs/command"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "artifacts": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "tests": {
+      "type": "object",
+      "required": ["unit", "integration", "e2e", "lint", "static_analysis"],
+      "additionalProperties": {"$ref": "#/$defs/command"}
+    }
+  },
+  "$defs": {
+    "command": {
+      "type": "object",
+      "required": ["argv"],
+      "properties": {
+        "argv": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "windows_argv": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "cwd": {"type": "string"},
+        "timeout_seconds": {"type": "integer", "minimum": 1},
+        "startup_grace_seconds": {"type": "number", "minimum": 0},
+        "background": {"type": "boolean"}
+        ,"windows_only": {"type": "boolean"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

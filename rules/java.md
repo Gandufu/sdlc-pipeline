@@ -1,6 +1,6 @@
 # Java 栈规约
 
-> 本文件为"怎么写 Java 代码"的栈级规约。由 `/design`、`/code`、`/test` 阶段按 manifest `stacks` 字段**按需 Read**,不常驻上下文。
+> Java 栈级规约。由 `/sdlc-spec` 选择 extension point，runner 在 code/test context pack 中按 manifest `stacks` 按需提供，不常驻上下文。
 
 ## 1. 命名
 - 类名 `UpperCamelCase`;方法名、变量名 `lowerCamelCase`;常量 `UPPER_SNAKE_CASE`。

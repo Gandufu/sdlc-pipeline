@@ -1,175 +1,142 @@
-"""项目级安装与宿主接线的快速契约测试，不调用任何 LLM。"""
 from __future__ import annotations
 
+import importlib.util
 import json
-import os
+import shutil
 import subprocess
-import sys
 import tempfile
+import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent.parent
-INSTALLER = ROOT / "scripts" / "install_project.py"
-failures: list[str] = []
-passes = 0
+REPO = Path(__file__).resolve().parents[1]
+SPEC = importlib.util.spec_from_file_location(
+    "install_project", REPO / "scripts" / "install_project.py"
+)
+assert SPEC and SPEC.loader
+installer = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(installer)
 
 
-def check(name: str, condition: bool, detail: str = "") -> None:
-    global passes
-    if condition:
-        passes += 1
-        print(f"PASS {name}")
-    else:
-        failures.append(f"{name}: {detail}")
-        print(f"FAIL {name}: {detail}")
+class InstallerTests(unittest.TestCase):
+    def test_installs_only_opencode_surface_and_two_subagents(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            result = installer.install(target)
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["host"], "opencode")
+            agents = sorted(path.name for path in (target / ".opencode/agents").glob("*.md"))
+            self.assertEqual(
+                agents, ["sdlc-coder.md", "sdlc-executor.md", "sdlc-main.md"]
+            )
+            commands = sorted(path.name for path in (target / ".opencode/commands").glob("*.md"))
+            self.assertEqual(
+                commands,
+                ["sdlc-code.md", "sdlc-init.md", "sdlc-spec.md", "sdlc-test.md"],
+            )
+            self.assertFalse((target / ".claude").exists())
+            self.assertFalse((target / ".codex").exists())
+
+    def test_install_preserves_unmanaged_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            custom = target / ".opencode" / "commands" / "custom.md"
+            custom.parent.mkdir(parents=True)
+            custom.write_text("mine", encoding="utf-8")
+            installer.install(target)
+            self.assertEqual(custom.read_text(encoding="utf-8"), "mine")
+
+    def test_reinstall_requires_force(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            installer.install(target)
+            with self.assertRaises(ValueError):
+                installer.install(target)
+            self.assertTrue(installer.install(target, force=True)["ok"])
+
+    def test_installed_runtime_can_install_another_project(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            first = base / "first"
+            second = base / "second"
+            first.mkdir()
+            second.mkdir()
+            installer.install(first)
+            runtime_installer = first / ".sdlc-pipeline/scripts/install_project.py"
+            spec = importlib.util.spec_from_file_location("runtime_installer", runtime_installer)
+            assert spec and spec.loader
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.assertTrue(module.install(second)["ok"])
+            self.assertTrue((second / ".opencode/plugins/sdlc-pipeline.js").exists())
+
+    def test_templates_have_valid_hash_contracts(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(REPO / "scripts"))
+        from sdlc_core.lifecycle import load_contract
+        from sdlc_core.trace import verify_scaffold
+
+        for name in ("spring-boot-full", "heli-terminal-client"):
+            root = REPO / "templates" / name
+            self.assertTrue(verify_scaffold(root)["ok"], name)
+            contract = load_contract(root)
+            self.assertEqual(
+                set(contract["tests"]),
+                {"unit", "integration", "e2e", "lint", "static_analysis"},
+            )
+
+    def test_all_json_schemas_are_valid_json(self) -> None:
+        schemas = list((REPO / "schemas").glob("*.schema.json"))
+        self.assertGreaterEqual(len(schemas), 6)
+        for path in schemas:
+            value = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(value["$schema"], "https://json-schema.org/draft/2020-12/schema")
+
+    def test_plugin_has_four_tools_without_experimental_injection(self) -> None:
+        text = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
+        for name in ("sdlc_status", "sdlc_publish", "sdlc_lifecycle", "sdlc_finalize"):
+            self.assertIn(name, text)
+        self.assertNotIn("experimental.chat.messages.transform", text)
+        self.assertNotIn("config.skills.paths", text)
+        self.assertNotIn("sdlc-tester", text)
+
+    def test_agent_permission_matrix(self) -> None:
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
+        executor = (REPO / ".opencode/agents/sdlc-executor.md").read_text(encoding="utf-8")
+        self.assertIn('"sdlc-coder": allow', main)
+        self.assertIn('"sdlc-executor": allow', main)
+        self.assertIn("edit: allow", coder)
+        self.assertIn("bash: deny", coder)
+        self.assertIn("edit: deny", executor)
+        self.assertIn("task: deny", executor)
+
+    def test_desktop_project_assets_are_discoverable(self) -> None:
+        self.assertTrue((REPO / ".opencode/plugins/sdlc-pipeline.js").exists())
+        self.assertTrue((REPO / ".opencode/skills/sdlc-pipeline/SKILL.md").exists())
+        for name in ("sdlc-main", "sdlc-coder", "sdlc-executor"):
+            self.assertTrue((REPO / f".opencode/agents/{name}.md").exists())
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_plugin_javascript_syntax(self) -> None:
+        subprocess.run(
+            ["node", "--check", str(REPO / ".opencode/plugins/sdlc-pipeline.js")],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_installation_marker_identifies_desktop_compatible_opencode(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            installer.install(target)
+            marker = json.loads((
+                target / ".sdlc-pipeline/installation.json"
+            ).read_text(encoding="utf-8"))
+            self.assertEqual(marker["host"], "opencode")
+            self.assertTrue(marker["desktop_compatible"])
 
 
-def run(*args: str, cwd: Path | None = None, input_text: str | None = None):
-    return subprocess.run(
-        args,
-        cwd=cwd,
-        input=input_text,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        capture_output=True,
-    )
-
-
-with tempfile.TemporaryDirectory(prefix="sdlc-project-install-") as temp:
-    project = Path(temp)
-    run("git", "init", "-q", str(project))
-    result = run(
-        sys.executable,
-        str(INSTALLER),
-        "--target",
-        str(project),
-        "--host",
-        "all",
-    )
-    check("安装器成功", result.returncode == 0, result.stderr or result.stdout)
-
-    installation = json.loads(
-        (project / ".sdlc-pipeline" / "installation.json").read_text(encoding="utf-8")
-    )
-    check(
-        "安装记录三宿主",
-        installation.get("hosts") == ["claude", "codex", "opencode"],
-        str(installation),
-    )
-    check("共享运行时存在", (project / ".sdlc-pipeline/scripts/derive_state.py").is_file())
-    check("Codex 异步结果适配器存在", (project / ".sdlc-pipeline/scripts/validate_result.py").is_file())
-    check(
-        "运行时忽略 Python 缓存",
-        "**/__pycache__/" in (project / ".sdlc-pipeline/.gitignore").read_text(encoding="utf-8"),
-    )
-    check("不创建项目 CODEX_HOME", not (project / ".codex-home").exists())
-    check("不复制插件缓存", not (project / "plugins").exists())
-
-    for phase in ("init", "requirement", "design", "code", "test", "verify"):
-        codex_skill = project / f".agents/skills/sdlc-pipeline-{phase}/SKILL.md"
-        claude_skill = project / f".claude/skills/sdlc-pipeline-{phase}/SKILL.md"
-        opencode_skill = project / f".opencode/skills/sdlc-pipeline-{phase}/SKILL.md"
-        for host, file in (
-            ("Codex", codex_skill),
-            ("Claude", claude_skill),
-            ("OpenCode", opencode_skill),
-        ):
-            text = file.read_text(encoding="utf-8") if file.exists() else ""
-            check(f"{host} {phase} frontmatter 位于首行", text.startswith("---\n"))
-            check(f"{host} {phase} skill", f"name: sdlc-pipeline-{phase}" in text, text[:100])
-            check(f"{host} {phase} 使用项目运行时", ".sdlc-pipeline" in text)
-            check(f"{host} {phase} 无插件根变量", "${CLAUDE_PLUGIN_ROOT}" not in text)
-            if phase == "design":
-                check(
-                    f"{host} design manifest 使用项目运行时",
-                    "`.sdlc-pipeline/templates/manifest.json`" in text,
-                )
-            if phase == "verify":
-                check(
-                    f"{host} verify 非阶段验证",
-                    "这是一个非阶段 skill" in text and "python tests/test_pipeline.py" in text,
-                    text[:300],
-                )
-
-    codex_hooks = json.loads((project / ".codex/hooks.json").read_text(encoding="utf-8"))
-    check("Codex 项目 hooks", "PreToolUse" in codex_hooks.get("hooks", {}))
-    check(
-        "Codex hooks 识别 Agent",
-        any(
-            group.get("matcher") == "Agent"
-            for group in codex_hooks["hooks"]["PreToolUse"]
-        ),
-    )
-    check(
-        "Codex Windows hook 命令",
-        all(
-            "commandWindows" in handler
-            for groups in codex_hooks["hooks"].values()
-            for group in groups
-            for handler in group.get("hooks", [])
-        ),
-    )
-
-    claude_settings = json.loads(
-        (project / ".claude/settings.json").read_text(encoding="utf-8")
-    )
-    check("Claude 项目 hooks 合并", "SessionStart" in claude_settings.get("hooks", {}))
-    check("Claude coder agent", (project / ".claude/agents/sdlc-coder.md").is_file())
-
-    check("OpenCode 本地 plugin", (project / ".opencode/plugins/sdlc-pipeline.js").is_file())
-    check("OpenCode commands", (project / ".opencode/commands/sdlc-code.md").is_file())
-    check("OpenCode verify command", (project / ".opencode/commands/sdlc-verify.md").is_file())
-    tester = (project / ".opencode/agents/sdlc-tester.md").read_text(encoding="utf-8")
-    check("OpenCode tester 禁止编辑", "edit: deny" in tester)
-    check("OpenCode tester 禁止 shell", "bash: deny" in tester)
-
-    syntax = run(
-        "node",
-        "--check",
-        str(project / ".opencode/plugins/sdlc-pipeline.js"),
-        cwd=project,
-    )
-    check("OpenCode adapter JS 语法", syntax.returncode == 0, syntax.stderr)
-
-    state = run(
-        sys.executable,
-        str(project / ".sdlc-pipeline/scripts/inspect_pipeline.py"),
-        "--project-root",
-        str(project),
-        cwd=project,
-    )
-    parsed = json.loads(state.stdout) if state.returncode == 0 else {}
-    check(
-        "安装后诊断可运行",
-        state.returncode == 0 and parsed.get("phase") == "未初始化",
-        state.stderr or state.stdout,
-    )
-
-    repeat = run(
-        sys.executable,
-        str(INSTALLER),
-        "--target",
-        str(project),
-        "--host",
-        "codex",
-    )
-    check("重复安装需显式 force", repeat.returncode != 0)
-
-    forced = run(
-        sys.executable,
-        str(INSTALLER),
-        "--target",
-        str(project),
-        "--host",
-        "all",
-        "--force",
-    )
-    check("force 可幂等升级", forced.returncode == 0, forced.stderr)
-
-print(f"\n{passes} passed, {len(failures)} failed")
-if failures:
-    for failure in failures:
-        print(f"- {failure}")
-    raise SystemExit(1)
+if __name__ == "__main__":
+    unittest.main()

@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "template_id": "heli-terminal-client",
+  "template_version": "0.5.0",
+  "key_files": [
+    {"path": "package.json", "sha256": "6c23c7975222aa763055484e5005db6bfb1e61959c2e16993db21c6cb857f651"},
+    {"path": "pnpm-lock.yaml", "sha256": "1aa3aff3db2355a137f01c75f34feca95753bb5374ad3bb57db5de5645ca5dbc"}
+  ],
+  "protected_paths": [
+    ".sdlc-pipeline/lifecycle.json",
+    ".sdlc-pipeline/scaffold.json",
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml"
+  ],
+  "extension_points": [
+    {"id": "main-device-adapter", "path": "packages/main/src/adapters"},
+    {"id": "main-service", "path": "packages/main/src/services"},
+    {"id": "main-ipc", "path": "packages/main/src/ipc"},
+    {"id": "renderer-page", "path": "packages/renderer/src/pages"},
+    {"id": "shared-contract", "path": "packages/shared/src"}
+  ],
+  "allowed_paths": [
+    "packages/main/src",
+    "packages/renderer/src",
+    "packages/shared/src"
+  ],
+  "lifecycle_hash": "111cd0e3e27249f9f733282cc443845c0044e6d3d089dab9cfff7931ecad3727",
+  "capabilities": ["electron-main", "react-renderer", "typed-ipc", "device-adapters", "vitest"]
+}

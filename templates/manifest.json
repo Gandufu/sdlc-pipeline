@@ -2,7 +2,7 @@
   {
     "id": "spring-boot-full",
     "name": "Spring Boot 全栈脚手架",
-    "description": "Spring Boot 3 + Spring Security + 分层架构(controller/service/repository/dto)全栈骨架,内置鉴权模块样例。",
+    "description": "可编译运行的 Spring Boot 3 分层骨架，内置 Actuator 健康检查、鉴权样例和 Maven wrapper 入口。",
     "stacks": ["java", "spring"],
     "path": "templates/spring-boot-full",
     "conventions": "templates/conventions/spring-boot-full.md"

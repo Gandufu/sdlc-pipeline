@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/test-results.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version", "version", "status", "started_at", "finished_at",
+    "results", "mandatory_failed", "open_issues"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "version": {"type": "string", "pattern": "^V[0-9]{4}$"},
+    "status": {"enum": ["pass", "fail"]},
+    "started_at": {"type": "string"},
+    "finished_at": {"type": "string"},
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "mandatory", "status", "duration_ms", "log"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^T-[0-9]{4}$"},
+          "mandatory": {"type": "boolean"},
+          "status": {"enum": ["pass", "fail", "skip"]},
+          "duration_ms": {"type": "integer", "minimum": 0},
+          "log": {"type": "string"},
+          "tail": {"type": "string"}
+        },
+        "additionalProperties": false
+      }
+    },
+    "executor": {"type": "object"},
+    "mandatory_failed": {"type": "array", "items": {"type": "string", "pattern": "^T-[0-9]{4}$"}},
+    "open_issues": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": false
+}

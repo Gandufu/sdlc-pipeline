@@ -1,0 +1,12 @@
+---
+description: 派发唯一 coder，校验 diff，并真实 compile/restart/health/artifact verify
+agent: sdlc-main
+subtask: false
+---
+
+执行 code 阶段。先调用 `sdlc_status` 并确认 init/spec 门禁。仅派发一次 `sdlc-coder`；
+plugin 会生成最小 context pack、校验 handoff、Git diff、protected paths 与允许范围。
+coder 完成后调用 `sdlc_lifecycle(action=compile_restart_verify)`。
+
+只有 runner 返回 compile、旧实例 stop、新 PID start、health 与 artifact hash 全部通过才成功；
+不得采信 agent 自述的 compiled 状态。

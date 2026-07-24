@@ -1,7 +1,7 @@
 # heli-terminal-client 脚手架编码约定
 
-> 本文件不拷入目标项目。`/code` 从 `${CLAUDE_PLUGIN_ROOT}` 读取，并与
-> `rules/typescript.md`、`rules/electron.md`、`rules/react.md` 一起传给编码 agent。
+> 本文件由 runner 按受影响 extension point 放入 coder context pack，并与
+> `rules/typescript.md`、`rules/electron.md`、`rules/react.md` 一起按需提供。
 
 ## Monorepo 边界
 

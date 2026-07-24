@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/handoff.schema.json",
+  "oneOf": [
+    {
+      "title": "coder",
+      "type": "object",
+      "required": ["design_to_code", "test_to_files", "changed_files", "open_issues"],
+      "properties": {
+        "design_to_code": {"type": "object", "propertyNames": {"pattern": "^D-[0-9]{4}$"}},
+        "test_to_files": {"type": "object", "propertyNames": {"pattern": "^T-[0-9]{4}$"}},
+        "changed_files": {"type": "array", "items": {"type": "string"}},
+        "open_issues": {"type": "array", "items": {"type": "string"}},
+        "full_scan": {"type": "boolean"},
+        "full_scan_reason": {"type": ["string", "null"]}
+      }
+    },
+    {
+      "title": "executor",
+      "type": "object",
+      "required": ["results", "open_issues"],
+      "properties": {
+        "results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "status", "evidence"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^T-[0-9]{4}$"},
+              "status": {"enum": ["pass", "fail", "skip"]},
+              "evidence": {"type": "string"}
+            }
+          }
+        },
+        "open_issues": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  ]
+}

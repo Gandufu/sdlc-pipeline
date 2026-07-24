@@ -1,0 +1,29 @@
+{
+  "schema_version": "1.0",
+  "template_id": "spring-boot-full",
+  "template_version": "0.5.0",
+  "key_files": [
+    {"path": "pom.xml", "sha256": "6da50c51d2e9e8f5f2ce7ee3c71a54947e493471f74e4c5fcb597dbdae002d2a"},
+    {"path": "src/main/java/com/example/Application.java", "sha256": "d7c24abac3135aaa7f68c8c57e7af715585fafe01a34932dc7043e6a4b1ee6f0"}
+  ],
+  "protected_paths": [
+    ".sdlc-pipeline/lifecycle.json",
+    ".sdlc-pipeline/scaffold.json",
+    "pom.xml",
+    "mvnw",
+    "mvnw.cmd"
+  ],
+  "extension_points": [
+    {"id": "spring-controller", "path": "src/main/java/com/example/*/api"},
+    {"id": "spring-service", "path": "src/main/java/com/example/*/service"},
+    {"id": "spring-domain", "path": "src/main/java/com/example/*/domain"},
+    {"id": "spring-test", "path": "src/test/java"}
+  ],
+  "allowed_paths": [
+    "src/main/java",
+    "src/test/java",
+    "src/main/resources"
+  ],
+  "lifecycle_hash": "65cf3301e6ab1be12263186f4b81ae26ce6be3cd7ad875f8f4b8e1ec0ebe3820",
+  "capabilities": ["spring-web", "validation", "actuator-health", "auth-example"]
+}

@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/manifest.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version", "version", "status", "summary", "parent_version",
+    "initial_git_sha", "final_git_sha", "template", "environment",
+    "artifact_hashes", "ids", "impact", "trace", "evidence", "token_usage",
+    "requirement_records", "open_issues", "commit", "tag", "created_at", "closed_at"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "version": {"type": "string", "pattern": "^V[0-9]{4}$"},
+    "status": {"enum": ["candidate", "closed"]},
+    "summary": {"type": "string", "minLength": 1},
+    "parent_version": {"type": ["string", "null"], "pattern": "^V[0-9]{4}$"},
+    "initial_git_sha": {"type": "string", "minLength": 7},
+    "final_git_sha": {"type": ["string", "null"]},
+    "template": {"type": "object"},
+    "environment": {"type": "object"},
+    "artifact_hashes": {"type": "object"},
+    "ids": {
+      "type": "object",
+      "required": ["requirements", "design", "tests"],
+      "properties": {
+        "requirements": {"type": "array", "items": {"type": "string", "pattern": "^R-[0-9]{4}$"}},
+        "design": {"type": "array", "items": {"type": "string", "pattern": "^D-[0-9]{4}$"}},
+        "tests": {"type": "array", "items": {"type": "string", "pattern": "^T-[0-9]{4}$"}}
+      }
+    },
+    "impact": {"type": "object"},
+    "requirement_records": {"type": "object"},
+    "trace": {"type": "array"},
+    "evidence": {"type": "object"},
+    "token_usage": {"type": "object"},
+    "open_issues": {"type": "array", "items": {"type": "string"}},
+    "commit": {"type": ["string", "null"]},
+    "tag": {"type": "string", "pattern": "^sdlc/V[0-9]{4}$"},
+    "created_at": {"type": "string"},
+    "closed_at": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
+}
