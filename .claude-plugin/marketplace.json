@@ -1,0 +1,15 @@
+{
+  "name": "sdlc-pipeline-local",
+  "owner": {
+    "name": "SDLC Pipeline Team"
+  },
+  "description": "本地 SDLC Pipeline 插件开发与项目级安装源",
+  "plugins": [
+    {
+      "name": "sdlc-pipeline",
+      "source": "./",
+      "description": "需求、设计、编码、测试四阶段闭环研发流水线",
+      "strict": true
+    }
+  ]
+}
