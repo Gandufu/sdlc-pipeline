@@ -384,13 +384,13 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(registry["schema_version"], "1.0")
         self.assertEqual(
             [item["id"] for item in registry["templates"]],
-            ["electron-scaffold"],
+            ["sdlc-electron-scaffold"],
         )
         self.assertEqual(
             registry["templates"][0]["source"],
             {
                 "kind": "git",
-                "repository": "https://github.com/Gandufu/electron-scaffold.git",
+                "repository": "https://github.com/Gandufu/sdlc-electron-scaffold.git",
                 "ref": "main",
             },
         )

@@ -21,8 +21,8 @@ runner 或让用户复制任何手工命令。若 `sdlc_lifecycle` 不在当前�
 
 支持三种模式：
 
-1. 已登记模板：`<template>`，例如 `/sdlc-init electron-scaffold`。调用
-   `sdlc_lifecycle(action=init, options={"template":"electron-scaffold"})`；runner 从插件
+1. 已登记模板：`<template>`，例如 `/sdlc-init sdlc-electron-scaffold`。调用
+   `sdlc_lifecycle(action=init, options={"template":"sdlc-electron-scaffold"})`；runner 从插件
    `templates/manifest.json` 读取 repository/ref，clone 后导入当前空目录并保留模板 Git
    历史。插件只携带数据源元数据，不携带模板源码或模板专属资产。
 2. GitHub 模板：`--github <repo> [ref]`，例如

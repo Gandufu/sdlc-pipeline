@@ -94,12 +94,12 @@ OpenCode 桌面版已经安装时，init 不会重复安装 OpenCode。
 
 | Template | 技术栈 | 数据源 |
 |---|---|---|
-| `electron-scaffold` | Electron Forge、React、Vite、TypeScript | `https://github.com/Gandufu/electron-scaffold.git` |
+| `sdlc-electron-scaffold` | Electron Forge、React、Vite、TypeScript | `https://github.com/Gandufu/sdlc-electron-scaffold.git` |
 
 已登记数据源示例：
 
 ```text
-/sdlc-init electron-scaffold
+/sdlc-init sdlc-electron-scaffold
 ```
 
 也可以描述技术需求；主 agent 会读取已安装的 registry，按
@@ -172,7 +172,7 @@ docs/sdlc/
 .sdlc-pipeline/scaffold.json
 ```
 
-可以参考 `electron-scaffold` 独立模板仓库，以及
+可以参考 `sdlc-electron-scaffold` 独立模板仓库，以及
 `schemas/lifecycle.schema.json`、`schemas/scaffold.schema.json`。
 
 ### 2. 安装 adapter

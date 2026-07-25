@@ -25,14 +25,14 @@ docs/existing-framework.md
 
 ```json
 {
-  "id": "electron-scaffold",
-  "name": "Electron 脚手架",
+  "id": "sdlc-electron-scaffold",
+  "name": "SDLC Electron 脚手架",
   "description": "可用于需求匹配的说明",
   "stacks": ["typescript", "electron", "react"],
   "capabilities": ["desktop", "typed-ipc"],
   "source": {
     "kind": "git",
-    "repository": "https://github.com/example/electron-scaffold.git",
+    "repository": "https://github.com/example/sdlc-electron-scaffold.git",
     "ref": "main"
   }
 }

@@ -2,8 +2,8 @@
   "schema_version": "1.0",
   "templates": [
     {
-      "id": "electron-scaffold",
-      "name": "Electron 脚手架",
+      "id": "sdlc-electron-scaffold",
+      "name": "SDLC Electron 脚手架",
       "description": "Electron Forge + React + Vite + TypeScript 通用桌面应用模板，内置安全 IPC、sandbox preload、单元测试和真实 Electron 冒烟。",
       "stacks": [
         "typescript",
@@ -21,7 +21,7 @@
       ],
       "source": {
         "kind": "git",
-        "repository": "https://github.com/Gandufu/electron-scaffold.git",
+        "repository": "https://github.com/Gandufu/sdlc-electron-scaffold.git",
         "ref": "main"
       }
     }
