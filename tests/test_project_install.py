@@ -7,6 +7,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -70,6 +71,70 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(module.install(second)["ok"])
             self.assertTrue((second / ".opencode/plugins/sdlc-pipeline.js").exists())
 
+    def test_builtin_init_fills_the_current_plugin_project(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(REPO / "scripts"))
+        from sdlc_core.bootstrap import bootstrap
+
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            installer.install(project)
+            expected_report = {"status": "pass", "tools": {"missing": []}}
+            with patch(
+                "sdlc_core.bootstrap._create_builtin_git_baseline",
+                return_value="baseline-sha",
+            ), patch("sdlc_core.lifecycle.init_project", return_value=expected_report):
+                result = bootstrap(project, template="spring-boot-full")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["project_root"], str(project.resolve()))
+            self.assertEqual(result["source"], {
+                "kind": "builtin", "template": "spring-boot-full"
+            })
+            self.assertEqual(result["git_baseline"], "baseline-sha")
+            self.assertTrue((project / "pom.xml").exists())
+            self.assertTrue((project / ".sdlc-pipeline/lifecycle.json").exists())
+
+    def test_github_init_imports_into_current_project_and_preserves_history(self) -> None:
+        import sys
+
+        sys.path.insert(0, str(REPO / "scripts"))
+        from sdlc_core.bootstrap import bootstrap
+
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            remote = base / "remote-template"
+            project = base / "project"
+            remote.mkdir()
+            (remote / "app.txt").write_text("remote template\n", encoding="utf-8")
+            contracts = remote / ".sdlc-pipeline"
+            contracts.mkdir()
+            (contracts / "lifecycle.json").write_text("{}\n", encoding="utf-8")
+            (contracts / "scaffold.json").write_text("{}\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=remote, check=True)
+            subprocess.run(["git", "add", "-A"], cwd=remote, check=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Tests", "-c", "user.email=tests@example.invalid",
+                 "commit", "-qm", "template"],
+                cwd=remote,
+                check=True,
+            )
+            source_sha = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=remote, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            project.mkdir()
+            installer.install(project)
+            expected_report = {"status": "pass", "tools": {"missing": []}}
+            with patch("sdlc_core.lifecycle.init_project", return_value=expected_report):
+                result = bootstrap(project, github=str(remote), ref="HEAD")
+            self.assertTrue(result["ok"])
+            self.assertEqual(result["project_root"], str(project.resolve()))
+            self.assertEqual(result["git_baseline"], source_sha)
+            self.assertTrue((project / ".git").exists())
+            self.assertEqual((project / "app.txt").read_text(encoding="utf-8"), "remote template\n")
+            self.assertTrue((project / ".sdlc-pipeline/lifecycle.json").exists())
+
     def test_templates_have_valid_hash_contracts(self) -> None:
         import sys
 
@@ -118,14 +183,15 @@ class InstallerTests(unittest.TestCase):
         for name in ("sdlc-main", "sdlc-coder", "sdlc-executor"):
             self.assertTrue((REPO / f".opencode/agents/{name}.md").exists())
 
-    def test_readme_describes_bootstrap_handoff_and_current_init(self) -> None:
+    def test_readme_describes_current_project_init_and_github_template(self) -> None:
         readme = (REPO / "README.md").read_text(encoding="utf-8")
         init_command = (
             REPO / ".opencode/commands/sdlc-init.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("必须用 OpenCode 打开生成的目标项目", readme)
-        self.assertIn("/sdlc-init --current", readme)
-        self.assertIn("不得在插件仓库会话继续后续阶段", init_command)
+        self.assertIn("项目目录内", readme)
+        self.assertIn("/sdlc-init --github", readme)
+        self.assertIn("当前 OpenCode 项目根目录", init_command)
+        self.assertNotIn("<repo> <ref> <target>", init_command)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_plugin_javascript_syntax(self) -> None:

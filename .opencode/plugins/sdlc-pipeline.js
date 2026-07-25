@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import path from "node:path"
 import { tool } from "@opencode-ai/plugin"
 
@@ -7,12 +8,17 @@ const AGENTS = {
   "sdlc-coder": "coder",
   "sdlc-executor": "executor",
 }
+const PACKAGE_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".."
+)
 
 function coreScript(root) {
   const installed = path.join(root, ".sdlc-pipeline", "scripts", "sdlc.py")
   if (existsSync(installed)) return installed
   const development = path.join(root, "scripts", "sdlc.py")
   if (existsSync(development)) return development
+  const packaged = path.join(PACKAGE_ROOT, "scripts", "sdlc.py")
+  if (existsSync(packaged)) return packaged
   throw new Error("sdlc-pipeline Python core is missing")
 }
 
@@ -82,7 +88,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
             "health", "system_install", "compile_restart_verify", "run_tests", "test",
           ]),
           options: tool.schema.string().optional().describe(
-            "Optional JSON: init accepts repo/ref/target/template; later bootstrap actions accept target_root; test accepts executor_result",
+            "Optional JSON: init only acts on the current project and accepts template, or github/ref; test accepts executor_result",
           ),
         },
         async execute(args, context) {

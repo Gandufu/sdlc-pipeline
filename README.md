@@ -2,7 +2,7 @@
 
 > OpenCode-first、证据驱动的项目交付状态机。
 
-当前版本：`0.5.0`。
+当前版本：`0.6.0`。
 
 SDLC Pipeline 用项目脚手架契约、确定性 Python runner、真实编译/启动/测试和 Git
 版本证据，把一次需求从澄清推进到可追溯版本。
@@ -12,8 +12,8 @@ SDLC Pipeline 用项目脚手架契约、确定性 Python runner、真实编译/
 
 ## 文档导航
 
-- [先理解两种使用场景](#先理解两种使用场景)
-- [新项目完整流程](#新项目完整流程推荐)
+- [一个项目目录，一个会话](#一个项目目录一个会话)
+- [从模板创建新项目](#场景-a从模板创建新项目)
 - [已有项目接入](#已有项目接入)
 - [四个用户命令](#四个用户命令)
 - [角色与权限](#角色与权限)
@@ -63,69 +63,31 @@ runner 的准备优先级固定为：
 
 OpenCode 桌面版已经安装时，init 不会重复安装 OpenCode。
 
-## 先理解两种使用场景
+## 一个项目目录，一个会话
 
-### 场景 A：创建一个新项目
+`/sdlc-init` 始终在**项目目录内**执行；当前 OpenCode worktree 就是唯一的项目根、
+日志根和版本证据根。它不接受 target 目录，不要求先打开插件仓库，也不会在 init 后要求
+切换到另一个会话。
 
-先在本插件仓库中启动 OpenCode，再通过 `/sdlc-init` clone 业务仓库、安装 adapter、
-复制模板并完成首次运行验收。
+### 场景 A：从模板创建新项目
 
-init 成功后，必须用 OpenCode 打开生成的目标项目，再执行后续命令。
+1. 创建并进入一个空目录，例如 `D:\workspace\business-app`。
+2. 在该目录安装 SDLC Pipeline 项目插件。已通过 OpenCode 插件机制安装时，直接打开该目录；
+   本地开发/未自动注入项目文件时，在**当前目录**运行：
 
-```text
-插件仓库中的 OpenCode 会话
-  └─ /sdlc-init <repo> <ref> <target> [template]
-       ├─ clone 目标仓库
-       ├─ 安装项目级 OpenCode adapter
-       ├─ 复制脚手架与 lifecycle/scaffold
-       └─ install → compile → start → verify → stop
+   ```powershell
+   python <SDLC_PIPELINE_ROOT>\scripts\install_project.py --target .
+   ```
 
-切换到目标项目的 OpenCode 会话
-  └─ /sdlc-spec
-       └─ /sdlc-code
-            └─ /sdlc-test
-                 └─ 用户确认 → internal finalize → version
-```
-
-### 场景 B：接入一个已有项目
-
-已有项目不需要再次 clone。先为项目准备 lifecycle/scaffold 契约，再安装项目 adapter，
-然后在该项目中执行 `/sdlc-init --current`。
+3. 用 OpenCode 桌面版打开同一目录，执行内置模板或 GitHub 模板 init。
 
 ```text
-已有项目
-  ├─ .sdlc-pipeline/lifecycle.json
-  ├─ .sdlc-pipeline/scaffold.json
-  └─ 安装项目 adapter
-       └─ /sdlc-init --current
-            └─ /sdlc-spec → /sdlc-code → /sdlc-test
-```
-
-`install_project.py` 只负责安装 adapter 和 deterministic core，不会猜测已有项目的启动方式，
-也不会自动生成不可信的 lifecycle。
-
-## 新项目完整流程（推荐）
-
-### 1. 获取插件仓库
-
-```powershell
-git clone https://github.com/Gandufu/sdlc-pipeline.git
-cd sdlc-pipeline
-```
-
-用 OpenCode 桌面版打开该仓库。仓库根的 `opencode.json` 会选择 `sdlc-main`，
-项目级 plugin、agents、commands 和 skill 位于 `.opencode/`。
-
-### 2. 执行 bootstrap init
-
-```text
-/sdlc-init <repo> <ref> <target> [template]
-```
-
-示例：
-
-```text
-/sdlc-init https://github.com/example/business-app.git main D:\workspace\business-app heli-terminal-client
+空项目目录（也是 OpenCode 会话）
+  └─ 安装 SDLC 插件
+       └─ /sdlc-init <内置模板>
+          或 /sdlc-init --github <repo> [ref]
+             └─ import → adapter/scaffold → install → compile → start → verify → stop
+                  └─ /sdlc-spec → /sdlc-code → /sdlc-test → 用户确认 → version
 ```
 
 内置模板：
@@ -135,13 +97,29 @@ cd sdlc-pipeline
 | `spring-boot-full` | Spring Boot 3、Java、Maven | 可执行 JAR、Actuator health |
 | `heli-terminal-client` | Electron、React、TypeScript、pnpm | main/renderer/shared build |
 
+内置模板示例：
+
+```text
+/sdlc-init spring-boot-full
+```
+
+GitHub 模板示例：
+
+```text
+/sdlc-init --github https://github.com/acme/service-template.git main
+```
+
+GitHub 模板会在临时目录完成 clone/checkout 后导入**当前项目目录**，并保留原仓库的
+`.git` 历史。它必须提供 `.sdlc-pipeline/lifecycle.json` 和
+`.sdlc-pipeline/scaffold.json`；`.opencode`、`opencode.json`、runner 与运行现场由插件管理，
+不得随 GitHub 模板携带。
+
 init 严格执行：
 
 ```text
-检查 target 不存在或为空
-  → git clone + checkout ref
-  → 安装项目级 adapter
-  → 复制模板且不覆盖已有文件
+检查当前目录为空或只含已安装插件文件
+  → 导入内置模板，或 clone GitHub 模板到临时目录再导入当前目录
+  → 安装/复用项目级 adapter
   → 校验 lifecycle/scaffold hash
   → 探测工具链和版本
   → install dependencies
@@ -153,13 +131,11 @@ init 严格执行：
   → init-report
 ```
 
-任何 mandatory 步骤失败，init 都返回 blocked/fail，不会生成伪成功报告。
+内置模板还会在当前目录建立一条 Git 基线提交；GitHub 模板则复用导入仓库的 HEAD。任何
+mandatory 步骤失败，init 都返回 blocked/fail，不会生成伪成功报告。
 
-### 3. 打开目标项目
-
-init 完成后，用 OpenCode 桌面版打开 `<target>`，不要继续在插件仓库会话里执行 spec。
-
-目标项目将包含：
+init 成功后，**就在同一 OpenCode 会话**继续执行 `/sdlc-spec`、`/sdlc-code`、`/sdlc-test`。
+项目将包含：
 
 ```text
 .opencode/
@@ -178,20 +154,7 @@ docs/sdlc/
   init-report.md
 ```
 
-### 4. 运行交付阶段
-
-在目标项目中依次执行：
-
-```text
-/sdlc-spec
-/sdlc-code
-/sdlc-test
-```
-
-测试全部通过后，主会话展示 `Vxxxx` candidate 并询问是否固化。只有明确确认后，
-才调用内部 `sdlc_finalize` 创建 Git 版本。
-
-## 已有项目接入
+## 场景 B：接入已有项目
 
 ### 1. 声明项目生命周期
 
@@ -211,16 +174,16 @@ docs/sdlc/
 
 ### 2. 安装 adapter
 
-从本插件仓库执行：
+在已有项目根目录安装 adapter：
 
 ```powershell
-python scripts/install_project.py --target D:\path\to\existing-project
+python <SDLC_PIPELINE_ROOT>\scripts\install_project.py --target .
 ```
 
 升级本插件受管文件：
 
 ```powershell
-python scripts/install_project.py --target D:\path\to\existing-project --force
+python <SDLC_PIPELINE_ROOT>\scripts\install_project.py --target . --force
 ```
 
 installer 只写入：
@@ -233,13 +196,13 @@ installer 只写入：
 
 ### 3. 验收当前项目
 
-用 OpenCode 打开已有项目并执行：
+用 OpenCode 打开同一已有项目并执行：
 
 ```text
-/sdlc-init --current
+/sdlc-init
 ```
 
-该模式不 clone、不复制新模板，只根据当前项目已有 lifecycle/scaffold 执行
+该模式不导入模板，只根据当前项目已有 lifecycle/scaffold 执行
 probe → install → compile → start → verify → stop，并生成 init-report。
 
 ## 四个用户命令
@@ -248,11 +211,12 @@ probe → install → compile → start → verify → stop，并生成 init-rep
 
 | 命令 | 运行位置 | 用户输入 | 成功门禁 |
 |---|---|---|---|
-| `/sdlc-init <repo> <ref> <target> [template]` | 插件仓库 | 仓库、ref、目标目录、模板 | clone/install/compile/start/verify/stop |
-| `/sdlc-init --current` | 已有目标项目 | 当前 lifecycle/scaffold | install/compile/start/verify/stop |
-| `/sdlc-spec` | 目标项目 | 需求、范围、约束、验收标准 | R→D→T 完整且原子发布 |
-| `/sdlc-code` | 目标项目 | 已发布 spec | diff 合规且真实 compile/restart/verify |
-| `/sdlc-test` | 目标项目 | code evidence | mandatory T-id 全部执行并生成结果 |
+| `/sdlc-init <template>` | 当前空项目目录 | 内置模板 ID | import/install/compile/start/verify/stop |
+| `/sdlc-init --github <repo> [ref]` | 当前空项目目录 | GitHub 模板与 ref | import/install/compile/start/verify/stop |
+| `/sdlc-init` | 当前已有项目 | 当前 lifecycle/scaffold | install/compile/start/verify/stop |
+| `/sdlc-spec` | 当前项目 | 需求、范围、约束、验收标准 | R→D→T 完整且原子发布 |
+| `/sdlc-code` | 当前项目 | 已发布 spec | diff 合规且真实 compile/restart/verify |
+| `/sdlc-test` | 当前项目 | code evidence | mandatory T-id 全部执行并生成结果 |
 
 ### `/sdlc-spec`
 
@@ -547,10 +511,10 @@ git diff --check
 
 ## 常见问题
 
-### init 后为什么不能直接在原会话运行 spec？
+### init 后在哪里运行 spec？
 
-bootstrap init 的原会话属于插件仓库，后续项目状态和 `.sdlc-pipeline` 位于新 target。
-必须用 OpenCode 打开 target，让项目级 adapter 以目标 Git worktree 为 evidence root。
+仍在执行 init 的同一个项目目录、同一个 OpenCode 会话运行 `/sdlc-spec`。当前 worktree
+从开始就是 evidence root，不存在插件仓库会话到目标项目会话的交接。
 
 ### 为什么 init 最后停止程序？
 
@@ -559,8 +523,8 @@ init 的目标是证明项目能启动并通过验证，而不是长期占用端
 
 ### 已安装 OpenCode 桌面版，还需要安装插件吗？
 
-不需要安装另一个 OpenCode 应用。但每个业务项目仍需要项目级 `.opencode` adapter；
-bootstrap init 或 `install_project.py` 会负责复制。
+不需要安装另一个 OpenCode 应用。但每个业务项目仍需要 SDLC Pipeline 的项目级 adapter；
+插件安装或在项目根执行 `install_project.py --target .` 会负责写入受管文件。
 
 ### 为什么没有 `/sdlc-status`？
 

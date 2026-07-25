@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0 - 2026-07-25
+
+- `/sdlc-init` 改为始终在当前项目目录执行，移除 repo/ref/target 跨目录 bootstrap。
+- 新项目支持内置模板或携带 lifecycle/scaffold 契约的 GitHub 模板；GitHub 模板保留 Git 历史。
+- 内置模板建立 Git 基线，确保后续版本 manifest 有可追溯的起点。
+- 更新命令、README、架构真值与回归测试；同步修复两个内置模板的 scaffold hash。
+
 ## 0.5.0 - 2026-07-25
 
 - 正式收敛为 OpenCode-only，兼容 OpenCode 桌面版项目发现。

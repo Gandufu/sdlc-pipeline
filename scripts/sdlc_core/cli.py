@@ -49,21 +49,20 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         raise SdlcError(f"不支持的 publish kind: {kind}")
     if operation == "lifecycle":
         action = payload.get("action")
-        lifecycle_root = (
-            Path(payload["target_root"]).expanduser().resolve()
-            if payload.get("target_root")
-            else root
-        )
+        lifecycle_root = root
         if action == "probe":
             return probe_tools(lifecycle_root)
         if action == "init":
-            if payload.get("repo"):
+            if payload.get("target") or payload.get("target_root") or payload.get("repo"):
+                raise SdlcError(
+                    "sdlc-init 只在当前项目目录执行；请使用 template 或 github，不要传 target/repo"
+                )
+            if payload.get("template") or payload.get("github"):
                 return bootstrap(
                     root,
-                    repo=payload["repo"],
-                    ref=payload.get("ref") or "HEAD",
-                    target=payload["target"],
-                    template=payload["template"],
+                    template=payload.get("template"),
+                    github=payload.get("github"),
+                    ref=payload.get("ref"),
                 )
             return init_project(lifecycle_root)
         if action == "compile_restart_verify":

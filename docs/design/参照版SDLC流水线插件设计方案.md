@@ -1,6 +1,6 @@
 # SDLC Pipeline OpenCode-first 架构真值
 
-- 对应版本：`0.5.0`
+- 对应版本：`0.6.0`
 - 状态：当前实现
 
 ## 定位
@@ -22,17 +22,15 @@ uninitialized
                           └─ closed version
 ```
 
-bootstrap init 与后续研发阶段可能位于两个 OpenCode 项目会话：
+init 与后续研发阶段始终位于同一个 OpenCode 项目会话。用户先创建空项目目录并安装插件，
+然后在该目录执行 `/sdlc-init <template>` 或
+`/sdlc-init --github <repo> [ref]`。内置模板直接复制到当前目录；GitHub 模板先在临时目录
+clone/checkout，再连同 Git 历史导入当前目录。当前 worktree 从 init 开始就是唯一的 evidence
+root，后续直接执行 `/sdlc-spec → /sdlc-code → /sdlc-test`。
 
-```text
-插件仓库会话：/sdlc-init <repo> <ref> <target> [template]
-                                  │
-                                  └─ 安装项目级 adapter
-目标项目会话：                    /sdlc-spec → /sdlc-code → /sdlc-test
-```
-
-init 后必须打开 target，以目标 Git worktree 作为后续 evidence root。已有项目已经具备
-lifecycle/scaffold 时，可以在目标项目直接运行 `/sdlc-init --current`。
+GitHub 模板必须提供 lifecycle/scaffold 契约；`.opencode`、`opencode.json`、runner 和运行
+现场由插件统一管理。已有项目已经具备 lifecycle/scaffold 时，直接在项目根运行无参数的
+`/sdlc-init`。
 
 失败不会跳过门禁：
 

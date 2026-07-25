@@ -9,7 +9,7 @@ description: OpenCode-first 项目交付状态机。执行 init/spec/code/test�
 
 阶段门禁：
 
-1. init：clone → adapter/scaffold → probe → install → compile → start → health/artifact → stop。
+1. init：在当前项目目录导入内置/GitHub 模板 → adapter/scaffold → probe → install → compile → start → health/artifact → stop。
 2. spec：同一会话原子发布独立 requirements、design、test-plan，并校验 R→D→T。
 3. code：唯一 coder → handoff/diff/path 校验 → runner compile/restart/verify。
 4. test：唯一 executor → mandatory 测试 → 结果 → 用户确认 → internal finalize。
