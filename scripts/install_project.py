@@ -16,6 +16,7 @@ PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 VERSION = "0.6.1"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
+OPENCODE_PLUGIN_VERSION = "^1.18.5"
 MANAGED = (
     ("scripts", ".sdlc-pipeline/scripts"),
     ("templates", ".sdlc-pipeline/templates"),
@@ -65,6 +66,28 @@ def _copy(source: Path, destination: Path, force: bool) -> None:
             return
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+
+
+def _ensure_opencode_dependencies(target: Path) -> None:
+    package_path = target / ".opencode" / "package.json"
+    package: dict[str, Any] = {}
+    if package_path.exists():
+        value = json.loads(package_path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise ValueError(f"OpenCode package 配置必须是 JSON object: {package_path}")
+        package = value
+    dependencies = package.setdefault("dependencies", {})
+    if not isinstance(dependencies, dict):
+        raise ValueError(
+            f"OpenCode package dependencies 必须是 JSON object: {package_path}"
+        )
+    package.setdefault("private", True)
+    package.setdefault("type", "module")
+    dependencies.setdefault("@opencode-ai/plugin", OPENCODE_PLUGIN_VERSION)
+    atomic_write(
+        package_path,
+        json.dumps(package, ensure_ascii=False, indent=2) + "\n",
+    )
 
 
 def _source(name: str) -> Path:
@@ -153,6 +176,7 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
         raise ValueError("项目已安装；升级请使用 --force")
     for source_name, destination_name in MANAGED:
         _copy(_source(source_name), target / destination_name, force)
+    _ensure_opencode_dependencies(target)
     config_path = target / "opencode.json"
     config = {}
     if config_path.exists():

@@ -139,6 +139,7 @@ init 成功后，**就在同一 OpenCode 会话**继续执行 `/sdlc-spec`、`/s
 
 ```text
 .opencode/
+  package.json
   agents/
   commands/
   plugins/
@@ -473,6 +474,9 @@ templates/
   heli-terminal-client/
 tests/
 ```
+
+`.opencode/package.json` 声明本地插件运行所需的 `@opencode-ai/plugin`。
+安装器会自动创建或合并该依赖，OpenCode 启动时负责安装，无需用户手工执行包管理命令。
 
 旧 Claude/Codex manifests、hooks 和 adapter 不再维护；历史实现仍可通过 Git 历史追溯。
 

@@ -49,6 +49,36 @@ class InstallerTests(unittest.TestCase):
             installer.install(target)
             self.assertEqual(custom.read_text(encoding="utf-8"), "mine")
 
+    def test_install_adds_plugin_sdk_dependency_and_preserves_existing_dependencies(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            package_path = target / ".opencode" / "package.json"
+            package_path.parent.mkdir(parents=True)
+            package_path.write_text(
+                json.dumps(
+                    {
+                        "private": True,
+                        "dependencies": {"existing-plugin-dependency": "^1.0.0"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            installer.install(target)
+
+            package = json.loads(package_path.read_text(encoding="utf-8"))
+            self.assertTrue(package["private"])
+            self.assertEqual(package["type"], "module")
+            self.assertEqual(
+                package["dependencies"]["existing-plugin-dependency"], "^1.0.0"
+            )
+            self.assertEqual(
+                package["dependencies"]["@opencode-ai/plugin"],
+                installer.OPENCODE_PLUGIN_VERSION,
+            )
+
     def test_reinstall_requires_force(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
@@ -221,6 +251,13 @@ class InstallerTests(unittest.TestCase):
     def test_desktop_project_assets_are_discoverable(self) -> None:
         self.assertTrue((REPO / ".opencode/plugins/sdlc-pipeline.js").exists())
         self.assertTrue((REPO / ".opencode/skills/sdlc-pipeline/SKILL.md").exists())
+        package = json.loads(
+            (REPO / ".opencode/package.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            package["dependencies"]["@opencode-ai/plugin"],
+            installer.OPENCODE_PLUGIN_VERSION,
+        )
         for name in ("sdlc-main", "sdlc-coder", "sdlc-executor"):
             self.assertTrue((REPO / f".opencode/agents/{name}.md").exists())
 
