@@ -2,7 +2,7 @@
 
 > OpenCode-first、证据驱动的项目交付状态机。
 
-当前版本：`0.6.1`。
+当前版本：`0.7.0`。
 
 SDLC Pipeline 用项目脚手架契约、确定性 Python runner、真实编译/启动/测试和 Git
 版本证据，把一次需求从澄清推进到可追溯版本。
@@ -220,8 +220,8 @@ probe → install → compile → start → verify → stop，并生成 init-rep
 | `/sdlc-init <template>` | 当前空项目目录 | 内置模板 ID | import/install/compile/start/verify/stop |
 | `/sdlc-init --github <repo> [ref]` | 当前空项目目录 | GitHub 模板与 ref | import/install/compile/start/verify/stop |
 | `/sdlc-init` | 当前已有项目 | 当前 lifecycle/scaffold | install/compile/start/verify/stop |
-| `/sdlc-spec` | 当前项目 | 需求、范围、约束、验收标准 | R→D→T 完整且原子发布 |
-| `/sdlc-code` | 当前项目 | 已发布 spec | diff 合规且真实 compile/restart/verify |
+| `/sdlc-spec` | 当前项目 | 需求、范围、约束、验收标准 | 用户确认且 R→D→T 完整后原子发布 |
+| `/sdlc-code` | 当前项目 | 已发布且无 blocking 问题的 spec | diff 合规且真实 compile/restart/verify |
 | `/sdlc-test` | 当前项目 | code evidence | mandatory T-id 全部执行并生成结果 |
 
 ### `/sdlc-spec`
@@ -234,6 +234,10 @@ requirement 与 design 合并为一次主会话交互，但产物仍然独立：
 
 必须满足：
 
+- 保存与当前版本相关的用户原始输入，并与 AI 规范化需求分开；
+- 分析明确区分已确认事实、影响范围、假设、待确认问题、风险和决策；
+- 发布前向用户展示候选摘要、允许修改路径、风险和 blocking 问题；
+- 只有用户明确确认后，Python core 才接受 `spec_confirmed=true` 并原子发布；
 - R/D/T ID 格式固定且唯一；
 - 每个 R-id 至少映射一个 D-id 和一个 T-id；
 - 每个 D-id 至少被一个 T-id 覆盖；
@@ -244,7 +248,7 @@ requirement 与 design 合并为一次主会话交互，但产物仍然独立：
 ### `/sdlc-code`
 
 ```text
-检查 init/spec
+检查 init/spec 与 blocking 问题
   → 生成最小 context pack
   → 派发唯一 sdlc-coder
   → 校验 coder handoff 与实际 Git diff
@@ -257,6 +261,7 @@ requirement 与 design 合并为一次主会话交互，但产物仍然独立：
 ```
 
 coder 返回的 `compiled: pass` 不参与门禁。
+任何 `blocking=true` 且未解决的问题都会被 Python core 拒绝，不能只靠命令提示绕过。
 
 ### `/sdlc-test`
 
@@ -308,7 +313,8 @@ coder 返回的 `compiled: pass` 不参与门禁。
 
 | 动作 | 是否需要人工确认 |
 |---|---|
-| 查询状态、发布 spec | 否 |
+| 查询状态 | 否 |
+| 发布 spec | 是，必须先确认候选 spec |
 | 项目 install/compile/start/stop/test | 否，受 lifecycle 白名单控制 |
 | 修改 production/test allowed path | 否，但受前后双重 path/diff 校验 |
 | 系统级 Java/Node/Maven 安装 | 是，必须先展示缺失项和受控命令 |
@@ -364,9 +370,12 @@ docs/sdlc/current/design.json
 docs/sdlc/current/test-plan.json
 docs/sdlc/test-results/Vxxxx.json
 docs/sdlc/versions/Vxxxx/manifest.json
+docs/sdlc/versions/Vxxxx/summary.md
 ```
 
 对应 Markdown 由 runner 固定渲染。
+`summary.md` 由 manifest 和测试/运行证据确定性生成，便于直接查看交付范围、commit/tag、
+compile/restart/health/test、artifact 和 open issues；它不是新的机器真值。
 
 manifest 保存：
 
@@ -431,6 +440,8 @@ incremental 需要同时满足机器条件和用户确认：
 - 没有第三个 reviewer；
 - 不做 SessionStart 状态注入；
 - coder/executor 只接收影响集和 context pack；
+- 原始需求完整保存在正式 artifact 中，context pack 只传 source、字符数和 SHA-256，
+  避免 coder/executor 重复消费长篇原始输入；
 - context pack 超过约 30k 字符时按模块拆分；
 - 完整日志落盘，只返回错误片段和受限尾部；
 - OpenCode 可提供的 input/output/cache Token 按阶段累计；

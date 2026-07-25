@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -36,14 +37,108 @@ def _unique(items: list[dict[str, Any]], kind: str) -> set[str]:
     return ids
 
 
+def _require_string_list(value: Any, name: str, *, nonempty: bool = False) -> None:
+    if not isinstance(value, list) or (nonempty and not value):
+        suffix = "且不能为空" if nonempty else ""
+        raise SdlcError(f"{name} 必须是数组{suffix}")
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise SdlcError(f"{name} 只能包含非空字符串")
+
+
+def _require_keys(value: dict[str, Any], fields: tuple[str, ...], context: str) -> None:
+    missing = [field for field in fields if field not in value]
+    if missing:
+        raise SdlcError(f"{context} 缺少必填字段: {', '.join(missing)}")
+
+
+def unresolved_blocking_questions(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    analysis = spec.get("requirements", {}).get("analysis", {})
+    return [
+        question
+        for question in analysis.get("open_questions", [])
+        if question.get("blocking") is True and question.get("status") != "resolved"
+    ]
+
+
+def require_code_ready(spec: dict[str, Any]) -> None:
+    blockers = unresolved_blocking_questions(spec)
+    if blockers:
+        identifiers = [item["id"] for item in blockers]
+        raise SdlcError(f"code 门禁拒绝未解决的 blocking 问题: {identifiers}")
+
+
 def validate_spec(payload: dict[str, Any]) -> dict[str, set[str]]:
     require_fields(
         payload,
-        ("schema_version", "flow", "requirements", "design", "test_plan"),
+        (
+            "schema_version", "flow", "spec_confirmed",
+            "requirements", "design", "test_plan",
+        ),
         "spec",
     )
+    if payload["spec_confirmed"] is not True:
+        raise SdlcError("spec 发布前必须记录用户明确确认")
     if payload["flow"] not in {"standard", "incremental"}:
         raise SdlcError("flow 必须是 standard 或 incremental")
+    require_fields(
+        payload["requirements"],
+        ("source_inputs", "analysis", "items"),
+        "requirements",
+    )
+    source_inputs = payload["requirements"]["source_inputs"]
+    if not isinstance(source_inputs, list) or not source_inputs:
+        raise SdlcError("requirements.source_inputs 至少包含一项原始输入")
+    for index, source in enumerate(source_inputs, 1):
+        require_fields(source, ("source", "content"), f"source_inputs[{index}]")
+        if not isinstance(source["source"], str) or not source["source"].strip():
+            raise SdlcError(f"source_inputs[{index}].source 必须是非空字符串")
+        if not isinstance(source["content"], str) or not source["content"].strip():
+            raise SdlcError(f"source_inputs[{index}].content 必须是非空字符串")
+
+    analysis = payload["requirements"]["analysis"]
+    _require_keys(
+        analysis,
+        (
+            "confirmed_facts", "impact_scope", "assumptions",
+            "open_questions", "risks", "decisions",
+        ),
+        "requirements.analysis",
+    )
+    for name in (
+        "confirmed_facts", "impact_scope", "assumptions", "risks", "decisions",
+    ):
+        _require_string_list(
+            analysis[name],
+            f"requirements.analysis.{name}",
+            nonempty=name == "impact_scope",
+        )
+    questions = analysis["open_questions"]
+    if not isinstance(questions, list):
+        raise SdlcError("requirements.analysis.open_questions 必须是数组")
+    question_ids: set[str] = set()
+    for index, question in enumerate(questions, 1):
+        _require_keys(
+            question,
+            ("id", "question", "blocking", "status"),
+            f"open_questions[{index}]",
+        )
+        identifier = question["id"]
+        if not re.fullmatch(r"Q-[0-9]{4}", identifier):
+            raise SdlcError(f"非法问题 ID: {identifier!r}")
+        if identifier in question_ids:
+            raise SdlcError(f"重复问题 ID: {identifier}")
+        question_ids.add(identifier)
+        if not isinstance(question["question"], str) or not question["question"].strip():
+            raise SdlcError(f"{identifier} question 必须是非空字符串")
+        if not isinstance(question["blocking"], bool):
+            raise SdlcError(f"{identifier} blocking 必须是布尔值")
+        if question["status"] not in {"open", "resolved"}:
+            raise SdlcError(f"{identifier} status 只能是 open/resolved")
+        if question["status"] == "resolved" and not str(
+            question.get("resolution", "")
+        ).strip():
+            raise SdlcError(f"{identifier} resolved 时必须提供 resolution")
+
     requirements = payload["requirements"].get("items", [])
     decisions = payload["design"].get("items", [])
     tests = payload["test_plan"].get("items", [])
@@ -115,7 +210,48 @@ def validate_spec(payload: dict[str, Any]) -> dict[str, set[str]]:
 
 
 def _render_requirements(data: dict[str, Any]) -> str:
-    lines = ["# 需求规格", "", f"- 流程：`{data['flow']}`", ""]
+    lines = [
+        "# 需求规格",
+        "",
+        f"- 流程：`{data['flow']}`",
+        f"- 用户确认：`{str(data['spec_confirmed']).lower()}`",
+        "",
+        "## 原始输入",
+        "",
+    ]
+    for source in data["source_inputs"]:
+        quoted = [
+            f"> {line}" if line else ">"
+            for line in source["content"].splitlines()
+        ]
+        lines += [f"### {source['source']}", "", *quoted, ""]
+    analysis = data["analysis"]
+    lines += ["## 分析与边界", ""]
+    sections = (
+        ("已确认事实", "confirmed_facts"),
+        ("影响范围", "impact_scope"),
+        ("假设", "assumptions"),
+        ("风险", "risks"),
+        ("决策", "decisions"),
+    )
+    for title, key in sections:
+        lines += [f"### {title}", ""]
+        values = analysis[key]
+        lines += [*[f"- {value}" for value in values], ""] if values else ["- 无", ""]
+    lines += ["### 待确认问题", ""]
+    if analysis["open_questions"]:
+        for question in analysis["open_questions"]:
+            state = question["status"]
+            blocking = "blocking" if question["blocking"] else "non-blocking"
+            lines.append(
+                f"- `{question['id']}` [{state}/{blocking}] {question['question']}"
+            )
+            if question.get("resolution"):
+                lines.append(f"  - 结论：{question['resolution']}")
+        lines.append("")
+    else:
+        lines += ["- 无", ""]
+    lines += ["## 规范化需求", ""]
     for item in data["items"]:
         lines += [
             f"## {item['id']} {item['title']}",
@@ -224,6 +360,7 @@ def publish_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             **payload["requirements"],
             "schema_version": payload["schema_version"],
             "flow": payload["flow"],
+            "spec_confirmed": payload["spec_confirmed"],
             "generated_at": generated,
         },
         "design": {
@@ -267,6 +404,7 @@ def load_current_spec(root: Path) -> dict[str, Any]:
     combined = {
         "schema_version": requirements["schema_version"],
         "flow": requirements["flow"],
+        "spec_confirmed": requirements["spec_confirmed"],
         "requirements": requirements,
         "design": design,
         "test_plan": test_plan,

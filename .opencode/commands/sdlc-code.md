@@ -4,7 +4,8 @@ agent: sdlc-main
 subtask: false
 ---
 
-执行 code 阶段。先调用 `sdlc_status` 并确认 init/spec 门禁。仅派发一次 `sdlc-coder`；
+执行 code 阶段。先调用 `sdlc_status` 并确认 init/spec 门禁；如果状态返回任何未解决的
+blocking 问题，停止并请用户先回到 `/sdlc-spec` 解决。仅派发一次 `sdlc-coder`；
 plugin 会生成最小 context pack、校验 handoff、Git diff、protected paths 与允许范围。
 coder 完成后调用 `sdlc_lifecycle(action=compile_restart_verify)`。
 

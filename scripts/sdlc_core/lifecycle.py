@@ -11,7 +11,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .artifacts import load_current_spec, render_test_results
+from .artifacts import load_current_spec, render_test_results, require_code_ready
 from .common import (
     SdlcError,
     atomic_write,
@@ -313,7 +313,7 @@ def artifact_evidence(root: Path) -> dict[str, Any]:
 
 
 def compile_restart_verify(root: Path) -> dict[str, Any]:
-    load_current_spec(root)
+    require_code_ready(load_current_spec(root))
     read_json(root / ".sdlc-pipeline" / "runs" / "coder-handoff.json")
     drift = verify_scaffold(root)
     if not drift["ok"]:

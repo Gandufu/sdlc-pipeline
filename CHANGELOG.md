@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0 - 2026-07-25
+
+- spec 增加原始输入、结构化分析与发布前人工确认门禁。
+- code 在 coder 派发和 compile/restart 两层拒绝未解决的 blocking 问题。
+- requirements Markdown 与版本交付摘要改为 runner 固定渲染。
+- context pack 以 hash 投影原始长需求，减少 coder/executor 重复 Token。
+- 补充 Schema、门禁、渲染、Token/context-pack 与完整版本闭环回归测试。
+
 ## 0.6.1 - 2026-07-25
 
 - 项目 adapter 安装改为可从 GitHub raw 地址下载单文件 installer 后直接执行。

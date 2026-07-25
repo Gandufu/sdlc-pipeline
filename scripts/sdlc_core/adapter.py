@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
 from typing import Any
 
-from .artifacts import load_current_spec
+from .artifacts import load_current_spec, require_code_ready
 from .common import SdlcError, read_json, utc_now, write_json
 from .trace import changed_paths, validate_diff, verify_extension_points
 
@@ -93,9 +94,25 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
     repeated = 0
     for name in files:
         path = root / name
-        if not path.exists() or path.stat().st_size > 80_000:
+        if not path.exists() or (
+            path.stat().st_size > 80_000
+            and name != "docs/sdlc/current/requirements.json"
+        ):
             continue
         content = path.read_text(encoding="utf-8", errors="replace")
+        if name == "docs/sdlc/current/requirements.json":
+            requirements = json.loads(content)
+            requirements["source_inputs"] = [
+                {
+                    "source": item["source"],
+                    "sha256": hashlib.sha256(
+                        item["content"].encode("utf-8")
+                    ).hexdigest(),
+                    "characters": len(item["content"]),
+                }
+                for item in requirements.get("source_inputs", [])
+            ]
+            content = json.dumps(requirements, ensure_ascii=False, indent=2) + "\n"
         entry_size = len(name) + len(content)
         if size and size + entry_size > MAX_CONTEXT_CHARS:
             packs.append([])
@@ -132,6 +149,8 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         raise SdlcError("coder 门禁要求 init 与 spec 均通过")
     if role == "executor" and not current["gates"]["code"]:
         raise SdlcError("executor 门禁要求真实 compile/restart/verify 证据")
+    if role == "coder":
+        require_code_ready(load_current_spec(root))
     verify_extension_points(root)
     before = changed_paths(root)
     write_json(root / ".sdlc-pipeline" / "runs" / f"{role}-before.json", {

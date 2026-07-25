@@ -16,6 +16,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 from sdlc_core.adapter import (  # noqa: E402
     before_task,
+    build_context_pack,
     validate_coder_handoff,
     validate_executor_handoff,
     validate_write_path,
@@ -59,7 +60,20 @@ def spec_payload() -> dict:
     return {
         "schema_version": "1.0",
         "flow": "standard",
+        "spec_confirmed": True,
         "requirements": {
+            "source_inputs": [{
+                "source": "user",
+                "content": "增加一个可以验证编译、重启和测试闭环的健康接口。",
+            }],
+            "analysis": {
+                "confirmed_facts": ["项目已有 feature extension point"],
+                "impact_scope": ["src", "tests"],
+                "assumptions": [],
+                "open_questions": [],
+                "risks": ["健康检查必须使用真实进程"],
+                "decisions": ["沿用现有 lifecycle 测试命令"],
+            },
             "items": [{
                 "id": "R-0001",
                 "title": "健康接口",
@@ -214,6 +228,15 @@ class ProjectFixture:
 
 
 class SchemaAndTraceTests(unittest.TestCase):
+    def test_spec_schema_requires_confirmation_sources_and_analysis(self) -> None:
+        schema = json.loads(
+            (REPO / "schemas/spec.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertIn("spec_confirmed", schema["required"])
+        required = schema["properties"]["requirements"]["required"]
+        self.assertIn("source_inputs", required)
+        self.assertIn("analysis", required)
+
     def test_valid_spec_has_complete_rdt(self) -> None:
         ids = validate_spec(spec_payload())
         self.assertEqual(ids["R"], {"R-0001"})
@@ -226,18 +249,72 @@ class SchemaAndTraceTests(unittest.TestCase):
         with self.assertRaises(SdlcError):
             validate_spec(payload)
 
+    def test_publish_requires_explicit_spec_confirmation(self) -> None:
+        fixture = ProjectFixture()
+        try:
+            payload = spec_payload()
+            payload["spec_confirmed"] = False
+            with self.assertRaisesRegex(SdlcError, "明确确认"):
+                publish_spec(fixture.root, payload)
+        finally:
+            fixture.close()
+
+    def test_resolved_question_requires_resolution(self) -> None:
+        payload = spec_payload()
+        payload["requirements"]["analysis"]["open_questions"] = [{
+            "id": "Q-0001",
+            "question": "是否修改公共接口？",
+            "blocking": True,
+            "status": "resolved",
+        }]
+        with self.assertRaisesRegex(SdlcError, "resolution"):
+            validate_spec(payload)
+
     def test_publish_is_fixed_json_and_markdown(self) -> None:
         fixture = ProjectFixture()
         try:
             result = publish_spec(fixture.root, spec_payload())
             self.assertTrue(result["ok"])
-            self.assertIn("# 需求规格", (
+            markdown = (
                 fixture.root / "docs/sdlc/current/requirements.md"
-            ).read_text(encoding="utf-8"))
+            ).read_text(encoding="utf-8")
+            self.assertIn("# 需求规格", markdown)
+            self.assertIn("## 原始输入", markdown)
+            self.assertIn("## 分析与边界", markdown)
+            self.assertIn("## 规范化需求", markdown)
+            self.assertIn("用户确认：`true`", markdown)
             self.assertEqual(
                 load_current_spec(fixture.root)["design"]["items"][0]["id"],
                 "D-0001",
             )
+        finally:
+            fixture.close()
+
+    def test_context_pack_hashes_raw_input_instead_of_repeating_it(self) -> None:
+        fixture = ProjectFixture()
+        try:
+            payload = spec_payload()
+            raw = "不应重复注入的原始需求-" * 3000
+            payload["requirements"]["source_inputs"][0]["content"] = raw
+            publish_spec(fixture.root, payload)
+            context = build_context_pack(fixture.root, "coder")
+            entries = [
+                entry
+                for path in context["paths"]
+                for entry in json.loads(
+                    (fixture.root / path).read_text(encoding="utf-8")
+                )["files"]
+            ]
+            requirements = next(
+                entry["content"]
+                for entry in entries
+                if entry["path"] == "docs/sdlc/current/requirements.json"
+            )
+            self.assertNotIn(raw, requirements)
+            self.assertIn('"characters":', requirements)
+            self.assertIn('"sha256":', requirements)
+            self.assertIn('"id": "R-0001"', requirements)
+            self.assertLess(context["repeated_chars"], len(raw))
         finally:
             fixture.close()
 
@@ -379,6 +456,33 @@ class ClosedLoopTests(unittest.TestCase):
         with self.assertRaises(SdlcError):
             validate_coder_handoff(self.fixture.root, json.dumps(bad))
 
+    def test_coder_gate_rejects_unresolved_blocking_question(self) -> None:
+        init_project(self.fixture.root)
+        payload = spec_payload()
+        payload["requirements"]["analysis"]["open_questions"] = [{
+            "id": "Q-0001",
+            "question": "是否允许修改公共接口？",
+            "blocking": True,
+            "status": "open",
+        }]
+        publish_spec(self.fixture.root, payload)
+        with self.assertRaisesRegex(SdlcError, "Q-0001"):
+            before_task(self.fixture.root, "coder")
+        write_json(
+            self.fixture.root / ".sdlc-pipeline/runs/coder-handoff.json",
+            {
+                "design_to_code": {"D-0001": ["src/feature.py"]},
+                "test_to_files": {"T-0001": ["tests/test_feature.py"]},
+                "changed_files": [],
+                "open_issues": [],
+            },
+        )
+        with self.assertRaisesRegex(SdlcError, "Q-0001"):
+            compile_restart_verify(self.fixture.root)
+        current = status(self.fixture.root)
+        self.assertEqual(current["blocking_questions"][0]["id"], "Q-0001")
+        self.assertFalse(current["can_enter_next"])
+
     def test_executor_requires_every_tid(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
@@ -428,8 +532,21 @@ class ClosedLoopTests(unittest.TestCase):
         manifest = json.loads((
             self.fixture.root / "docs/sdlc/versions/V0001/manifest.json"
         ).read_text(encoding="utf-8"))
+        summary = (
+            self.fixture.root / "docs/sdlc/versions/V0001/summary.md"
+        ).read_text(encoding="utf-8")
         self.assertEqual(manifest["status"], "closed")
         self.assertEqual(manifest["token_usage"]["phases"]["code"]["input"], 100)
+        self.assertIn("# 交付摘要 V0001", summary)
+        self.assertIn("## 交付证据", summary)
+        self.assertIn("`src/feature.py`", summary)
+        self.assertEqual(
+            run(
+                "git", "ls-files", "docs/sdlc/versions/V0001/summary.md",
+                cwd=self.fixture.root,
+            ),
+            "docs/sdlc/versions/V0001/summary.md",
+        )
         final_status = status(self.fixture.root)
         self.assertEqual(final_status["current_version"], "V0001")
         self.assertEqual(final_status["stage"], "version")

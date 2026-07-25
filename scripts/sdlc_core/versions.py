@@ -6,6 +6,7 @@ from typing import Any
 from .artifacts import load_current_spec
 from .common import (
     SdlcError,
+    atomic_write,
     git,
     git_available,
     read_json,
@@ -32,6 +33,55 @@ def current_version(root: Path) -> str | None:
 def parent_manifest(root: Path) -> dict[str, Any] | None:
     items = manifests(root)
     return read_json(items[-1]) if items else None
+
+
+def render_version_summary(manifest: dict[str, Any]) -> str:
+    evidence = manifest["evidence"]
+    restart = evidence.get("restart", {})
+    changed_files = manifest.get("impact", {}).get("changed_files", [])
+    open_issues = manifest.get("open_issues", [])
+    artifacts = evidence.get("artifacts", {}).get("artifacts", [])
+    lines = [
+        f"# 交付摘要 {manifest['version']}",
+        "",
+        f"- 状态：`{manifest['status']}`",
+        f"- 摘要：{manifest['summary']}",
+        f"- 父版本：`{manifest.get('parent_version') or '无'}`",
+        f"- 交付 commit：`{manifest.get('commit') or '待固化'}`",
+        f"- Tag：`{manifest['tag']}`",
+        "",
+        "## 需求与追溯",
+        "",
+        f"- R-id：{', '.join(f'`{x}`' for x in manifest['ids']['requirements'])}",
+        f"- D-id：{', '.join(f'`{x}`' for x in manifest['ids']['design'])}",
+        f"- T-id：{', '.join(f'`{x}`' for x in manifest['ids']['tests'])}",
+        "",
+        "## 交付证据",
+        "",
+        f"- Compile：`{'pass' if evidence.get('compile', {}).get('ok') else 'fail'}`",
+        f"- Stop：`{'pass' if restart.get('stop', {}).get('ok') else 'fail'}`",
+        f"- Start：`{'pass' if restart.get('start', {}).get('ok') else 'fail'}`",
+        f"- Health：`{'pass' if evidence.get('health', {}).get('ok') else 'fail'}`",
+        f"- Tests：`{evidence.get('tests', '')}`",
+        "",
+        "## 实际变更",
+        "",
+        *([f"- `{path}`" for path in changed_files] or ["- 无"]),
+        "",
+        "## Artifacts",
+        "",
+    ]
+    if artifacts:
+        for artifact in artifacts:
+            lines.append(
+                f"- `{artifact.get('path', '')}` "
+                f"SHA-256 `{artifact.get('sha256', '')}`"
+            )
+    else:
+        lines.append("- 无")
+    lines += ["", "## Open issues", ""]
+    lines += [f"- {issue}" for issue in open_issues] or ["- 无"]
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
@@ -154,7 +204,14 @@ def finalize(root: Path, version: str, summary: str, confirmed: bool) -> dict[st
     manifest["commit"] = delivery_sha
     manifest["closed_at"] = utc_now()
     write_json(path, manifest)
-    git(root, "add", path.relative_to(root).as_posix())
+    summary_path = path.with_name("summary.md")
+    atomic_write(summary_path, render_version_summary(manifest))
+    git(
+        root,
+        "add",
+        path.relative_to(root).as_posix(),
+        summary_path.relative_to(root).as_posix(),
+    )
     git(root, "commit", "-m", f"sdlc({version}): record evidence")
     evidence_sha = git(root, "rev-parse", "HEAD")
     git(root, "tag", "-a", tag, "-m", f"SDLC {version}: {summary}")

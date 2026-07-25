@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import load_current_spec
+from .artifacts import load_current_spec, unresolved_blocking_questions
 from .common import read_json
 from .runs import pid_alive, read_active
 from .trace import incremental_eligibility, verify_scaffold
@@ -24,9 +24,11 @@ def status(root: Path) -> dict[str, Any]:
     if not gates["init"]:
         missing.append("docs/sdlc/init-report.json(pass)")
     spec = None
+    blocking_questions: list[dict[str, Any]] = []
     try:
         spec = load_current_spec(root)
         gates["spec"] = True
+        blocking_questions = unresolved_blocking_questions(spec)
     except Exception:
         gates["spec"] = False
         missing.append("requirements/design/test-plan")
@@ -60,7 +62,7 @@ def status(root: Path) -> dict[str, Any]:
     prerequisites = {
         "init": False,
         "spec": gates["init"],
-        "code": gates["spec"],
+        "code": gates["spec"] and not blocking_questions,
         "test": gates["code"],
         "version": gates["test"],
     }
@@ -91,6 +93,10 @@ def status(root: Path) -> dict[str, Any]:
         "active_pid": active_pid if pid_alive(active_pid) else None,
         "unfinished_run": candidate if candidate and candidate.get("status") != "closed" else None,
         "affected_ids": ids,
+        "blocking_questions": [
+            {"id": item["id"], "question": item["question"]}
+            for item in blocking_questions
+        ],
         "scaffold": {"ok": drift["ok"], "drift": drift["drift"]},
         "incremental": incremental,
         "can_enter_next": prerequisites[stage],
