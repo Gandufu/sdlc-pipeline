@@ -9,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 REPO = Path(__file__).resolve().parents[1]
@@ -398,6 +399,36 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(report["health"]["ok"])
         self.assertTrue(report["artifacts"]["ok"])
         self.assertTrue(report["stop"]["stopped"])
+
+    def test_init_command_auto_installs_template_declared_missing_tools(self) -> None:
+        missing = {
+            "ok": False,
+            "tools": [],
+            "missing": ["python"],
+            "install_policy": "template_declared_auto_install",
+        }
+        ready = {
+            "ok": True,
+            "tools": [],
+            "missing": [],
+            "install_policy": "template_declared_auto_install",
+        }
+        installed = {"ok": True, "tool": "python"}
+        with patch(
+            "sdlc_core.lifecycle.probe_tools",
+            side_effect=[missing, ready],
+        ), patch(
+            "sdlc_core.lifecycle.install_system_tool",
+            return_value=installed,
+        ) as system_install:
+            report = init_project(
+                self.fixture.root,
+                auto_install_missing=True,
+            )
+
+        system_install.assert_called_once_with(self.fixture.root, "python", True)
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["system_installs"], [installed])
 
     def test_compile_restart_has_real_evidence(self) -> None:
         publish_spec(self.fixture.root, spec_payload())

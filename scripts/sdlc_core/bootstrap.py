@@ -177,7 +177,7 @@ def bootstrap(
     _install_adapter_if_needed(destination, source_root)
     from .lifecycle import init_project
 
-    report = init_project(destination)
+    report = init_project(destination, auto_install_missing=True)
     return {
         "ok": report.get("status") == "pass",
         "project_root": str(destination),

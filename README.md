@@ -312,7 +312,8 @@ coder 返回的 `compiled: pass` 不参与门禁。
 | 发布 spec | 是，必须先确认候选 spec |
 | 项目 install/compile/start/stop/test | 否，受 lifecycle 白名单控制 |
 | 修改 production/test allowed path | 否，但受前后双重 path/diff 校验 |
-| 系统级 Java/Node/Maven 安装 | 是，必须先展示缺失项和受控命令 |
+| init 中模板声明的 Java/Node/Maven 安装 | 否，执行 `/sdlc-init` 即授权受控安装 |
+| init 之外的系统级工具安装 | 是，必须明确确认 |
 | 固化版本 `sdlc_finalize` | 是，测试通过后必须明确确认 |
 | push 到远端 | pipeline 不自动执行 |
 
@@ -476,7 +477,9 @@ tests/
 ```
 
 `.opencode/package.json` 声明本地插件运行所需的 `@opencode-ai/plugin`。
-安装器会自动创建或合并该依赖，OpenCode 启动时负责安装，无需用户手工执行包管理命令。
+安装器会自动创建或合并该依赖，并通过系统已有的 npm（或 bun）完成安装和落盘验证，
+以规避部分 OpenCode Desktop 版本无法正确准备本地插件依赖的问题。用户无需手工执行
+包管理命令；安装完成后可直接重启 OpenCode 并执行 `/sdlc-init`。
 
 旧 Claude/Codex manifests、hooks 和 adapter 不再维护；历史实现仍可通过 Git 历史追溯。
 
@@ -509,6 +512,7 @@ git diff --check
 - main/coder/executor 权限矩阵；
 - lifecycle/scaffold schema 与 hash；
 - wrapper/Corepack 优先级；
+- init 自动安装模板声明的缺失系统工具；
 - 系统安装确认拒绝和执行失败；
 - compile/start/stop/PID；
 - process/HTTP/TCP/file/browser health；
@@ -554,10 +558,11 @@ finalize 是测试通过后的高风险确认动作，不是独立阶段。用�
 默认 reviewer 会增加固定上下文和重复读取。当前把 review 拆成 trace、compile、lint、
 static analysis 和按 T-id 的行为测试。需要人工代码审查时使用项目自己的 PR 流程。
 
-### 系统工具安装被拒绝后会怎样？
+### init 缺少系统工具时会怎样？
 
-init 生成 blocked report，列出缺失工具和安装命令，不会跳过 compile/start 制造绿色结果。
-人工安装完成后重新运行 init。
+`/sdlc-init` 会让 runner 按模板 `lifecycle.json` 中的白名单命令自动安装并重新探测，然后
+继续 install/compile/start/verify/stop。模板没有声明受控安装方式或安装失败时，init 返回
+真实失败日志；AI 不会让用户复制 Python runner 命令，也不会跳过门禁制造绿色结果。
 
 ### code 通过后又修改了文件会怎样？
 

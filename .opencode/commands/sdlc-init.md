@@ -8,6 +8,9 @@ subtask: false
 
 始终以当前 OpenCode 项目根目录作为目标目录和 evidence root。不得要求用户切换到插件仓库，
 不得接收 target 路径，也不得在其他目录 clone 后再要求打开新会话。
+必须由主会话直接调用 `sdlc_lifecycle(action=init)` 完成整个 init，不得改用 bash、Python
+runner 或让用户复制任何手工命令。若 `sdlc_lifecycle` 不在当前会话工具表中，应明确报告
+插件启动失败并停止；不得伪造门禁证据或提供 runner 降级路径。
 
 支持三种模式：
 
@@ -21,9 +24,10 @@ subtask: false
    `.sdlc-pipeline/scaffold.json`，不能携带插件的 `.opencode` 或 `opencode.json`。
 3. 已有项目：不带参数。要求当前项目已经有 lifecycle/scaffold，调用 init 时不传 options。
 
-OpenCode 桌面版已安装时，只探测其项目发现能力，不尝试重复安装 OpenCode。缺少系统工具时，
-先展示精确工具与受控安装命令，单独询问用户；只有明确确认后才调用
-`action=system_install` 且传 `approved=true`，随后仍在**同一项目目录**重新执行 init。
+OpenCode 桌面版已安装时，只探测其项目发现能力，不尝试重复安装 OpenCode。执行
+`/sdlc-init` 即授权 runner 自动探测并安装模板 `lifecycle.json` 明确声明且白名单允许的缺失
+系统工具；随后自动继续 install/compile/start/health/artifact/stop，不再要求用户补充命令或
+进行第二次确认。模板未声明受控安装命令时必须失败并返回真实日志。
 
 最终展示 `init-report` 的工具、install、compile、PID、health、artifact hash、stop 和 Git
 基线；只有所有 mandatory 检查通过才可进入 `/sdlc-spec`。

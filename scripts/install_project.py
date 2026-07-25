@@ -164,7 +164,11 @@ def install_from_repository(
     """Install from a raw-script invocation without requiring a local clone."""
     with tempfile.TemporaryDirectory(prefix="sdlc-pipeline-") as temporary:
         source_root = _clone_distribution(repository, ref, Path(temporary))
-        return _load_installer(source_root).install(target, force)
+        result = _load_installer(source_root).install(target, force)
+    result["plugin_dependencies"] = prepare_opencode_plugin_dependencies(
+        target.expanduser().resolve()
+    )
+    return result
 
 
 def install(target: Path, force: bool = False) -> dict[str, object]:
@@ -199,6 +203,75 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
     return {"ok": True, "target": str(target), **value}
 
 
+def prepare_opencode_plugin_dependencies(target: Path) -> dict[str, str]:
+    """Install the SDK needed before OpenCode can load the project plugin."""
+    package_root = target / ".opencode"
+    managers = (
+        (
+            "npm",
+            [
+                "install",
+                "--ignore-scripts",
+                "--no-audit",
+                "--no-fund",
+                "--package-lock=false",
+            ],
+        ),
+        ("bun", ["install", "--ignore-scripts"]),
+    )
+    selected: tuple[str, str, list[str]] | None = None
+    for name, args in managers:
+        executable = shutil.which(name)
+        if executable:
+            selected = (name, executable, args)
+            break
+    if not selected:
+        raise RuntimeError(
+            "无法准备 OpenCode 插件依赖：系统中未找到 npm 或 bun。"
+            "安装器必须先完成插件 SDK bootstrap，之后 /sdlc-init 才能自动探测模板环境。"
+        )
+    name, executable, args = selected
+    result = subprocess.run(
+        [executable, *args],
+        cwd=package_root,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode:
+        details = (result.stderr or result.stdout)[-4000:]
+        raise RuntimeError(
+            f"OpenCode 插件依赖安装失败（{name}）: {details}"
+        )
+    installed = (
+        package_root
+        / "node_modules"
+        / "@opencode-ai"
+        / "plugin"
+        / "package.json"
+    )
+    if not installed.is_file():
+        raise RuntimeError(
+            f"OpenCode 插件依赖安装未生成预期文件: {installed}"
+        )
+    metadata = json.loads(installed.read_text(encoding="utf-8"))
+    return {
+        "manager": name,
+        "package": "@opencode-ai/plugin",
+        "version": str(metadata.get("version", "unknown")),
+    }
+
+
+def install_complete(target: Path, force: bool = False) -> dict[str, object]:
+    """Install project files and make the plugin loadable in one operation."""
+    result = install(target, force)
+    resolved = target.expanduser().resolve()
+    result["plugin_dependencies"] = prepare_opencode_plugin_dependencies(resolved)
+    return result
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="安装 OpenCode 项目级 SDLC Pipeline")
     parser.add_argument("--target", required=True)
@@ -207,7 +280,7 @@ def main() -> int:
     parser.add_argument("--ref", default=DEFAULT_REF)
     args = parser.parse_args()
     if is_distribution(PLUGIN_ROOT):
-        result = install(Path(args.target), args.force)
+        result = install_complete(Path(args.target), args.force)
     else:
         result = install_from_repository(
             Path(args.target), args.force, args.repository, args.ref

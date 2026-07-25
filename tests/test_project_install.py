@@ -115,12 +115,24 @@ class InstallerTests(unittest.TestCase):
             self.assertFalse(raw.is_distribution(raw.PLUGIN_ROOT))
             target = base / "project"
             target.mkdir()
-            with patch.object(raw, "_clone_distribution", return_value=REPO) as clone:
+            prepared = {
+                "manager": "npm",
+                "package": "@opencode-ai/plugin",
+                "version": "1.18.5",
+            }
+            with patch.object(
+                raw, "_clone_distribution", return_value=REPO
+            ) as clone, patch.object(
+                raw,
+                "prepare_opencode_plugin_dependencies",
+                return_value=prepared,
+            ):
                 result = raw.install_from_repository(
                     target, False, "https://example.invalid/sdlc-pipeline.git", "main"
                 )
             clone.assert_called_once()
             self.assertTrue(result["ok"])
+            self.assertEqual(result["plugin_dependencies"], prepared)
             self.assertTrue((target / ".sdlc-pipeline/scripts/sdlc.py").exists())
 
     def test_downloaded_installer_main_uses_repository_fallback(self) -> None:
@@ -141,6 +153,26 @@ class InstallerTests(unittest.TestCase):
                 Path(base), False, raw.DEFAULT_REPOSITORY, raw.DEFAULT_REF
             )
             self.assertIn('"ok": true', output.getvalue())
+
+    def test_complete_install_prepares_plugin_dependency_without_manual_step(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            prepared = {
+                "manager": "npm",
+                "package": "@opencode-ai/plugin",
+                "version": "1.18.5",
+            }
+            with patch.object(
+                installer,
+                "prepare_opencode_plugin_dependencies",
+                return_value=prepared,
+            ) as prepare:
+                result = installer.install_complete(target)
+
+            prepare.assert_called_once_with(target.resolve())
+            self.assertEqual(result["plugin_dependencies"], prepared)
 
     def test_builtin_init_fills_the_current_plugin_project(self) -> None:
         import sys

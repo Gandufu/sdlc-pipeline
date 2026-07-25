@@ -158,7 +158,7 @@ def probe_tools(root: Path) -> dict[str, Any]:
         "ok": not missing,
         "tools": results,
         "missing": missing,
-        "install_policy": "wrapper_corepack_existing_then_approved_system_install",
+        "install_policy": "template_declared_auto_install_on_init",
     }
 
 
@@ -339,18 +339,27 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
     return evidence
 
 
-def init_project(root: Path) -> dict[str, Any]:
+def init_project(
+    root: Path,
+    *,
+    auto_install_missing: bool = False,
+) -> dict[str, Any]:
     drift = verify_scaffold(root)
     if not drift["ok"]:
         raise SdlcError(f"脚手架初始校验失败: {drift['drift']}")
     tools = probe_tools(root)
+    system_installs = []
+    if not tools["ok"] and auto_install_missing:
+        for name in tools["missing"]:
+            system_installs.append(install_system_tool(root, name, True))
+        tools = probe_tools(root)
     if not tools["ok"]:
         report = {
             "schema_version": "1.0",
             "status": "blocked",
             "created_at": utc_now(),
             "tools": tools,
-            "approval_required": tools["missing"],
+            "system_installs": system_installs,
         }
         _write_init_report(root, report)
         return report
@@ -369,6 +378,7 @@ def init_project(root: Path) -> dict[str, Any]:
         "status": status,
         "created_at": utc_now(),
         "tools": tools,
+        "system_installs": system_installs,
         "install": install,
         "compile": compile_result,
         "start": started,

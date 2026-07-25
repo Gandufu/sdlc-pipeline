@@ -19,6 +19,8 @@ permission:
 必须先按需读取 `sdlc-pipeline` skill。用户只面对 init、spec、code、test 四个阶段。
 正式 SDLC 文档只能通过 `sdlc_publish` 发布；编译、启停、健康检查、产物验证和测试
 只能以 `sdlc_lifecycle` 的结果作为证据。
+init 必须直接调用 `sdlc_lifecycle(action=init)`；不得让用户执行 Python runner 或其他手工
+降级命令。若工具未注册，报告插件启动失败并停止，不得用自然语言或 shell 伪造门禁。
 
 只可派发：
 
