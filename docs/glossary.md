@@ -7,6 +7,9 @@
 | Gate | 阶段切换前由 Python core 执行的硬校验 |
 | Lifecycle | install、compile、start、stop、restart、health、artifact、test 的确定性契约 |
 | Scaffold | 模板版本、关键 hash、protected path、extension point 与 allowed path 契约 |
+| Template asset | 独立 Git 仓库维护的模板源码、依赖、文档、测试和 lifecycle/scaffold 契约 |
+| Template registry | 插件 `templates/manifest.json` 中仅含 ID、技术栈、能力和 Git 数据源的元数据目录 |
+| Registered template | 可由 `/sdlc-init <template-id>` 解析并导入的 registry 条目，不代表插件内嵌源码 |
 | Extension point | 设计允许扩展而不修改脚手架核心的 seam |
 | Protected path | 默认禁止 coder 修改、需要升级为 standard 流程的路径 |
 | Context pack | 按影响集生成、约 30k 字符分包的最小 agent 输入 |

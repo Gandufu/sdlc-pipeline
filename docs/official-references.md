@@ -1,6 +1,6 @@
 # OpenCode 官方资料索引
 
-核对日期：2026-07-25。当前正式宿主只有 OpenCode；桌面版与 CLI 均读取项目级配置。
+核对日期：2026-07-26。当前正式宿主只有 OpenCode；桌面版与 CLI 均读取项目级配置。
 
 | 本插件实现 | 官方约定 | 官方来源 |
 |---|---|---|
@@ -14,6 +14,10 @@
 
 本插件不使用 `experimental.chat.messages.transform`，也不依赖与 Claude/Codex
 SubagentStop 等价的同上下文恢复。task 校验失败时返回结构化错误，由主会话重新派发。
+
+模板资产不属于 OpenCode plugin 组件：插件只在 `templates/manifest.json` 保存模板数据源
+元数据，模板源码、依赖、生命周期契约和测试由独立 Git 仓库维护。当前登记的参考实现是
+[`sdlc-electron-scaffold`](https://github.com/Gandufu/sdlc-electron-scaffold)。
 
 推荐核对顺序：
 

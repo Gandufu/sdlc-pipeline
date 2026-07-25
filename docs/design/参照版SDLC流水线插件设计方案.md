@@ -1,6 +1,6 @@
 # SDLC Pipeline OpenCode-first 架构真值
 
-- 对应版本：`0.6.1`
+- 对应版本：`0.8.0`
 - 状态：当前实现
 
 ## 定位
@@ -26,13 +26,31 @@ init 与后续研发阶段始终位于同一个 OpenCode 项目会话。用户�
 raw 地址下载 `scripts/install_project.py` 并执行；该单文件入口自动 clone 指定 ref 的完整
 发行内容后安装项目 adapter。随后在该目录执行
 `/sdlc-init <template>` 或
-`/sdlc-init --github <repo> [ref]`。内置模板直接复制到当前目录；GitHub 模板先在临时目录
-clone/checkout，再连同 Git 历史导入当前目录。当前 worktree 从 init 开始就是唯一的 evidence
-root，后续直接执行 `/sdlc-spec → /sdlc-code → /sdlc-test`。
+`/sdlc-init --github <repo> [ref]`。已登记模板先从插件
+`templates/manifest.json` 解析 Git repository/ref；显式 GitHub 模板直接使用用户提供的数据源。
+两种方式都先在临时目录 clone/checkout，再连同 Git 历史导入当前目录。当前 worktree 从 init
+开始就是唯一的 evidence root，后续直接执行
+`/sdlc-spec → /sdlc-code → /sdlc-test`。
 
 GitHub 模板必须提供 lifecycle/scaffold 契约；`.opencode`、`opencode.json`、runner 和运行
 现场由插件统一管理。已有项目已经具备 lifecycle/scaffold 时，直接在项目根运行无参数的
 `/sdlc-init`。
+
+## 模板资产边界
+
+插件是流程与数据源适配器，不是模板资产包：
+
+- 插件的 `templates/` 目录只允许保存 `manifest.json` 注册元数据；
+- 模板源码、依赖、锁文件、文档、测试、lifecycle/scaffold 契约均由独立 Git 仓库维护；
+- init 根据用户指定的 ID，或根据 `name/description/stacks/capabilities` 匹配唯一候选；
+- 没有唯一候选时必须要求用户确认，不得静默选择；
+- 导入报告记录 template ID、repository、请求 ref 和解析后的 commit SHA。
+
+当前参考模板为
+[`sdlc-electron-scaffold`](https://github.com/Gandufu/sdlc-electron-scaffold)，本地维护目录是
+`D:\sdlc-electron-scaffold`。它采用纯通用模板方案：删除 Heli、设备和会议业务，只保留安全
+main/preload/typed IPC 示例、React 页面、测试和完整生命周期；打包工具单轨使用 Electron
+Forge，不保留 electron-builder。
 
 失败不会跳过门禁：
 
@@ -98,14 +116,16 @@ plugin 是薄 adapter：转换 OpenCode 输入输出、注册正式 before/after
 1. 项目 wrapper；
 2. Corepack/packageManager；
 3. 已安装系统工具；
-4. 获得单独批准后的系统安装。
+4. 模板 lifecycle 已声明且 runner 白名单允许的自动系统安装。
 
 init 的成功标准是 install、compile、start、health、artifact 全部通过，并完成 stop（除非模板
 明确 keep running）。code 阶段重复执行 compile → stop old → start new → health/artifact，
 因此文档落盘或 coder 的 compiled 声明不能过门。
 
 health 支持 process、HTTP、TCP、command、file 和 browser smoke。browser smoke 在 core 中
-以无 UI HTTP 页面探针实现；需要真实交互的模板可把受控 Playwright 命令登记为 command。
+以无 UI HTTP 页面探针实现；需要真实交互的模板必须把受控 E2E 命令登记为 command。当前
+Electron 模板的 `test:e2e` 会启动打包后的真实窗口，并验证 preload bridge 与 typed IPC，
+不能用 renderer HTTP 可达代替。
 
 ## 标准与增量
 
