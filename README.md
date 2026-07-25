@@ -76,9 +76,7 @@ OpenCode 桌面版已经安装时，init 不会重复安装 OpenCode。
    当前项目；无需预先 clone 本插件或设置本地环境变量：
 
    ```powershell
-   $installer = Join-Path ([System.IO.Path]::GetTempPath()) 'sdlc-pipeline-install.py'
-   Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py' -OutFile $installer
-   try { python $installer --target . } finally { Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue }
+   python -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py').read())" --target .
    ```
 
 3. 用 OpenCode 桌面版打开同一目录，执行内置模板或 GitHub 模板 init。
@@ -179,17 +177,13 @@ docs/sdlc/
 在已有项目根目录安装 adapter：
 
 ```powershell
-$installer = Join-Path ([System.IO.Path]::GetTempPath()) 'sdlc-pipeline-install.py'
-Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py' -OutFile $installer
-try { python $installer --target . } finally { Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue }
+python -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py').read())" --target .
 ```
 
 升级本插件受管文件：
 
 ```powershell
-$installer = Join-Path ([System.IO.Path]::GetTempPath()) 'sdlc-pipeline-install.py'
-Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py' -OutFile $installer
-try { python $installer --target . --force } finally { Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue }
+python -c "import urllib.request; exec(urllib.request.urlopen('https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py').read())" --target . --force
 ```
 
 installer 只写入：
