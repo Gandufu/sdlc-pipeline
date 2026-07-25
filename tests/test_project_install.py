@@ -314,6 +314,60 @@ class InstallerTests(unittest.TestCase):
             text=True,
         )
 
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_plugin_ignores_filesystem_root_worktree_when_project_core_exists(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary).resolve()
+            plugin_path = target / ".opencode" / "plugins" / "sdlc-pipeline.js"
+            plugin_path.parent.mkdir(parents=True)
+            shutil.copy2(REPO / ".opencode/plugins/sdlc-pipeline.js", plugin_path)
+            core = target / ".sdlc-pipeline" / "scripts" / "sdlc.py"
+            core.parent.mkdir(parents=True)
+            core.write_text("print('fixture')\n", encoding="utf-8")
+            sdk = (
+                target
+                / ".opencode"
+                / "node_modules"
+                / "@opencode-ai"
+                / "plugin"
+            )
+            sdk.mkdir(parents=True)
+            (sdk / "package.json").write_text(
+                json.dumps(
+                    {
+                        "name": "@opencode-ai/plugin",
+                        "type": "module",
+                        "exports": "./index.js",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (sdk / "index.js").write_text(
+                "const schema = () => ({"
+                "optional() { return this }, describe() { return this }"
+                "})\n"
+                "export const tool = (input) => input\n"
+                "tool.schema = { enum: schema, string: schema, boolean: schema }\n",
+                encoding="utf-8",
+            )
+            script = (
+                "import(process.argv[1]).then(m => {"
+                "console.log(m.resolveProjectRoot({"
+                "directory: process.argv[2], worktree: '/'"
+                "}))"
+                "}).catch(e => { console.error(e); process.exit(1) })"
+            )
+            result = subprocess.run(
+                ["node", "-e", script, plugin_path.as_uri(), str(target)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(Path(result.stdout.strip()).resolve(), target)
+
     def test_installation_marker_identifies_desktop_compatible_opencode(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)

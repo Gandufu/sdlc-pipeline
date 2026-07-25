@@ -2,23 +2,27 @@ import { spawnSync } from "node:child_process"
 import { existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
-import { tool } from "@opencode-ai/plugin"
 
 const AGENTS = {
   "sdlc-coder": "coder",
   "sdlc-executor": "executor",
 }
-const PACKAGE_ROOT = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".."
+const PLUGIN_PROJECT_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)), "..", ".."
 )
 
-function coreScript(root) {
+function localCoreScript(root) {
   const installed = path.join(root, ".sdlc-pipeline", "scripts", "sdlc.py")
   if (existsSync(installed)) return installed
   const development = path.join(root, "scripts", "sdlc.py")
   if (existsSync(development)) return development
-  const packaged = path.join(PACKAGE_ROOT, "scripts", "sdlc.py")
-  if (existsSync(packaged)) return packaged
+}
+
+function coreScript(root) {
+  for (const candidate of [root, PLUGIN_PROJECT_ROOT]) {
+    const script = localCoreScript(candidate)
+    if (script) return script
+  }
   throw new Error("sdlc-pipeline Python core is missing")
 }
 
@@ -44,8 +48,27 @@ function invoke(root, operation, payload = {}) {
   return data
 }
 
+export function resolveProjectRoot(context = {}, fallback = PLUGIN_PROJECT_ROOT) {
+  const candidates = [
+    context?.directory,
+    context?.worktree,
+    fallback,
+    PLUGIN_PROJECT_ROOT,
+  ]
+  const seen = new Set()
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string" || !candidate.trim()) continue
+    const resolved = path.resolve(candidate)
+    const key = resolved.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    if (localCoreScript(resolved)) return resolved
+  }
+  return PLUGIN_PROJECT_ROOT
+}
+
 function rootOf(context, fallback) {
-  return context?.worktree || context?.directory || fallback
+  return resolveProjectRoot(context, fallback)
 }
 
 function requireAgent(context, allowed, toolName) {
@@ -56,7 +79,8 @@ function requireAgent(context, allowed, toolName) {
 }
 
 export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
-  const fallbackRoot = worktree || directory
+  const { tool } = await import("@opencode-ai/plugin")
+  const fallbackRoot = resolveProjectRoot({ directory, worktree })
   return {
     tool: {
       sdlc_status: tool({
