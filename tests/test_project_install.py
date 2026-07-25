@@ -135,6 +135,16 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(result["plugin_dependencies"], prepared)
             self.assertTrue((target / ".sdlc-pipeline/scripts/sdlc.py").exists())
 
+    def test_downloaded_installer_can_load_without_file_global(self) -> None:
+        source = (REPO / "scripts" / "install_project.py").read_text(
+            encoding="utf-8"
+        )
+        namespace = {"__name__": "downloaded_installer"}
+
+        exec(compile(source, "<downloaded-installer>", "exec"), namespace)
+
+        self.assertIsInstance(namespace["PLUGIN_ROOT"], Path)
+
     def test_downloaded_installer_main_uses_repository_fallback(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)

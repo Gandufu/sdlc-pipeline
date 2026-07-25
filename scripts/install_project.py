@@ -12,7 +12,12 @@ from pathlib import Path
 from typing import Any
 
 
-PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+_SOURCE_FILE = globals().get("__file__")
+PLUGIN_ROOT = (
+    Path(_SOURCE_FILE).resolve().parent.parent
+    if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
+    else Path.cwd().resolve()
+)
 VERSION = "0.6.1"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
