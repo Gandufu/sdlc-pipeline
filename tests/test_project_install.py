@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -70,6 +72,45 @@ class InstallerTests(unittest.TestCase):
             spec.loader.exec_module(module)
             self.assertTrue(module.install(second)["ok"])
             self.assertTrue((second / ".opencode/plugins/sdlc-pipeline.js").exists())
+
+    def test_downloaded_installer_fetches_complete_distribution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            raw_script = base / "install_project.py"
+            shutil.copy2(REPO / "scripts" / "install_project.py", raw_script)
+            spec = importlib.util.spec_from_file_location("raw_installer", raw_script)
+            assert spec and spec.loader
+            raw = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(raw)
+            self.assertFalse(raw.is_distribution(raw.PLUGIN_ROOT))
+            target = base / "project"
+            target.mkdir()
+            with patch.object(raw, "_clone_distribution", return_value=REPO) as clone:
+                result = raw.install_from_repository(
+                    target, False, "https://example.invalid/sdlc-pipeline.git", "main"
+                )
+            clone.assert_called_once()
+            self.assertTrue(result["ok"])
+            self.assertTrue((target / ".sdlc-pipeline/scripts/sdlc.py").exists())
+
+    def test_downloaded_installer_main_uses_repository_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            raw_script = base / "install_project.py"
+            shutil.copy2(REPO / "scripts" / "install_project.py", raw_script)
+            spec = importlib.util.spec_from_file_location("raw_installer_main", raw_script)
+            assert spec and spec.loader
+            raw = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(raw)
+            output = io.StringIO()
+            with patch.object(raw, "install_from_repository", return_value={"ok": True}) as fallback, patch.object(
+                sys, "argv", [str(raw_script), "--target", str(base)]
+            ), patch("sys.stdout", output):
+                self.assertEqual(raw.main(), 0)
+            fallback.assert_called_once_with(
+                Path(base), False, raw.DEFAULT_REPOSITORY, raw.DEFAULT_REF
+            )
+            self.assertIn('"ok": true', output.getvalue())
 
     def test_builtin_init_fills_the_current_plugin_project(self) -> None:
         import sys
@@ -190,6 +231,8 @@ class InstallerTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("项目目录内", readme)
         self.assertIn("/sdlc-init --github", readme)
+        self.assertIn("raw.githubusercontent.com/Gandufu/sdlc-pipeline", readme)
+        self.assertNotIn("<SDLC_PIPELINE_ROOT>", readme)
         self.assertIn("当前 OpenCode 项目根目录", init_command)
         self.assertNotIn("<repo> <ref> <target>", init_command)
 

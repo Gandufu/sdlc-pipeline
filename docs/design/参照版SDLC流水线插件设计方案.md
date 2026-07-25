@@ -1,6 +1,6 @@
 # SDLC Pipeline OpenCode-first 架构真值
 
-- 对应版本：`0.6.0`
+- 对应版本：`0.6.1`
 - 状态：当前实现
 
 ## 定位
@@ -22,8 +22,10 @@ uninitialized
                           └─ closed version
 ```
 
-init 与后续研发阶段始终位于同一个 OpenCode 项目会话。用户先创建空项目目录并安装插件，
-然后在该目录执行 `/sdlc-init <template>` 或
+init 与后续研发阶段始终位于同一个 OpenCode 项目会话。用户先创建空项目目录，从本仓库
+raw 地址下载 `scripts/install_project.py` 并执行；该单文件入口自动 clone 指定 ref 的完整
+发行内容后安装项目 adapter。随后在该目录执行
+`/sdlc-init <template>` 或
 `/sdlc-init --github <repo> [ref]`。内置模板直接复制到当前目录；GitHub 模板先在临时目录
 clone/checkout，再连同 Git 历史导入当前目录。当前 worktree 从 init 开始就是唯一的 evidence
 root，后续直接执行 `/sdlc-spec → /sdlc-code → /sdlc-test`。

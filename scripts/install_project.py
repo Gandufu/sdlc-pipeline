@@ -2,15 +2,20 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 from pathlib import Path
+from typing import Any
 
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-VERSION = "0.6.0"
+VERSION = "0.6.1"
+DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
+DEFAULT_REF = "main"
 MANAGED = (
     ("scripts", ".sdlc-pipeline/scripts"),
     ("templates", ".sdlc-pipeline/templates"),
@@ -73,6 +78,72 @@ def _source(name: str) -> Path:
     return direct
 
 
+def is_distribution(root: Path) -> bool:
+    """Return whether root contains the complete installable distribution."""
+    return (
+        (root / "scripts" / "sdlc.py").is_file()
+        and (root / "templates" / "manifest.json").is_file()
+        and (root / ".opencode" / "plugins" / "sdlc-pipeline.js").is_file()
+    )
+
+
+def _clone_distribution(repository: str, ref: str, parent: Path) -> Path:
+    destination = parent / "sdlc-pipeline"
+    try:
+        clone = subprocess.run(
+            ["git", "clone", "--no-checkout", repository, str(destination)],
+            cwd=parent,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+    except OSError as exc:
+        raise RuntimeError("无法运行 Git；请安装 Git 后重试 installer") from exc
+    if clone.returncode:
+        raise RuntimeError(
+            f"无法从 {repository} 拉取 SDLC Pipeline："
+            f"{(clone.stderr or clone.stdout)[-4000:]}"
+        )
+    checkout = subprocess.run(
+        ["git", "checkout", ref],
+        cwd=destination,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if checkout.returncode:
+        raise RuntimeError(
+            f"无法 checkout SDLC Pipeline ref {ref}："
+            f"{(checkout.stderr or checkout.stdout)[-4000:]}"
+        )
+    if not is_distribution(destination):
+        raise RuntimeError("下载内容不是完整的 SDLC Pipeline 发行包")
+    return destination
+
+
+def _load_installer(source_root: Path) -> Any:
+    path = source_root / "scripts" / "install_project.py"
+    spec = importlib.util.spec_from_file_location("sdlc_remote_installer", path)
+    if not spec or not spec.loader:
+        raise RuntimeError("无法加载下载的 SDLC Pipeline installer")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def install_from_repository(
+    target: Path, force: bool, repository: str, ref: str
+) -> dict[str, object]:
+    """Install from a raw-script invocation without requiring a local clone."""
+    with tempfile.TemporaryDirectory(prefix="sdlc-pipeline-") as temporary:
+        source_root = _clone_distribution(repository, ref, Path(temporary))
+        return _load_installer(source_root).install(target, force)
+
+
 def install(target: Path, force: bool = False) -> dict[str, object]:
     target = target.expanduser().resolve()
     if not target.is_dir():
@@ -108,8 +179,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="安装 OpenCode 项目级 SDLC Pipeline")
     parser.add_argument("--target", required=True)
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--repository", default=DEFAULT_REPOSITORY)
+    parser.add_argument("--ref", default=DEFAULT_REF)
     args = parser.parse_args()
-    print(json.dumps(install(Path(args.target), args.force), ensure_ascii=False))
+    if is_distribution(PLUGIN_ROOT):
+        result = install(Path(args.target), args.force)
+    else:
+        result = install_from_repository(
+            Path(args.target), args.force, args.repository, args.ref
+        )
+    print(json.dumps(result, ensure_ascii=False))
     return 0
 
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1 - 2026-07-25
+
+- 项目 adapter 安装改为可从 GitHub raw 地址下载单文件 installer 后直接执行。
+- 单文件 installer 自动拉取指定仓库/ref 的完整发行内容，避免要求用户预先设置
+  `SDLC_PIPELINE_ROOT` 或 clone 本插件仓库。
+
 ## 0.6.0 - 2026-07-25
 
 - `/sdlc-init` 改为始终在当前项目目录执行，移除 repo/ref/target 跨目录 bootstrap。

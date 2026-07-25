@@ -2,7 +2,7 @@
 
 > OpenCode-first、证据驱动的项目交付状态机。
 
-当前版本：`0.6.0`。
+当前版本：`0.6.1`。
 
 SDLC Pipeline 用项目脚手架契约、确定性 Python runner、真实编译/启动/测试和 Git
 版本证据，把一次需求从澄清推进到可追溯版本。
@@ -72,11 +72,13 @@ OpenCode 桌面版已经安装时，init 不会重复安装 OpenCode。
 ### 场景 A：从模板创建新项目
 
 1. 创建并进入一个空目录，例如 `D:\workspace\business-app`。
-2. 在该目录安装 SDLC Pipeline 项目插件。已通过 OpenCode 插件机制安装时，直接打开该目录；
-   本地开发/未自动注入项目文件时，在**当前目录**运行：
+2. 在该目录从仓库下载 installer 并执行。脚本会自动拉取完整发行内容到临时目录，再安装到
+   当前项目；无需预先 clone 本插件或设置本地环境变量：
 
    ```powershell
-   python <SDLC_PIPELINE_ROOT>\scripts\install_project.py --target .
+   $installer = Join-Path ([System.IO.Path]::GetTempPath()) 'sdlc-pipeline-install.py'
+   Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py' -OutFile $installer
+   try { python $installer --target . } finally { Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue }
    ```
 
 3. 用 OpenCode 桌面版打开同一目录，执行内置模板或 GitHub 模板 init。
@@ -177,13 +179,17 @@ docs/sdlc/
 在已有项目根目录安装 adapter：
 
 ```powershell
-python <SDLC_PIPELINE_ROOT>\scripts\install_project.py --target .
+$installer = Join-Path ([System.IO.Path]::GetTempPath()) 'sdlc-pipeline-install.py'
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py' -OutFile $installer
+try { python $installer --target . } finally { Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue }
 ```
 
 升级本插件受管文件：
 
 ```powershell
-python <SDLC_PIPELINE_ROOT>\scripts\install_project.py --target . --force
+$installer = Join-Path ([System.IO.Path]::GetTempPath()) 'sdlc-pipeline-install.py'
+Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py' -OutFile $installer
+try { python $installer --target . --force } finally { Remove-Item -LiteralPath $installer -ErrorAction SilentlyContinue }
 ```
 
 installer 只写入：
@@ -524,7 +530,7 @@ init 的目标是证明项目能启动并通过验证，而不是长期占用端
 ### 已安装 OpenCode 桌面版，还需要安装插件吗？
 
 不需要安装另一个 OpenCode 应用。但每个业务项目仍需要 SDLC Pipeline 的项目级 adapter；
-插件安装或在项目根执行 `install_project.py --target .` 会负责写入受管文件。
+在项目根执行上面的 GitHub installer 命令会负责拉取发行内容并写入受管文件。
 
 ### 为什么没有 `/sdlc-status`？
 
