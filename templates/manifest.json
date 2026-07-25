@@ -17,7 +17,9 @@
         "typed-ipc",
         "react-renderer",
         "forge-package",
-        "electron-smoke"
+        "electron-smoke",
+        "squirrel-installer",
+        "installer-smoke"
       ],
       "source": {
         "kind": "git",
