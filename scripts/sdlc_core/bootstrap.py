@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .common import SdlcError, git, run_command
+from .common import SdlcError, git, read_json, run_command
 
 
 # The adapter may run from the repository during development or from
@@ -16,7 +16,56 @@ def distribution_root() -> Path:
     root = Path(__file__).resolve().parents[2]
     if (root / "templates" / "manifest.json").exists():
         return root
-    raise SdlcError("当前安装不包含 templates，无法执行 init")
+    raise SdlcError("当前安装不包含模板数据源注册表，无法执行 init")
+
+
+def template_registry(root: Path | None = None) -> list[dict[str, Any]]:
+    registry_path = (root or distribution_root()) / "templates" / "manifest.json"
+    registry = read_json(registry_path)
+    if not isinstance(registry, dict) or registry.get("schema_version") != "1.0":
+        raise SdlcError("模板数据源注册表格式无效")
+    templates = registry.get("templates")
+    if not isinstance(templates, list):
+        raise SdlcError("模板数据源注册表缺少 templates 数组")
+    ids: set[str] = set()
+    for item in templates:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str):
+            raise SdlcError("模板数据源条目缺少 id")
+        required_text = ("name", "description")
+        if any(
+            not isinstance(item.get(field), str) or not item[field].strip()
+            for field in required_text
+        ):
+            raise SdlcError(f"模板 {item['id']} 缺少 name/description")
+        for field in ("stacks", "capabilities"):
+            values = item.get(field)
+            if (
+                not isinstance(values, list)
+                or not values
+                or any(not isinstance(value, str) or not value for value in values)
+            ):
+                raise SdlcError(f"模板 {item['id']} 的 {field} 必须是非空字符串数组")
+        if item["id"] in ids:
+            raise SdlcError(f"模板数据源 ID 重复: {item['id']}")
+        ids.add(item["id"])
+        source = item.get("source")
+        if not isinstance(source, dict) or source.get("kind") != "git":
+            raise SdlcError(f"模板 {item['id']} 的 source 必须是 git")
+        if not source.get("repository") or not source.get("ref"):
+            raise SdlcError(f"模板 {item['id']} 的 source 缺少 repository/ref")
+    return templates
+
+
+def resolve_template_source(template_id: str) -> dict[str, Any]:
+    templates = template_registry()
+    template = next(
+        (item for item in templates if item["id"] == template_id),
+        None,
+    )
+    if template is None:
+        available = ", ".join(item["id"] for item in templates) or "无"
+        raise SdlcError(f"未知模板数据源: {template_id}；可用: {available}")
+    return template
 
 
 def _copy_without_overwrite(
@@ -74,30 +123,7 @@ def _git_head(root: Path) -> str:
     return git(root, "rev-parse", "HEAD", check=False)
 
 
-def _create_builtin_git_baseline(root: Path, template: str) -> str:
-    if (root / ".git").exists():
-        return _git_head(root)
-    result = run_command(["git", "init"], cwd=root, timeout=60, check=False)
-    if result.returncode:
-        raise SdlcError(f"无法初始化 Git 仓库: {(result.stderr or result.stdout)[-4000:]}")
-    result = run_command(["git", "add", "-A"], cwd=root, timeout=60, check=False)
-    if result.returncode:
-        raise SdlcError(f"无法建立模板基线: {(result.stderr or result.stdout)[-4000:]}")
-    result = run_command(
-        ["git", "commit", "-m", f"chore: initialize {template} template"],
-        cwd=root,
-        timeout=60,
-        check=False,
-    )
-    if result.returncode:
-        raise SdlcError(
-            "无法建立 Git 基线；请先配置 user.name 和 user.email 后重新执行 init。\n"
-            f"{(result.stderr or result.stdout)[-4000:]}"
-        )
-    return _git_head(root)
-
-
-def _resume_builtin_template(
+def _resume_registered_template(
     destination: Path, template: str
 ) -> dict[str, Any] | None:
     contract_root = destination / ".sdlc-pipeline"
@@ -121,18 +147,24 @@ def _resume_builtin_template(
         )
     source_root = distribution_root()
     _install_adapter_if_needed(destination, source_root)
-    baseline = (
-        _git_head(destination)
-        if (destination / ".git").exists()
-        else _create_builtin_git_baseline(destination, template)
-    )
+    if not (destination / ".git").exists():
+        raise SdlcError("模板合约已存在但缺少远程模板 Git 历史，无法安全续跑")
+    baseline = _git_head(destination)
+    metadata = resolve_template_source(template)
+    remote = metadata["source"]
     from .lifecycle import init_project
 
     report = init_project(destination, auto_install_missing=True)
     return {
         "ok": report.get("status") == "pass",
         "project_root": str(destination),
-        "source": {"kind": "builtin", "template": template},
+        "source": {
+            "kind": "registry",
+            "template": template,
+            "repository": remote["repository"],
+            "ref": remote["ref"],
+            "commit": baseline,
+        },
         "git_baseline": baseline,
         "files_imported": [],
         "resumed": True,
@@ -195,35 +227,48 @@ def bootstrap(
     github: str | None = None,
     ref: str | None = None,
 ) -> dict[str, Any]:
-    """Fill the current empty project directory, then prove it can run.
+    """Import a registered or ad-hoc Git template, then prove it can run.
 
-    A built-in template is copied from the plugin distribution.  A GitHub
-    template is cloned to a temporary directory and imported into this same
-    project directory, including its Git metadata.  There is deliberately no
-    target argument: the OpenCode worktree is always the evidence root.
+    The plugin distribution contains metadata only.  Both a registered
+    template ID and an explicit Git URL resolve to the same remote import path.
+    There is deliberately no target argument: the OpenCode worktree is always
+    the evidence root.
     """
     destination = current_root.expanduser().resolve()
     if template and not github:
-        resumed = _resume_builtin_template(destination, template)
+        resumed = _resume_registered_template(destination, template)
         if resumed is not None:
             return resumed
     _ensure_bootstrap_workspace(destination)
     if bool(template) == bool(github):
-        raise SdlcError("init 必须二选一：提供内置 template，或提供 github 模板地址")
+        raise SdlcError("init 必须二选一：提供模板数据源 ID，或提供 github 模板地址")
     source_root = distribution_root()
     if github:
+        resolved_ref = ref or "HEAD"
         copied, baseline = _import_github_template(
-            destination, repo=github, ref=ref or "HEAD"
+            destination, repo=github, ref=resolved_ref
         )
-        source = {"kind": "github", "repo": github, "ref": ref or "HEAD"}
+        source = {
+            "kind": "github",
+            "repository": github,
+            "ref": resolved_ref,
+            "commit": baseline,
+        }
     else:
-        template_root = source_root / "templates" / str(template)
-        if not template_root.is_dir():
-            raise SdlcError(f"未知内置模板: {template}")
-        copied = _copy_without_overwrite(template_root, destination)
-        _install_adapter_if_needed(destination, source_root)
-        baseline = _create_builtin_git_baseline(destination, str(template))
-        source = {"kind": "builtin", "template": template}
+        metadata = resolve_template_source(str(template))
+        remote = metadata["source"]
+        copied, baseline = _import_github_template(
+            destination,
+            repo=str(remote["repository"]),
+            ref=str(remote["ref"]),
+        )
+        source = {
+            "kind": "registry",
+            "template": template,
+            "repository": remote["repository"],
+            "ref": remote["ref"],
+            "commit": baseline,
+        }
     _install_adapter_if_needed(destination, source_root)
     from .lifecycle import init_project
 

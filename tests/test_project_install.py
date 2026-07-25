@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import io
 import json
 import shutil
@@ -21,6 +22,56 @@ installer = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(installer)
 
 
+def create_remote_template(root: Path, template_id: str = "electron-scaffold") -> str:
+    root.mkdir()
+    (root / "app.txt").write_text("registered template\n", encoding="utf-8")
+    contracts = root / ".sdlc-pipeline"
+    contracts.mkdir()
+    lifecycle_text = "{}\n"
+    (contracts / "lifecycle.json").write_text(lifecycle_text, encoding="utf-8")
+    scaffold = {
+        "schema_version": "1.0",
+        "template_id": template_id,
+        "template_version": "1.0.0",
+        "key_files": [],
+        "protected_paths": [
+            ".sdlc-pipeline/lifecycle.json",
+            ".sdlc-pipeline/scaffold.json",
+        ],
+        "extension_points": [{"id": "app", "path": "app.txt"}],
+        "allowed_paths": ["app.txt"],
+        "lifecycle_hash": hashlib.sha256(lifecycle_text.encode("utf-8")).hexdigest(),
+        "capabilities": ["test"],
+    }
+    (contracts / "scaffold.json").write_text(
+        json.dumps(scaffold, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Tests",
+            "-c",
+            "user.email=tests@example.invalid",
+            "commit",
+            "-qm",
+            "template",
+        ],
+        cwd=root,
+        check=True,
+    )
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 class InstallerTests(unittest.TestCase):
     def test_installs_only_opencode_surface_and_two_subagents(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -39,6 +90,18 @@ class InstallerTests(unittest.TestCase):
             )
             self.assertFalse((target / ".claude").exists())
             self.assertFalse((target / ".codex").exists())
+            self.assertTrue(
+                (
+                    target
+                    / ".opencode/skills/extract-project-template/SKILL.md"
+                ).is_file()
+            )
+            installed_templates = sorted(
+                path.relative_to(target / ".sdlc-pipeline/templates").as_posix()
+                for path in (target / ".sdlc-pipeline/templates").rglob("*")
+                if path.is_file()
+            )
+            self.assertEqual(installed_templates, ["manifest.json"])
 
     def test_install_preserves_unmanaged_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -184,28 +247,46 @@ class InstallerTests(unittest.TestCase):
             prepare.assert_called_once_with(target.resolve())
             self.assertEqual(result["plugin_dependencies"], prepared)
 
-    def test_builtin_init_fills_the_current_plugin_project(self) -> None:
+    def test_registered_init_resolves_metadata_and_preserves_template_history(self) -> None:
         import sys
 
         sys.path.insert(0, str(REPO / "scripts"))
         from sdlc_core.bootstrap import bootstrap
 
         with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
+            base = Path(temporary)
+            remote = base / "remote-template"
+            source_sha = create_remote_template(remote)
+            project = base / "project"
+            project.mkdir()
             installer.install(project)
             expected_report = {"status": "pass", "tools": {"missing": []}}
             with patch(
-                "sdlc_core.bootstrap._create_builtin_git_baseline",
-                return_value="baseline-sha",
+                "sdlc_core.bootstrap.resolve_template_source",
+                return_value={
+                    "id": "electron-scaffold",
+                    "source": {
+                        "kind": "git",
+                        "repository": str(remote),
+                        "ref": "HEAD",
+                    },
+                },
             ), patch("sdlc_core.lifecycle.init_project", return_value=expected_report):
-                result = bootstrap(project, template="spring-boot-full")
+                result = bootstrap(project, template="electron-scaffold")
             self.assertTrue(result["ok"])
             self.assertEqual(result["project_root"], str(project.resolve()))
             self.assertEqual(result["source"], {
-                "kind": "builtin", "template": "spring-boot-full"
+                "kind": "registry",
+                "template": "electron-scaffold",
+                "repository": str(remote),
+                "ref": "HEAD",
+                "commit": source_sha,
             })
-            self.assertEqual(result["git_baseline"], "baseline-sha")
-            self.assertTrue((project / "pom.xml").exists())
+            self.assertEqual(result["git_baseline"], source_sha)
+            self.assertEqual(
+                (project / "app.txt").read_text(encoding="utf-8"),
+                "registered template\n",
+            )
             self.assertTrue((project / ".sdlc-pipeline/lifecycle.json").exists())
 
     def test_adapter_only_workspace_is_not_an_existing_project(self) -> None:
@@ -218,32 +299,43 @@ class InstallerTests(unittest.TestCase):
             installer.install(project)
             with self.assertRaisesRegex(
                 SdlcError,
-                "仅安装了 SDLC adapter.*template",
+                "仅安装了 SDLC adapter.*模板数据源 ID",
             ):
                 execute(project, "lifecycle", {"action": "init"})
 
-    def test_builtin_init_resumes_after_template_copy_gate_failure(self) -> None:
+    def test_registered_init_resumes_after_template_gate_failure(self) -> None:
         sys.path.insert(0, str(REPO / "scripts"))
         from sdlc_core.bootstrap import bootstrap
 
         with tempfile.TemporaryDirectory() as temporary:
-            project = Path(temporary)
+            base = Path(temporary)
+            remote = base / "remote-template"
+            source_sha = create_remote_template(remote)
+            project = base / "project"
+            project.mkdir()
             installer.install(project)
             reports = [
                 {"status": "failed", "tools": {"missing": []}},
                 {"status": "pass", "tools": {"missing": []}},
             ]
             with patch(
-                "sdlc_core.bootstrap._create_builtin_git_baseline",
-                return_value="baseline-sha",
+                "sdlc_core.bootstrap.resolve_template_source",
+                return_value={
+                    "id": "electron-scaffold",
+                    "source": {
+                        "kind": "git",
+                        "repository": str(remote),
+                        "ref": "HEAD",
+                    },
+                },
             ), patch("sdlc_core.lifecycle.init_project", side_effect=reports):
-                first = bootstrap(project, template="spring-boot-full")
-                second = bootstrap(project, template="spring-boot-full")
+                first = bootstrap(project, template="electron-scaffold")
+                second = bootstrap(project, template="electron-scaffold")
             self.assertFalse(first["ok"])
             self.assertTrue(second["ok"])
             self.assertTrue(second["resumed"])
             self.assertEqual(second["files_imported"], [])
-            self.assertEqual(second["git_baseline"], "baseline-sha")
+            self.assertEqual(second["git_baseline"], source_sha)
 
     def test_github_init_imports_into_current_project_and_preserves_history(self) -> None:
         import sys
@@ -285,21 +377,29 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual((project / "app.txt").read_text(encoding="utf-8"), "remote template\n")
             self.assertTrue((project / ".sdlc-pipeline/lifecycle.json").exists())
 
-    def test_templates_have_valid_hash_contracts(self) -> None:
-        import sys
-
-        sys.path.insert(0, str(REPO / "scripts"))
-        from sdlc_core.lifecycle import load_contract
-        from sdlc_core.trace import verify_scaffold
-
-        for name in ("spring-boot-full", "heli-terminal-client"):
-            root = REPO / "templates" / name
-            self.assertTrue(verify_scaffold(root)["ok"], name)
-            contract = load_contract(root)
-            self.assertEqual(
-                set(contract["tests"]),
-                {"unit", "integration", "e2e", "lint", "static_analysis"},
-            )
+    def test_templates_directory_contains_metadata_only(self) -> None:
+        registry = json.loads(
+            (REPO / "templates" / "manifest.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(registry["schema_version"], "1.0")
+        self.assertEqual(
+            [item["id"] for item in registry["templates"]],
+            ["electron-scaffold"],
+        )
+        self.assertEqual(
+            registry["templates"][0]["source"],
+            {
+                "kind": "git",
+                "repository": "https://github.com/Gandufu/electron-scaffold.git",
+                "ref": "main",
+            },
+        )
+        files = sorted(
+            path.relative_to(REPO / "templates").as_posix()
+            for path in (REPO / "templates").rglob("*")
+            if path.is_file()
+        )
+        self.assertEqual(files, ["manifest.json"])
 
     def test_remote_checkouts_disable_git_line_ending_conversion(self) -> None:
         installer_source = (REPO / "scripts/install_project.py").read_text(
@@ -361,6 +461,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("raw.githubusercontent.com/Gandufu/sdlc-pipeline", readme)
         self.assertNotIn("<SDLC_PIPELINE_ROOT>", readme)
         self.assertIn("当前 OpenCode 项目根目录", init_command)
+        self.assertIn("name/description/stacks/capabilities", init_command)
+        self.assertIn("只有唯一匹配", init_command)
         self.assertNotIn("<repo> <ref> <target>", init_command)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")

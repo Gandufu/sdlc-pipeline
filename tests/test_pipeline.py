@@ -31,6 +31,7 @@ from sdlc_core.common import (  # noqa: E402
 )
 from sdlc_core.common import sha256_json  # noqa: E402
 from sdlc_core.lifecycle import (  # noqa: E402
+    artifact_evidence,
     compile_restart_verify,
     execute_tests,
     init_project,
@@ -417,6 +418,20 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(report["health"]["ok"])
         self.assertTrue(report["artifacts"]["ok"])
         self.assertTrue(report["stop"]["stopped"])
+
+    def test_artifact_evidence_requires_every_declared_pattern(self) -> None:
+        lifecycle_path = self.fixture.root / ".sdlc-pipeline/lifecycle.json"
+        contract = json.loads(lifecycle_path.read_text(encoding="utf-8"))
+        contract["artifacts"].append("dist/missing-artifact.bin")
+        write_json(lifecycle_path, contract)
+        artifact = self.fixture.root / "dist/artifact.txt"
+        artifact.parent.mkdir(parents=True, exist_ok=True)
+        artifact.write_text("compiled\n", encoding="utf-8")
+
+        evidence = artifact_evidence(self.fixture.root)
+
+        self.assertFalse(evidence["ok"])
+        self.assertEqual(evidence["missing"], ["dist/missing-artifact.bin"])
 
     def test_init_command_auto_installs_template_declared_missing_tools(self) -> None:
         missing = {

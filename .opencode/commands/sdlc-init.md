@@ -8,8 +8,11 @@ subtask: false
 
 始终以当前 OpenCode 项目根目录作为目标目录和 evidence root。不得要求用户切换到插件仓库，
 不得接收 target 路径，也不得在其他目录 clone 后再要求打开新会话。
-先解析 `$ARGUMENTS`，然后只调用一次 init：参数非空时，第一次调用就必须把 template 或
-github/ref 放入 options；不得先执行无 options 的 init 来“探测模式”。`.sdlc-pipeline/`
+先解析 `$ARGUMENTS`。显式 `--github` 直接使用地址/ref；其他非空参数先读取
+`.sdlc-pipeline/templates/manifest.json`，优先按 ID 精确匹配，否则根据
+name/description/stacks/capabilities 与用户需求选择。只有唯一匹配时才能自动选择；零个或多个
+匹配必须先向用户展示候选并要求确认，不得猜测。选定后只调用一次 init：第一次调用就必须把
+template 或 github/ref 放入 options；不得先执行无 options 的 init 来“探测模式”。`.sdlc-pipeline/`
 目录本身只代表 adapter 已安装，不能据此判定为已有项目；已有项目必须同时存在项目根目录下的
 `.sdlc-pipeline/lifecycle.json` 和 `.sdlc-pipeline/scaffold.json`。
 必须由主会话直接调用 `sdlc_lifecycle(action=init)` 完成整个 init，不得改用 bash、Python
@@ -18,9 +21,10 @@ runner 或让用户复制任何手工命令。若 `sdlc_lifecycle` 不在当前�
 
 支持三种模式：
 
-1. 内置模板：`<template>`，例如 `/sdlc-init spring-boot-full`。调用
-   `sdlc_lifecycle(action=init, options={"template":"spring-boot-full"})`；仅当当前目录为空
-   或只含已安装插件文件时复制模板，并建立 Git 基线。
+1. 已登记模板：`<template>`，例如 `/sdlc-init electron-scaffold`。调用
+   `sdlc_lifecycle(action=init, options={"template":"electron-scaffold"})`；runner 从插件
+   `templates/manifest.json` 读取 repository/ref，clone 后导入当前空目录并保留模板 Git
+   历史。插件只携带数据源元数据，不携带模板源码或模板专属资产。
 2. GitHub 模板：`--github <repo> [ref]`，例如
    `/sdlc-init --github https://github.com/acme/service-template.git main`。调用
    `sdlc_lifecycle(action=init, options={"github":"...","ref":"main"})`；将该模板导入当前目录，

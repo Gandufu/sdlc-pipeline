@@ -18,7 +18,7 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.6.1"
+VERSION = "0.8.0"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.5"
@@ -38,6 +38,10 @@ MANAGED = (
     (".opencode/commands/sdlc-code.md", ".opencode/commands/sdlc-code.md"),
     (".opencode/commands/sdlc-test.md", ".opencode/commands/sdlc-test.md"),
     (".opencode/skills/sdlc-pipeline/SKILL.md", ".opencode/skills/sdlc-pipeline/SKILL.md"),
+    (
+        ".opencode/skills/extract-project-template",
+        ".opencode/skills/extract-project-template",
+    ),
 )
 
 

@@ -79,29 +79,32 @@ OpenCode 桌面版已经安装时，init 不会重复安装 OpenCode。
    curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target .
    ```
 
-3. 用 OpenCode 桌面版打开同一目录，执行内置模板或 GitHub 模板 init。
+3. 用 OpenCode 桌面版打开同一目录，执行已登记数据源或临时 GitHub 模板 init。
 
 ```text
 空项目目录（也是 OpenCode 会话）
   └─ 安装 SDLC 插件
-       └─ /sdlc-init <内置模板>
+       └─ /sdlc-init <模板数据源 ID>
           或 /sdlc-init --github <repo> [ref]
              └─ import → adapter/scaffold → install → compile → start → verify → stop
                   └─ /sdlc-spec → /sdlc-code → /sdlc-test → 用户确认 → version
 ```
 
-内置模板：
+已登记模板数据源：
 
-| Template | 技术栈 | 主要产物 |
+| Template | 技术栈 | 数据源 |
 |---|---|---|
-| `spring-boot-full` | Spring Boot 3、Java、Maven | 可执行 JAR、Actuator health |
-| `heli-terminal-client` | Electron、React、TypeScript、pnpm | main/renderer/shared build |
+| `electron-scaffold` | Electron Forge、React、Vite、TypeScript | `https://github.com/Gandufu/electron-scaffold.git` |
 
-内置模板示例：
+已登记数据源示例：
 
 ```text
-/sdlc-init spring-boot-full
+/sdlc-init electron-scaffold
 ```
+
+也可以描述技术需求；主 agent 会读取已安装的 registry，按
+`name/description/stacks/capabilities` 选择唯一候选。没有唯一匹配时必须让用户确认，不能
+静默猜测模板。
 
 GitHub 模板示例：
 
@@ -109,7 +112,8 @@ GitHub 模板示例：
 /sdlc-init --github https://github.com/acme/service-template.git main
 ```
 
-GitHub 模板会在临时目录完成 clone/checkout 后导入**当前项目目录**，并保留原仓库的
+已登记模板和显式 GitHub 模板都会在临时目录完成 clone/checkout 后导入**当前项目目录**，
+并保留原仓库的
 `.git` 历史。它必须提供 `.sdlc-pipeline/lifecycle.json` 和
 `.sdlc-pipeline/scaffold.json`；`.opencode`、`opencode.json`、runner 与运行现场由插件管理，
 不得随 GitHub 模板携带。
@@ -118,7 +122,8 @@ init 严格执行：
 
 ```text
 检查当前目录为空或只含已安装插件文件
-  → 导入内置模板，或 clone GitHub 模板到临时目录再导入当前目录
+  → 根据数据源元数据解析 repository/ref，或使用显式 GitHub 地址
+  → clone 到临时目录再导入当前目录
   → 安装/复用项目级 adapter
   → 校验 lifecycle/scaffold hash
   → 探测工具链和版本
@@ -131,7 +136,8 @@ init 严格执行：
   → init-report
 ```
 
-内置模板还会在当前目录建立一条 Git 基线提交；GitHub 模板则复用导入仓库的 HEAD。任何
+模板统一复用导入仓库的 HEAD 作为 Git 基线，并在 init-report 中记录数据源 ID、
+repository、请求 ref 与解析后的 commit SHA。任何
 mandatory 步骤失败，init 都返回 blocked/fail，不会生成伪成功报告。
 
 init 成功后，**就在同一 OpenCode 会话**继续执行 `/sdlc-spec`、`/sdlc-code`、`/sdlc-test`。
@@ -166,12 +172,8 @@ docs/sdlc/
 .sdlc-pipeline/scaffold.json
 ```
 
-可以参考：
-
-- `templates/spring-boot-full/.sdlc-pipeline/`
-- `templates/heli-terminal-client/.sdlc-pipeline/`
-- `schemas/lifecycle.schema.json`
-- `schemas/scaffold.schema.json`
+可以参考 `electron-scaffold` 独立模板仓库，以及
+`schemas/lifecycle.schema.json`、`schemas/scaffold.schema.json`。
 
 ### 2. 安装 adapter
 
@@ -212,7 +214,7 @@ probe → install → compile → start → verify → stop，并生成 init-rep
 
 | 命令 | 运行位置 | 用户输入 | 成功门禁 |
 |---|---|---|---|
-| `/sdlc-init <template>` | 当前空项目目录 | 内置模板 ID | import/install/compile/start/verify/stop |
+| `/sdlc-init <template>` | 当前空项目目录 | 已登记模板数据源 ID | resolve/import/install/compile/start/verify/stop |
 | `/sdlc-init --github <repo> [ref]` | 当前空项目目录 | GitHub 模板与 ref | import/install/compile/start/verify/stop |
 | `/sdlc-init` | 当前已有项目 | 当前 lifecycle/scaffold | install/compile/start/verify/stop |
 | `/sdlc-spec` | 当前项目 | 需求、范围、约束、验收标准 | 用户确认且 R→D→T 完整后原子发布 |
@@ -463,6 +465,7 @@ incremental 需要同时满足机器条件和用户确认：
     sdlc-pipeline.js
   skills/
     sdlc-pipeline/SKILL.md
+    extract-project-template/
 schemas/
 scripts/
   install_project.py
@@ -470,9 +473,6 @@ scripts/
   sdlc_core/
 templates/
   manifest.json
-  conventions/
-  spring-boot-full/
-  heli-terminal-client/
 tests/
 ```
 
@@ -483,17 +483,18 @@ tests/
 
 旧 Claude/Codex manifests、hooks 和 adapter 不再维护；历史实现仍可通过 Git 历史追溯。
 
-## 新增或修改模板
+## 新增或修改模板数据源
 
-1. 在 `templates/<id>` 放入可独立编译和启动的项目。
-2. 添加 `.sdlc-pipeline/lifecycle.json`。
-3. 添加 `.sdlc-pipeline/scaffold.json`。
-4. 在 `templates/manifest.json` 注册 ID、stacks 和 conventions。
-5. 计算 lifecycle 与 key-file SHA-256。
-6. 增加真实 install/compile/start/health/artifact/stop 测试。
-7. 运行完整回归。
+1. 在独立 Git 仓库维护可 clone、编译、启动和测试的模板项目。
+2. 模板仓库添加 `.sdlc-pipeline/lifecycle.json` 与 `scaffold.json`，并计算
+   lifecycle 与 key-file SHA-256。
+3. 模板仓库增加真实 install/compile/start/readiness/smoke/stop 测试。
+4. 在插件 `templates/manifest.json` 只登记
+   `id/name/description/stacks/capabilities/source(repository/ref)`。
+5. 用 `$extract-project-template` 生成 inventory，运行模板门禁和插件完整回归。
 
-模板不能只提供几段示例代码；init 的验收标准是项目真实可运行。
+插件发布包不包含模板源码或模板专属 assets。模板不能只提供几段示例代码；init 的验收标准
+是从数据源导入后项目真实可运行。
 
 ## 开发验证
 

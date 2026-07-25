@@ -55,7 +55,7 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         if action == "init":
             if payload.get("target") or payload.get("target_root") or payload.get("repo"):
                 raise SdlcError(
-                    "sdlc-init 只在当前项目目录执行；请使用 template 或 github，不要传 target/repo"
+                    "sdlc-init 只在当前项目目录执行；请使用模板数据源 ID 或 github，不要传 target/repo"
                 )
             if payload.get("template") or payload.get("github"):
                 return bootstrap(
@@ -73,7 +73,7 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             if missing_contracts:
                 raise SdlcError(
                     "当前目录仅安装了 SDLC adapter，不是已初始化项目；"
-                    "请在首次 init 调用中传入 template 或 github。"
+                    "请在首次 init 调用中传入模板数据源 ID 或 github。"
                     f"缺少项目合约: {', '.join(missing_contracts)}"
                 )
             return init_project(lifecycle_root, auto_install_missing=True)

@@ -1,18 +1,29 @@
-[
-  {
-    "id": "spring-boot-full",
-    "name": "Spring Boot 全栈脚手架",
-    "description": "可编译运行的 Spring Boot 3 分层骨架，内置 Actuator 健康检查、鉴权样例和 Maven wrapper 入口。",
-    "stacks": ["java", "spring"],
-    "path": "templates/spring-boot-full",
-    "conventions": "templates/conventions/spring-boot-full.md"
-  },
-  {
-    "id": "heli-terminal-client",
-    "name": "直升机会议终端桌面客户端",
-    "description": "Electron 30 + React 18 + TypeScript 5 + pnpm workspace 的 Windows 桌面客户端骨架，内置设备适配器、IPC 边界、鉴权、能力探测、网络诊断和单元测试样例。",
-    "stacks": ["typescript", "electron", "react"],
-    "path": "templates/heli-terminal-client",
-    "conventions": "templates/conventions/heli-terminal-client.md"
-  }
-]
+{
+  "schema_version": "1.0",
+  "templates": [
+    {
+      "id": "electron-scaffold",
+      "name": "Electron 脚手架",
+      "description": "Electron Forge + React + Vite + TypeScript 通用桌面应用模板，内置安全 IPC、sandbox preload、单元测试和真实 Electron 冒烟。",
+      "stacks": [
+        "typescript",
+        "electron",
+        "react"
+      ],
+      "capabilities": [
+        "desktop",
+        "electron-main",
+        "sandboxed-preload",
+        "typed-ipc",
+        "react-renderer",
+        "forge-package",
+        "electron-smoke"
+      ],
+      "source": {
+        "kind": "git",
+        "repository": "https://github.com/Gandufu/electron-scaffold.git",
+        "ref": "main"
+      }
+    }
+  ]
+}

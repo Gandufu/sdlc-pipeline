@@ -1,6 +1,0 @@
-target/
-.mvn/
-*.log
-.env
-.env.*
-!.env.example

@@ -61,17 +61,19 @@ def _context_files(root: Path) -> list[str]:
     manifest_path = root / ".sdlc-pipeline" / "templates" / "manifest.json"
     if manifest_path.exists():
         manifest = read_json(manifest_path)
+        templates = (
+            manifest.get("templates", [])
+            if isinstance(manifest, dict)
+            else []
+        )
         template = next(
-            (item for item in manifest if item["id"] == template_id), None
+            (item for item in templates if item["id"] == template_id), None
         )
         if template:
             for stack in template.get("stacks", []):
                 path = f".sdlc-pipeline/rules/{stack}.md"
                 if (root / path).exists():
                     paths.add(path)
-    convention = f".sdlc-pipeline/templates/conventions/{template_id}.md"
-    if (root / convention).exists():
-        paths.add(convention)
     if (root / "docs" / "existing-framework.md").exists():
         paths.add("docs/existing-framework.md")
     for item in spec["design"]["items"]:

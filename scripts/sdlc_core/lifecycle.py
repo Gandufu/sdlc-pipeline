@@ -300,16 +300,29 @@ def verify_health(root: Path) -> dict[str, Any]:
 def artifact_evidence(root: Path) -> dict[str, Any]:
     contract = load_contract(root)
     items = []
+    patterns = []
+    missing = []
     for pattern in contract["artifacts"]:
         matches = sorted(root.glob(pattern))
-        for path in matches:
-            if path.is_file():
-                items.append({
-                    "path": path.relative_to(root).as_posix(),
-                    "size": path.stat().st_size,
-                    "sha256": sha256_file(path),
-                })
-    return {"ok": bool(items), "artifacts": items}
+        files = [path for path in matches if path.is_file()]
+        patterns.append({
+            "pattern": pattern,
+            "matches": [path.relative_to(root).as_posix() for path in files],
+        })
+        if not files:
+            missing.append(pattern)
+        for path in files:
+            items.append({
+                "path": path.relative_to(root).as_posix(),
+                "size": path.stat().st_size,
+                "sha256": sha256_file(path),
+            })
+    return {
+        "ok": bool(items) and not missing,
+        "patterns": patterns,
+        "missing": missing,
+        "artifacts": items,
+    }
 
 
 def compile_restart_verify(root: Path) -> dict[str, Any]:
