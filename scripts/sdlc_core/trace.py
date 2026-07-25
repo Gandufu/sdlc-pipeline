@@ -5,7 +5,14 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import load_current_spec
-from .common import SdlcError, git, read_json, sha256_file, sha256_json
+from .common import (
+    SdlcError,
+    git,
+    read_json,
+    sha256_contract_file,
+    sha256_file,
+    sha256_json,
+)
 
 
 def scaffold(root: Path) -> dict[str, Any]:
@@ -21,17 +28,45 @@ def scaffold(root: Path) -> dict[str, Any]:
     return data
 
 
+def _hash_matches(path: Path, expected: str) -> tuple[bool, str | None]:
+    if not path.exists():
+        return False, None
+    actual = sha256_file(path)
+    canonical = sha256_contract_file(path)
+    return expected in {actual, canonical}, actual
+
+
 def verify_scaffold(root: Path) -> dict[str, Any]:
     contract = scaffold(root)
     lifecycle = root / ".sdlc-pipeline" / "lifecycle.json"
     drift: list[str] = []
-    if not lifecycle.exists() or sha256_file(lifecycle) != contract["lifecycle_hash"]:
+    issues: list[dict[str, Any]] = []
+    matches, actual = _hash_matches(lifecycle, contract["lifecycle_hash"])
+    if not matches:
         drift.append(".sdlc-pipeline/lifecycle.json")
+        issues.append({
+            "path": ".sdlc-pipeline/lifecycle.json",
+            "reason": "missing" if actual is None else "hash_mismatch",
+            "expected_sha256": contract["lifecycle_hash"],
+            "actual_sha256": actual,
+        })
     for item in contract["key_files"]:
         path = root / item["path"]
-        if not path.exists() or sha256_file(path) != item["sha256"]:
+        matches, actual = _hash_matches(path, item["sha256"])
+        if not matches:
             drift.append(item["path"])
-    return {"ok": not drift, "drift": sorted(set(drift)), "contract": contract}
+            issues.append({
+                "path": item["path"],
+                "reason": "missing" if actual is None else "hash_mismatch",
+                "expected_sha256": item["sha256"],
+                "actual_sha256": actual,
+            })
+    return {
+        "ok": not drift,
+        "drift": sorted(set(drift)),
+        "issues": issues,
+        "contract": contract,
+    }
 
 
 def changed_paths(root: Path, base: str | None = None) -> list[str]:

@@ -97,6 +97,49 @@ def _create_builtin_git_baseline(root: Path, template: str) -> str:
     return _git_head(root)
 
 
+def _resume_builtin_template(
+    destination: Path, template: str
+) -> dict[str, Any] | None:
+    contract_root = destination / ".sdlc-pipeline"
+    if not all(
+        (contract_root / name).is_file()
+        for name in ("lifecycle.json", "scaffold.json")
+    ):
+        return None
+    from .trace import verify_scaffold
+
+    verification = verify_scaffold(destination)
+    installed_template = verification["contract"]["template_id"]
+    if installed_template != template:
+        raise SdlcError(
+            f"当前目录已初始化为模板 {installed_template}，不能改用 {template}"
+        )
+    if not verification["ok"]:
+        raise SdlcError(
+            "模板已复制但 scaffold 存在真实漂移，拒绝覆盖；"
+            f"详情: {verification['issues']}"
+        )
+    source_root = distribution_root()
+    _install_adapter_if_needed(destination, source_root)
+    baseline = (
+        _git_head(destination)
+        if (destination / ".git").exists()
+        else _create_builtin_git_baseline(destination, template)
+    )
+    from .lifecycle import init_project
+
+    report = init_project(destination, auto_install_missing=True)
+    return {
+        "ok": report.get("status") == "pass",
+        "project_root": str(destination),
+        "source": {"kind": "builtin", "template": template},
+        "git_baseline": baseline,
+        "files_imported": [],
+        "resumed": True,
+        "report": report,
+    }
+
+
 def _validate_github_template(source: Path) -> None:
     if (source / ".opencode").exists() or (source / "opencode.json").exists():
         raise SdlcError(
@@ -118,7 +161,10 @@ def _import_github_template(
     with tempfile.TemporaryDirectory(prefix="sdlc-template-") as temporary:
         checkout = Path(temporary) / "template"
         result = run_command(
-            ["git", "clone", "--no-checkout", repo, str(checkout)],
+            [
+                "git", "-c", "core.autocrlf=false",
+                "clone", "--no-checkout", repo, str(checkout),
+            ],
             cwd=Path(temporary),
             timeout=600,
             check=False,
@@ -157,6 +203,10 @@ def bootstrap(
     target argument: the OpenCode worktree is always the evidence root.
     """
     destination = current_root.expanduser().resolve()
+    if template and not github:
+        resumed = _resume_builtin_template(destination, template)
+        if resumed is not None:
+            return resumed
     _ensure_bootstrap_workspace(destination)
     if bool(template) == bool(github):
         raise SdlcError("init 必须二选一：提供内置 template，或提供 github 模板地址")

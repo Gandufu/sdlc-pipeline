@@ -71,6 +71,19 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def sha256_contract_file(path: Path) -> str:
+    """Hash UTF-8 contract text with platform-independent line endings."""
+    content = path.read_bytes()
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return hashlib.sha256(content).hexdigest()
+    if "\0" in text:
+        return hashlib.sha256(content).hexdigest()
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+    return hashlib.sha256(normalized).hexdigest()
+
+
 def sha256_json(value: Any) -> str:
     encoded = json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")

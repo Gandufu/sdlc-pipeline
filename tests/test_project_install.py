@@ -208,6 +208,43 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue((project / "pom.xml").exists())
             self.assertTrue((project / ".sdlc-pipeline/lifecycle.json").exists())
 
+    def test_adapter_only_workspace_is_not_an_existing_project(self) -> None:
+        sys.path.insert(0, str(REPO / "scripts"))
+        from sdlc_core.cli import execute
+        from sdlc_core.common import SdlcError
+
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            installer.install(project)
+            with self.assertRaisesRegex(
+                SdlcError,
+                "仅安装了 SDLC adapter.*template",
+            ):
+                execute(project, "lifecycle", {"action": "init"})
+
+    def test_builtin_init_resumes_after_template_copy_gate_failure(self) -> None:
+        sys.path.insert(0, str(REPO / "scripts"))
+        from sdlc_core.bootstrap import bootstrap
+
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            installer.install(project)
+            reports = [
+                {"status": "failed", "tools": {"missing": []}},
+                {"status": "pass", "tools": {"missing": []}},
+            ]
+            with patch(
+                "sdlc_core.bootstrap._create_builtin_git_baseline",
+                return_value="baseline-sha",
+            ), patch("sdlc_core.lifecycle.init_project", side_effect=reports):
+                first = bootstrap(project, template="spring-boot-full")
+                second = bootstrap(project, template="spring-boot-full")
+            self.assertFalse(first["ok"])
+            self.assertTrue(second["ok"])
+            self.assertTrue(second["resumed"])
+            self.assertEqual(second["files_imported"], [])
+            self.assertEqual(second["git_baseline"], "baseline-sha")
+
     def test_github_init_imports_into_current_project_and_preserves_history(self) -> None:
         import sys
 
@@ -263,6 +300,17 @@ class InstallerTests(unittest.TestCase):
                 set(contract["tests"]),
                 {"unit", "integration", "e2e", "lint", "static_analysis"},
             )
+
+    def test_remote_checkouts_disable_git_line_ending_conversion(self) -> None:
+        installer_source = (REPO / "scripts/install_project.py").read_text(
+            encoding="utf-8"
+        )
+        bootstrap_source = (REPO / "scripts/sdlc_core/bootstrap.py").read_text(
+            encoding="utf-8"
+        )
+        expected = '"git", "-c", "core.autocrlf=false"'
+        self.assertIn(expected, installer_source)
+        self.assertIn(expected, bootstrap_source)
 
     def test_all_json_schemas_are_valid_json(self) -> None:
         schemas = list((REPO / "schemas").glob("*.schema.json"))

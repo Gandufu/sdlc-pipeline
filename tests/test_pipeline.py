@@ -23,7 +23,12 @@ from sdlc_core.adapter import (  # noqa: E402
     validate_write_path,
 )
 from sdlc_core.artifacts import load_current_spec, publish_spec, validate_spec  # noqa: E402
-from sdlc_core.common import SdlcError, sha256_file, write_json  # noqa: E402
+from sdlc_core.common import (  # noqa: E402
+    SdlcError,
+    sha256_contract_file,
+    sha256_file,
+    write_json,
+)
 from sdlc_core.common import sha256_json  # noqa: E402
 from sdlc_core.lifecycle import (  # noqa: E402
     compile_restart_verify,
@@ -200,7 +205,7 @@ class ProjectFixture:
             "template_version": "1.0.0",
             "key_files": [{
                 "path": "app.py",
-                "sha256": sha256_file(self.root / "app.py"),
+                "sha256": sha256_contract_file(self.root / "app.py"),
             }],
             "protected_paths": [
                 ".sdlc-pipeline/lifecycle.json",
@@ -209,7 +214,7 @@ class ProjectFixture:
             ],
             "extension_points": [{"id": "feature", "path": "src"}],
             "allowed_paths": ["src", "tests"],
-            "lifecycle_hash": sha256_file(
+            "lifecycle_hash": sha256_contract_file(
                 self.root / ".sdlc-pipeline" / "lifecycle.json"
             ),
             "capabilities": ["fixture"],
@@ -359,6 +364,19 @@ class SchemaAndTraceTests(unittest.TestCase):
             self.assertTrue(verify_scaffold(fixture.root)["ok"])
             (fixture.root / "app.py").write_text("drift", encoding="utf-8")
             self.assertFalse(verify_scaffold(fixture.root)["ok"])
+        finally:
+            fixture.close()
+
+    def test_scaffold_treats_lf_and_crlf_as_the_same_text(self) -> None:
+        fixture = ProjectFixture()
+        try:
+            app = fixture.root / "app.py"
+            app_lf = app.read_bytes().replace(b"\r\n", b"\n")
+            app.write_bytes(app_lf.replace(b"\n", b"\r\n"))
+            lifecycle = fixture.root / ".sdlc-pipeline" / "lifecycle.json"
+            lifecycle_lf = lifecycle.read_bytes().replace(b"\r\n", b"\n")
+            lifecycle.write_bytes(lifecycle_lf.replace(b"\n", b"\r\n"))
+            self.assertTrue(verify_scaffold(fixture.root)["ok"])
         finally:
             fixture.close()
 

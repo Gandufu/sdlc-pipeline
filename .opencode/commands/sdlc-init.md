@@ -8,6 +8,10 @@ subtask: false
 
 始终以当前 OpenCode 项目根目录作为目标目录和 evidence root。不得要求用户切换到插件仓库，
 不得接收 target 路径，也不得在其他目录 clone 后再要求打开新会话。
+先解析 `$ARGUMENTS`，然后只调用一次 init：参数非空时，第一次调用就必须把 template 或
+github/ref 放入 options；不得先执行无 options 的 init 来“探测模式”。`.sdlc-pipeline/`
+目录本身只代表 adapter 已安装，不能据此判定为已有项目；已有项目必须同时存在项目根目录下的
+`.sdlc-pipeline/lifecycle.json` 和 `.sdlc-pipeline/scaffold.json`。
 必须由主会话直接调用 `sdlc_lifecycle(action=init)` 完成整个 init，不得改用 bash、Python
 runner 或让用户复制任何手工命令。若 `sdlc_lifecycle` 不在当前会话工具表中，应明确报告
 插件启动失败并停止；不得伪造门禁证据或提供 runner 降级路径。

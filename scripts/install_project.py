@@ -119,7 +119,10 @@ def _clone_distribution(repository: str, ref: str, parent: Path) -> Path:
     destination = parent / "sdlc-pipeline"
     try:
         clone = subprocess.run(
-            ["git", "clone", "--no-checkout", repository, str(destination)],
+            [
+                "git", "-c", "core.autocrlf=false",
+                "clone", "--no-checkout", repository, str(destination),
+            ],
             cwd=parent,
             capture_output=True,
             text=True,

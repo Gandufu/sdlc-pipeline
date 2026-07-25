@@ -64,6 +64,18 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
                     github=payload.get("github"),
                     ref=payload.get("ref"),
                 )
+            contract_root = lifecycle_root / ".sdlc-pipeline"
+            missing_contracts = [
+                name
+                for name in ("lifecycle.json", "scaffold.json")
+                if not (contract_root / name).is_file()
+            ]
+            if missing_contracts:
+                raise SdlcError(
+                    "当前目录仅安装了 SDLC adapter，不是已初始化项目；"
+                    "请在首次 init 调用中传入 template 或 github。"
+                    f"缺少项目合约: {', '.join(missing_contracts)}"
+                )
             return init_project(lifecycle_root, auto_install_missing=True)
         if action == "compile_restart_verify":
             return compile_restart_verify(lifecycle_root)
