@@ -83,6 +83,8 @@ def changed_paths(root: Path, base: str | None = None) -> list[str]:
 def worktree_fingerprint(root: Path) -> dict[str, Any]:
     entries = []
     for name in changed_paths(root):
+        if name.startswith("docs/sdlc/test-results/"):
+            continue
         path = root / name
         entries.append({
             "path": name,

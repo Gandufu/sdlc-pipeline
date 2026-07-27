@@ -2,7 +2,7 @@
 
 > OpenCode-first、证据驱动的项目交付状态机。
 
-当前版本：`0.7.0`。
+当前版本：`0.8.1`。
 
 SDLC Pipeline 用项目脚手架契约、确定性 Python runner、真实编译/启动/测试和 Git
 版本证据，把一次需求从澄清推进到可追溯版本。
@@ -189,6 +189,10 @@ curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scri
 curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target . --force
 ```
 
+升级后重启 OpenCode，使项目级 plugin/agent 定义重新加载。`0.8.1` 将 executor 动作改为
+`execute_test_plan`，主会话结果记录动作改为 `record_test_results`；Python core 暂时兼容旧动作名，
+但新 plugin 不再向 agent 暴露旧名称。
+
 installer 只写入：
 
 - `.opencode/agents`、`.opencode/commands`、`.opencode/plugins`、`.opencode/skills`；
@@ -239,7 +243,8 @@ requirement 与 design 合并为一次主会话交互，但产物仍然独立：
 - 每个 R-id 至少映射一个 D-id 和一个 T-id；
 - 每个 D-id 至少被一个 T-id 覆盖；
 - design 引用 scaffold 中真实 extension point；
-- test 引用 lifecycle 中真实测试命令；
+- `test_plan.items[].command` 引用 lifecycle tests 逻辑键，例如 `unit`；
+  不得填写 `pnpm test`、`npm test` 等 shell 命令；
 - 修改后的需求创建新 R-id，并通过 `supersedes` 指向旧 ID。
 
 ### `/sdlc-code`
@@ -265,9 +270,9 @@ coder 返回的 `compiled: pass` 不参与门禁。
 ```text
 检查 code evidence 与当前工作树 fingerprint
   → 派发唯一 sdlc-executor
-  → runner 执行 test-plan 中的 T-id
+  → executor 调用 execute_test_plan，runner 执行 test-plan 中的 T-id
   → 校验 executor handoff 与 runner 结果一致
-  → 生成 test-results
+  → 主会话调用 record_test_results，生成 test-results
   → 合并 R→D→C→T
   → 生成 Vxxxx candidate
   → 询问用户是否固化
@@ -297,7 +302,7 @@ coder 返回的 `compiled: pass` 不参与门禁。
 |---|---|---|---|
 | `sdlc-main` | primary | 澄清、发布 spec、调用 lifecycle、派发两个 subagent | 直接 edit、任意 bash、其他 subagent |
 | `sdlc-coder` | subagent | 修改设计允许的生产/测试路径、局部 compile | SDLC 文档、protected path、系统安装、Git 发布 |
-| `sdlc-executor` | subagent | 只读检查、调用 `run_tests`、返回逐 T-id 结果 | 修改代码、task、finalize |
+| `sdlc-executor` | subagent | 只读检查、调用 `execute_test_plan`、返回逐 T-id 结果 | 修改代码、`record_test_results`、task、finalize |
 
 没有固定 reviewer：
 
@@ -335,6 +340,15 @@ Python core 会再次检查 `approved/confirmed`，不能只依赖模型文字�
 - process/HTTP/TCP/command/file/browser health；
 - artifact 路径；
 - unit/integration/e2e/lint/static-analysis。
+
+`tests` 的属性名是测试逻辑键，值才是受控 argv。例如：
+
+```text
+unit -> ["pnpm", "test"]
+```
+
+spec 中 `test_plan.items[].command` 必须填写 `unit`，不能填写 `pnpm test`。发布 spec 时
+Python core 会与当前项目 lifecycle 交叉校验，并在错误中列出允许的逻辑键。
 
 命令使用 argv 数组，不保存任意 shell 字符串。可使用的受控变量只有：
 

@@ -11,7 +11,12 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .artifacts import load_current_spec, render_test_results, require_code_ready
+from .artifacts import (
+    current_spec_hashes,
+    load_current_spec,
+    render_test_results,
+    require_code_ready,
+)
 from .common import (
     SdlcError,
     atomic_write,
@@ -68,6 +73,9 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
         "## 测试命令",
         "",
         *(test_lines or ["- 当前 lifecycle 合约未声明测试命令。"]),
+        "",
+        "- `test_plan.items[].command` 填写冒号左侧逻辑键（如 `unit`），"
+        "不能填写 `pnpm test` 等右侧 shell 命令。",
         "",
         "## SDLC 规则",
         "",
@@ -394,6 +402,7 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
         "health": health,
         "artifact_evidence": artifacts,
         "source_fingerprint": worktree_fingerprint(root),
+        "spec_hashes": current_spec_hashes(root),
     }
     write_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json", evidence)
     return evidence
@@ -478,6 +487,9 @@ def run_test_plan(root: Path) -> dict[str, Any]:
     code_evidence = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json")
     if not code_evidence.get("ok"):
         raise SdlcError("code 阶段没有真实 compile/restart/verify 证据")
+    spec_hashes = current_spec_hashes(root)
+    if code_evidence.get("spec_hashes") != spec_hashes:
+        raise SdlcError("code 证据与当前 spec 不匹配，必须重新 compile/restart/verify")
     if code_evidence.get("source_fingerprint") != worktree_fingerprint(root):
         raise SdlcError("code 证据生成后工作树发生变化，必须重新 compile/restart/verify")
     spec = load_current_spec(root)
@@ -503,6 +515,11 @@ def run_test_plan(root: Path) -> dict[str, Any]:
         "started_at": started_at,
         "finished_at": utc_now(),
         "results": results,
+        "binding": {
+            "spec_hashes": spec_hashes,
+            "lifecycle_sha256": sha256_file(contract_path(root)),
+            "source_fingerprint": code_evidence["source_fingerprint"],
+        },
     }
     write_json(root / ".sdlc-pipeline" / "runs" / "test-execution.json", execution)
     return {"ok": all(item["status"] == "pass" for item in results), **execution}
@@ -515,6 +532,17 @@ def execute_tests(root: Path, executor_result: dict[str, Any] | None = None) -> 
     )
     if not execution:
         execution = run_test_plan(root)
+    code_evidence = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json")
+    expected_binding = {
+        "spec_hashes": current_spec_hashes(root),
+        "lifecycle_sha256": sha256_file(contract_path(root)),
+        "source_fingerprint": code_evidence.get("source_fingerprint"),
+    }
+    if execution.get("binding") != expected_binding:
+        raise SdlcError(
+            "测试执行证据与当前 test-plan、lifecycle 或源码不匹配，"
+            "必须重新派发 executor"
+        )
     spec = load_current_spec(root)
     expected = {item["id"] for item in spec["test_plan"]["items"]}
     actual = {item["id"] for item in execution["results"]}
@@ -551,6 +579,7 @@ def execute_tests(root: Path, executor_result: dict[str, Any] | None = None) -> 
         "status": "ready" if output["status"] == "pass" else "failed",
         "test_results": f"docs/sdlc/test-results/{version}.json",
         "created_at": utc_now(),
+        "binding": expected_binding,
     }
     write_json(root / ".sdlc-pipeline" / "runs" / "version-candidate.json", candidate)
     return output

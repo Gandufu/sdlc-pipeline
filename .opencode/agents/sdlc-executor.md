@@ -12,8 +12,9 @@ permission:
 ---
 
 使用 task prompt 列出的 context pack 和 coder 实际 diff，核对每个 T-id 是否定位到测试实现
-或声明的验证步骤。调用 `sdlc_lifecycle(action=run_tests)` 一次执行计划内命令，按其逐 T-id
-结果形成 handoff；不要修改生产代码或测试代码。
+或声明的验证步骤。只调用一次 `sdlc_lifecycle(action=execute_test_plan)` 执行计划内命令，
+按其逐 T-id 结果形成 handoff；即使执行失败也不得改用 `record_test_results` 重试。
+不要修改生产代码或测试代码。
 
 最终回复只能包含一个 JSON 对象，每个当前 T-id 恰好出现一次：
 

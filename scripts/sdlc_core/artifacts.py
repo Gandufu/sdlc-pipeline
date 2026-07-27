@@ -24,6 +24,49 @@ CURRENT_FILES = {
 }
 
 
+def lifecycle_test_commands(root: Path) -> dict[str, dict[str, Any]]:
+    contract = read_json(root / ".sdlc-pipeline" / "lifecycle.json")
+    tests = contract.get("tests")
+    if not isinstance(tests, dict):
+        raise SdlcError("lifecycle.json tests 必须是对象")
+    return {
+        name: command
+        for name, command in tests.items()
+        if isinstance(name, str) and isinstance(command, dict)
+    }
+
+
+def current_spec_hashes(root: Path) -> dict[str, str]:
+    current = root / "docs" / "sdlc" / "current"
+    return {
+        kind: sha256_file(current / f"{base}.json")
+        for kind, base in CURRENT_FILES.items()
+    }
+
+
+def validate_lifecycle_test_references(
+    root: Path,
+    payload: dict[str, Any],
+) -> None:
+    commands = lifecycle_test_commands(root)
+    available = sorted(commands)
+    unknown = [
+        (item["id"], item["command"])
+        for item in payload["test_plan"]["items"]
+        if item["command"] not in commands
+    ]
+    if unknown:
+        details = "；".join(
+            f"{identifier} 引用未知 lifecycle test command: {command}"
+            for identifier, command in unknown
+        )
+        allowed = ", ".join(available) or "无"
+        raise SdlcError(
+            f"{details}；command 必须填写 lifecycle tests 逻辑键，"
+            f"不能填写 pnpm test 等 shell 命令；允许值: {allowed}"
+        )
+
+
 def _unique(items: list[dict[str, Any]], kind: str) -> set[str]:
     pattern = ID_PATTERNS[kind]
     ids: set[str] = set()
@@ -310,6 +353,7 @@ def _render_test_plan(data: dict[str, Any]) -> str:
 
 def publish_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     ids = validate_spec(payload)
+    validate_lifecycle_test_references(root, payload)
     historical: dict[str, str] = {}
     versions = root / "docs" / "sdlc" / "versions"
     if versions.exists():
@@ -389,10 +433,7 @@ def publish_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     # All validation happens before any target is replaced.
     for path, content in staged:
         atomic_write(path, content)
-    hashes = {
-        kind: sha256_file(current / f"{base}.json")
-        for kind, base in CURRENT_FILES.items()
-    }
+    hashes = current_spec_hashes(root)
     return {"ok": True, "ids": {k: sorted(v) for k, v in ids.items()}, "hashes": hashes}
 
 

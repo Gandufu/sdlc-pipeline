@@ -141,7 +141,11 @@
               "input": {"type": "string"},
               "expected": {"type": "string"},
               "mandatory": {"type": "boolean"},
-              "command": {"type": "string"}
+              "command": {
+                "type": "string",
+                "minLength": 1,
+                "description": "lifecycle.json tests 中的逻辑键（如 unit），不是 pnpm test 等 shell 命令"
+              }
             }
           }
         }

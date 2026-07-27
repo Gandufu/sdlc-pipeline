@@ -6,7 +6,9 @@ subtask: false
 
 执行 spec 阶段。先调用 `sdlc_status`，在同一主会话澄清目标、范围、约束、验收标准。
 分配永不复用的 R/D/T ID；修改需求用新 R-id 和 supersedes。设计必须引用 scaffold 中真实的
-extension point 和允许路径。每个 R-id 至少一个 mandatory T-id，并引用 lifecycle tests 命令。
+extension point 和允许路径。每个 R-id 至少一个 mandatory T-id。先读取 `sdlc_status` 返回的
+`lifecycle_tests.available`；`test_plan.items[].command` 必须填写 `unit`、`integration` 等
+lifecycle tests 逻辑键，不能填写 `pnpm test`、`npm test` 等 shell 命令。
 
 结构化记录用户原始输入，并明确区分已确认事实、影响范围、假设、待确认问题、风险和决策。
 正式文档使用中文：R/D/T 的 title、description、acceptance criteria、分析、测试前置条件、输入与预期

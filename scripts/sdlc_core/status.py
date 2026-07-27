@@ -3,8 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import load_current_spec, unresolved_blocking_questions
+from .artifacts import (
+    current_spec_hashes,
+    lifecycle_test_commands,
+    load_current_spec,
+    unresolved_blocking_questions,
+)
 from .common import read_json
+from .common import sha256_file
 from .runs import pid_alive, read_active
 from .trace import incremental_eligibility, verify_scaffold
 from .trace import worktree_fingerprint
@@ -24,9 +30,11 @@ def status(root: Path) -> dict[str, Any]:
     if not gates["init"]:
         missing.append("docs/sdlc/init-report.json(pass)")
     spec = None
+    spec_hashes: dict[str, str] | None = None
     blocking_questions: list[dict[str, Any]] = []
     try:
         spec = load_current_spec(root)
+        spec_hashes = current_spec_hashes(root)
         gates["spec"] = True
         blocking_questions = unresolved_blocking_questions(spec)
     except Exception:
@@ -35,6 +43,7 @@ def status(root: Path) -> dict[str, Any]:
     code = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json", required=False)
     gates["code"] = closed_baseline or bool(
         code and code.get("ok")
+        and code.get("spec_hashes") == spec_hashes
         and code.get("source_fingerprint") == fingerprint
     )
     if not gates["code"]:
@@ -43,8 +52,17 @@ def status(root: Path) -> dict[str, Any]:
         root / ".sdlc-pipeline" / "runs" / "version-candidate.json",
         required=False,
     )
+    lifecycle_path = root / ".sdlc-pipeline" / "lifecycle.json"
+    lifecycle_sha256 = sha256_file(lifecycle_path) if lifecycle_path.is_file() else None
+    expected_test_binding = {
+        "spec_hashes": spec_hashes,
+        "lifecycle_sha256": lifecycle_sha256,
+        "source_fingerprint": (code or {}).get("source_fingerprint"),
+    }
     gates["test"] = closed_baseline or bool(
         candidate and candidate.get("status") in {"ready", "closed"}
+        and candidate.get("binding") == expected_test_binding
+        and gates["code"]
     )
     if not gates["test"]:
         missing.append("mandatory test results")
@@ -83,6 +101,18 @@ def status(root: Path) -> dict[str, Any]:
         }
     except Exception as exc:
         incremental = {"eligible": False, "reasons": [str(exc)]}
+    try:
+        test_commands = lifecycle_test_commands(root)
+        lifecycle_tests = {
+            "available": sorted(test_commands),
+            "commands": test_commands,
+        }
+    except Exception as exc:
+        lifecycle_tests = {
+            "available": [],
+            "commands": {},
+            "error": str(exc),
+        }
     return {
         "ok": True,
         "current_version": current_version(root),
@@ -99,5 +129,6 @@ def status(root: Path) -> dict[str, Any]:
         ],
         "scaffold": {"ok": drift["ok"], "drift": drift["drift"]},
         "incremental": incremental,
+        "lifecycle_tests": lifecycle_tests,
         "can_enter_next": prerequisites[stage],
     }

@@ -170,10 +170,11 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
     )
     role_instruction = (
         "coder 仅可调用 sdlc_lifecycle(action=compile 或 health)；"
-        "禁止调用 run_tests 或 test，测试执行由 executor 和主会话负责。"
+        "禁止调用 execute_test_plan 或 record_test_results，"
+        "测试执行由 executor 和主会话负责。"
         if role == "coder"
-        else "executor 仅可调用 sdlc_lifecycle(action=run_tests 或 health)；"
-        "test 结果固化由主会话负责。"
+        else "executor 仅可调用 sdlc_lifecycle(action=execute_test_plan 或 health)；"
+        "禁止调用 record_test_results；测试结果记录由主会话负责。"
     )
     return {
         "ok": True,

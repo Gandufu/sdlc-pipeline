@@ -278,6 +278,22 @@ class SchemaAndTraceTests(unittest.TestCase):
         finally:
             fixture.close()
 
+    def test_publish_rejects_shell_command_instead_of_lifecycle_test_key(self) -> None:
+        fixture = ProjectFixture()
+        try:
+            payload = spec_payload()
+            payload["test_plan"]["items"][0]["command"] = "pnpm test"
+            with self.assertRaisesRegex(
+                SdlcError,
+                r"T-0001.*pnpm test.*unit",
+            ):
+                publish_spec(fixture.root, payload)
+            self.assertFalse(
+                (fixture.root / "docs/sdlc/current/test-plan.json").exists()
+            )
+        finally:
+            fixture.close()
+
     def test_resolved_question_requires_resolution(self) -> None:
         payload = spec_payload()
         payload["requirements"]["analysis"]["open_questions"] = [{
@@ -519,7 +535,10 @@ class ClosedLoopTests(unittest.TestCase):
             "coder 仅可调用 sdlc_lifecycle(action=compile 或 health)",
             result["instruction"],
         )
-        self.assertIn("禁止调用 run_tests 或 test", result["instruction"])
+        self.assertIn(
+            "禁止调用 execute_test_plan 或 record_test_results",
+            result["instruction"],
+        )
 
     def _through_code(self) -> None:
         init_project(self.fixture.root)
@@ -597,6 +616,53 @@ class ClosedLoopTests(unittest.TestCase):
         )
         with self.assertRaises(SdlcError):
             run_test_plan(self.fixture.root)
+
+    def test_test_execution_cannot_be_reused_after_test_plan_changes(self) -> None:
+        self._through_code()
+        execution = run_test_plan(self.fixture.root)
+        executor = {
+            "results": [
+                {"id": item["id"], "status": item["status"], "evidence": item["log"]}
+                for item in execution["results"]
+            ],
+            "open_issues": [],
+        }
+        payload = spec_payload()
+        payload["test_plan"]["items"][0]["command"] = "integration"
+        publish_spec(self.fixture.root, payload)
+        with self.assertRaisesRegex(SdlcError, "测试执行证据.*当前 test-plan"):
+            execute_tests(self.fixture.root, executor)
+
+    def test_status_exposes_lifecycle_test_keys_and_invalidates_stale_candidate(
+        self,
+    ) -> None:
+        self._through_code()
+        execution = run_test_plan(self.fixture.root)
+        executor = {
+            "results": [
+                {"id": item["id"], "status": item["status"], "evidence": item["log"]}
+                for item in execution["results"]
+            ],
+            "open_issues": [],
+        }
+        execute_tests(self.fixture.root, executor)
+        current = status(self.fixture.root)
+        self.assertEqual(
+            current["lifecycle_tests"]["available"],
+            ["e2e", "integration", "lint", "static_analysis", "unit"],
+        )
+        self.assertEqual(
+            current["lifecycle_tests"]["commands"]["unit"]["argv"][-1],
+            "print('unit pass')",
+        )
+        self.assertTrue(current["gates"]["test"])
+
+        payload = spec_payload()
+        payload["test_plan"]["items"][0]["command"] = "integration"
+        publish_spec(self.fixture.root, payload)
+        stale = status(self.fixture.root)
+        self.assertFalse(stale["gates"]["code"])
+        self.assertFalse(stale["gates"]["test"])
 
     def test_full_init_spec_code_test_version(self) -> None:
         self._through_code()

@@ -107,14 +107,15 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         },
       }),
       sdlc_lifecycle: tool({
-        description: "执行确定性的生命周期动作。角色范围：coder：仅 `compile`、`health`；executor：仅 `run_tests`、`health`；主会话负责其余动作（包括 `test`）。",
+        description: "执行确定性的生命周期动作。角色范围：coder：仅 `compile`、`health`；executor：仅 `execute_test_plan`、`health`；主会话在 executor handoff 后仅用 `record_test_results` 记录结果。",
         args: {
           action: tool.schema.enum([
             "probe", "init", "install", "compile", "start", "stop", "restart",
-            "health", "system_install", "compile_restart_verify", "run_tests", "test",
+            "health", "system_install", "compile_restart_verify",
+            "execute_test_plan", "record_test_results",
           ]),
           options: tool.schema.string().optional().describe(
-            "Optional JSON: init only acts on the current project and accepts template, or github/ref; test accepts executor_result",
+            "Optional JSON: init only acts on the current project and accepts template, or github/ref; record_test_results accepts executor_result",
           ),
         },
         async execute(args, context) {
@@ -122,10 +123,11 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
           const allowed = {
             "sdlc-main": [
               "probe", "init", "install", "compile", "start", "stop", "restart",
-              "health", "system_install", "compile_restart_verify", "test",
+              "health", "system_install", "compile_restart_verify",
+              "record_test_results",
             ],
             "sdlc-coder": ["compile", "health"],
-            "sdlc-executor": ["run_tests", "health"],
+            "sdlc-executor": ["execute_test_plan", "health"],
           }
           if (!allowed[context?.agent]?.includes(args.action)) {
             throw new Error(`agent ${context?.agent || "unknown"} cannot run lifecycle ${args.action}`)

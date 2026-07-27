@@ -85,9 +85,9 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             return stop_active(lifecycle_root)
         if action == "health":
             return verify_health(lifecycle_root)
-        if action == "test":
+        if action in {"record_test_results", "test"}:
             return execute_tests(lifecycle_root, payload.get("executor_result"))
-        if action == "run_tests":
+        if action in {"execute_test_plan", "run_tests"}:
             return run_test_plan(lifecycle_root)
         if action == "system_install":
             return install_system_tool(

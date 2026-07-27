@@ -419,6 +419,20 @@ class InstallerTests(unittest.TestCase):
             value = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(value["$schema"], "https://json-schema.org/draft/2020-12/schema")
 
+    def test_distribution_versions_are_aligned(self) -> None:
+        package = json.loads((REPO / "package.json").read_text(encoding="utf-8"))
+        core_version = {}
+        exec(
+            (REPO / "scripts/sdlc_core/__init__.py").read_text(encoding="utf-8"),
+            core_version,
+        )
+        self.assertEqual(package["version"], installer.VERSION)
+        self.assertEqual(core_version["__version__"], installer.VERSION)
+        self.assertIn(
+            f"当前版本：`{installer.VERSION}`",
+            (REPO / "README.md").read_text(encoding="utf-8"),
+        )
+
     def test_plugin_has_four_tools_without_experimental_injection(self) -> None:
         text = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         for name in ("sdlc_status", "sdlc_publish", "sdlc_lifecycle", "sdlc_finalize"):
@@ -453,11 +467,27 @@ class InstallerTests(unittest.TestCase):
 
     def test_coder_is_explicitly_routed_away_from_test_lifecycle_actions(self) -> None:
         coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
+        executor = (REPO / ".opencode/agents/sdlc-executor.md").read_text(encoding="utf-8")
         plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         adapter = (REPO / "scripts/sdlc_core/adapter.py").read_text(encoding="utf-8")
-        self.assertIn("禁止调用 `run_tests` 或 `test`", coder)
+        self.assertIn("禁止调用 `execute_test_plan`", coder)
         self.assertIn("coder：仅 `compile`、`health`", plugin)
         self.assertIn("coder 仅可调用 sdlc_lifecycle(action=compile 或 health)", adapter)
+        self.assertIn("action=execute_test_plan", executor)
+        self.assertIn("record_test_results", plugin)
+        self.assertNotIn('"run_tests", "test"', plugin)
+
+    def test_spec_guidance_distinguishes_test_key_from_shell_command(self) -> None:
+        paths = (
+            REPO / "README.md",
+            REPO / ".opencode/commands/sdlc-spec.md",
+            REPO / ".opencode/agents/sdlc-main.md",
+        )
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            self.assertIn("command", text)
+            self.assertIn("逻辑键", text)
+            self.assertIn("pnpm test", text)
 
     def test_desktop_project_assets_are_discoverable(self) -> None:
         self.assertTrue((REPO / ".opencode/plugins/sdlc-pipeline.js").exists())
@@ -548,6 +578,58 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(
                 operations[1]["payload"]["action"], "compile_restart_verify"
             )
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_executor_can_execute_plan_but_cannot_record_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary).resolve()
+            plugin_path = target / ".opencode" / "plugins" / "sdlc-pipeline.js"
+            plugin_path.parent.mkdir(parents=True)
+            shutil.copy2(REPO / ".opencode/plugins/sdlc-pipeline.js", plugin_path)
+            core = target / ".sdlc-pipeline" / "scripts" / "sdlc.py"
+            core.parent.mkdir(parents=True)
+            core.write_text(
+                "import json, sys\n"
+                "payload = json.load(sys.stdin)\n"
+                "print(json.dumps({'ok': True, 'action': payload.get('action')}))\n",
+                encoding="utf-8",
+            )
+            sdk = target / ".opencode" / "node_modules" / "@opencode-ai" / "plugin"
+            sdk.mkdir(parents=True)
+            (sdk / "package.json").write_text(
+                json.dumps({
+                    "name": "@opencode-ai/plugin",
+                    "type": "module",
+                    "exports": "./index.js",
+                }),
+                encoding="utf-8",
+            )
+            (sdk / "index.js").write_text(
+                "const schema = () => ({ optional() { return this }, describe() { return this } })\n"
+                "export const tool = (input) => input\n"
+                "tool.schema = { enum: schema, string: schema, boolean: schema }\n",
+                encoding="utf-8",
+            )
+            script = (
+                "import(process.argv[1]).then(async m => {"
+                "const plugin = await m.SdlcPipelinePlugin({directory: process.argv[2], worktree: '/'});"
+                "const lifecycle = plugin.tool.sdlc_lifecycle;"
+                "await lifecycle.execute({action: 'execute_test_plan'}, {agent: 'sdlc-executor'});"
+                "try {"
+                "await lifecycle.execute({action: 'record_test_results'}, {agent: 'sdlc-executor'});"
+                "process.exit(2);"
+                "} catch (error) {"
+                "if (!String(error).includes('cannot run lifecycle record_test_results')) throw error;"
+                "}"
+                "}).catch(e => { console.error(e); process.exit(1) })"
+            )
+            result = subprocess.run(
+                ["node", "-e", script, plugin_path.as_uri(), str(target)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_plugin_ignores_filesystem_root_worktree_when_project_core_exists(
