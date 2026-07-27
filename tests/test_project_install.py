@@ -445,6 +445,12 @@ class InstallerTests(unittest.TestCase):
             self.assertIn(".sdlc-pipeline/schemas/spec.schema.json", text)
             self.assertIn("R-0001", text)
 
+    def test_spec_generation_requires_chinese_formal_documents(self) -> None:
+        command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(encoding="utf-8")
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        for text in (command, main):
+            self.assertIn("正式文档使用中文", text)
+
     def test_coder_is_explicitly_routed_away_from_test_lifecycle_actions(self) -> None:
         coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
         plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")

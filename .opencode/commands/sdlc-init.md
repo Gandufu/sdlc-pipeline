@@ -37,5 +37,9 @@ OpenCode 桌面版已安装时，只探测其项目发现能力，不尝试重�
 系统工具；随后自动继续 install/compile/start/health/artifact/stop，不再要求用户补充命令或
 进行第二次确认。模板未声明受控安装命令时必须失败并返回真实日志。
 
+runner 成功完成 init 后会生成或保留项目根 `AGENTS.md`，其中包含项目结构、生命周期/测试命令与
+SDLC 规则。OpenCode 原生 `/init` 是交互式内建命令，不能由本命令嵌套伪调用；用户后续可运行
+`/init` 对该文件增补，且不得覆盖已有自定义规则。
+
 最终展示 `init-report` 的工具、install、compile、PID、health、artifact hash、stop 和 Git
 基线；只有所有 mandatory 检查通过才可进入 `/sdlc-spec`。

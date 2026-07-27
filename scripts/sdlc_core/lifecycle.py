@@ -33,6 +33,53 @@ MANDATORY_CONTRACT_FIELDS = {
 }
 
 
+def ensure_project_agents_file(root: Path) -> dict[str, str]:
+    """Create deterministic project guidance without replacing user rules."""
+    path = root / "AGENTS.md"
+    if path.exists():
+        return {"status": "existing", "path": "AGENTS.md"}
+    contract = load_contract(root)
+    scaffold = read_json(root / ".sdlc-pipeline" / "scaffold.json")
+    command_lines = []
+    for name in ("install", "compile", "start", "stop", "restart"):
+        command = contract["commands"].get(name)
+        if command:
+            command_lines.append(f"- `{name}`：`{' '.join(command['argv'])}`")
+    test_lines = [
+        f"- `{name}`：`{' '.join(command['argv'])}`"
+        for name, command in contract["tests"].items()
+        if command
+    ]
+    lines = [
+        "# 项目协作说明",
+        "",
+        "此文件由 SDLC init 生成；可在 OpenCode 原生 `/init` 中继续增补。",
+        "",
+        "## 项目上下文",
+        "",
+        f"- 项目类型：`{contract['project_type']}`",
+        f"- 脚手架：`{scaffold['template_id']}`",
+        f"- 扩展点：{', '.join(item['id'] for item in scaffold['extension_points'])}",
+        "",
+        "## 生命周期命令",
+        "",
+        *command_lines,
+        "",
+        "## 测试命令",
+        "",
+        *(test_lines or ["- 当前 lifecycle 合约未声明测试命令。"]),
+        "",
+        "## SDLC 规则",
+        "",
+        "- 正式需求、设计、测试计划使用中文；原始输入、代码标识、命令和协议字段保持原样。",
+        "- 通过 `/sdlc-spec`、`/sdlc-code`、`/sdlc-test` 依次推进，不直接编辑 `docs/sdlc` 正式产物。",
+        "- coder 完成后由 runner 自动执行 compile/restart/health/artifact 门禁；测试由独立 executor 执行。",
+        "",
+    ]
+    atomic_write(path, "\n".join(lines))
+    return {"status": "created", "path": "AGENTS.md"}
+
+
 def contract_path(root: Path) -> Path:
     return root / ".sdlc-pipeline" / "lifecycle.json"
 
@@ -400,9 +447,11 @@ def init_project(
         "stop": stopped,
         "keep_running_after_init": keep_running,
     }
-    _write_init_report(root, report)
     if status != "pass":
+        _write_init_report(root, report)
         raise SdlcError("init 的 health/artifact 验收失败")
+    report["agents_md"] = ensure_project_agents_file(root)
+    _write_init_report(root, report)
     return report
 
 
@@ -415,6 +464,10 @@ def _write_init_report(root: Path, report: dict[str, Any]) -> None:
         f"- 时间：`{report['created_at']}`",
         f"- 缺失工具：{', '.join(report.get('tools', {}).get('missing', [])) or '无'}",
     ]
+    if "agents_md" in report:
+        lines.append(
+            f"- AGENTS.md：`{report['agents_md']['status']}`"
+        )
     for name in ("install", "compile", "start", "health", "artifacts", "stop"):
         if name in report:
             lines.append(f"- {name}：`{'pass' if report[name].get('ok') else 'fail'}`")

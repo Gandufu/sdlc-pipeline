@@ -9,6 +9,8 @@ subtask: false
 extension point 和允许路径。每个 R-id 至少一个 mandatory T-id，并引用 lifecycle tests 命令。
 
 结构化记录用户原始输入，并明确区分已确认事实、影响范围、假设、待确认问题、风险和决策。
+正式文档使用中文：R/D/T 的 title、description、acceptance criteria、分析、测试前置条件、输入与预期
+均须使用中文；原始输入、代码标识、命令、协议字段与用户明确要求的英文内容保持原样。
 先向用户展示 R/D/T 候选摘要、允许修改路径、风险以及所有 blocking 问题；只有获得明确确认后，
 才设置 `spec_confirmed=true`，将三份结构化对象一次性提交给
 `sdlc_publish(kind=spec)`。未确认时不得发布正式文档。

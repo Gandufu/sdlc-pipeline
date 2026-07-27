@@ -431,6 +431,18 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(report["artifacts"]["ok"])
         self.assertTrue(report["stop"]["stopped"])
 
+    def test_init_creates_project_agents_file_without_replacing_existing_rules(self) -> None:
+        report = init_project(self.fixture.root)
+        agents = self.fixture.root / "AGENTS.md"
+        self.assertEqual(report["agents_md"]["status"], "created")
+        self.assertTrue(agents.is_file())
+        self.assertIn("# 项目协作说明", agents.read_text(encoding="utf-8"))
+
+        agents.write_text("# 自定义规则\n", encoding="utf-8")
+        report = init_project(self.fixture.root)
+        self.assertEqual(report["agents_md"]["status"], "existing")
+        self.assertEqual(agents.read_text(encoding="utf-8"), "# 自定义规则\n")
+
     def test_artifact_evidence_requires_every_declared_pattern(self) -> None:
         lifecycle_path = self.fixture.root / ".sdlc-pipeline/lifecycle.json"
         contract = json.loads(lifecycle_path.read_text(encoding="utf-8"))

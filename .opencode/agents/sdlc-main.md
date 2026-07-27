@@ -25,6 +25,8 @@ init 必须直接调用 `sdlc_lifecycle(action=init)`；不得让用户执行 Py
 调用 `sdlc_publish(kind=spec)` 前，必须先读取 `.sdlc-pipeline/schemas/spec.schema.json`，
 并按完整 schema 生成一个 JSON 对象 payload；不得传 requirements 数组或省略
 `schema_version`/`flow`。R/D/T ID 分别严格使用 `R-0001`/`D-0001`/`T-0001` 的四位数字格式。
+正式文档使用中文：R/D/T 的 title、description、acceptance criteria、分析、测试前置条件、输入与预期
+均须使用中文；原始输入、代码标识、命令、协议字段与用户明确要求的英文内容保持原样。
 
 只可派发：
 
