@@ -2,7 +2,7 @@
 
 > OpenCode-first、证据驱动的项目交付状态机。
 
-当前版本：`0.8.1`。
+当前版本：`0.8.3`。
 
 SDLC Pipeline 用项目脚手架契约、确定性 Python runner、真实编译/启动/测试和 Git
 版本证据，把一次需求从澄清推进到可追溯版本。
@@ -61,8 +61,6 @@ runner 的准备优先级固定为：
 3. 已安装的系统工具；
 4. 用户明确批准后的受控系统安装。
 
-OpenCode 桌面版已经安装时，init 不会重复安装 OpenCode。
-
 ## 一个项目目录，一个会话
 
 `/sdlc-init` 始终在**项目目录内**执行；当前 OpenCode worktree 就是唯一的项目根、
@@ -79,15 +77,14 @@ OpenCode 桌面版已经安装时，init 不会重复安装 OpenCode。
    curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target .
    ```
 
-3. 用 OpenCode 桌面版打开同一目录，执行已登记数据源或临时 GitHub 模板 init。
+3. 用 OpenCode 打开同一目录，只执行 `/sdlc-init`。
 
 ```text
 空项目目录（也是 OpenCode 会话）
   └─ 安装 SDLC 插件
-       └─ /sdlc-init <模板数据源 ID>
-          或 /sdlc-init --github <repo> [ref]
-             └─ import → adapter/scaffold → install → compile → start → verify → stop
-                  └─ /sdlc-spec → /sdlc-code → /sdlc-test → 用户确认 → version
+       └─ /sdlc-init
+          └─ 幂等检查 → 用户选择登记模板 → import → install → compile → verify → stop
+             └─ /sdlc-spec → /sdlc-code → /sdlc-test → 用户确认 → version
 ```
 
 已登记模板数据源：
@@ -96,36 +93,21 @@ OpenCode 桌面版已经安装时，init 不会重复安装 OpenCode。
 |---|---|---|
 | `sdlc-electron-scaffold` | Electron Forge、React、Vite、TypeScript | `https://github.com/Gandufu/sdlc-electron-scaffold.git` |
 
-已登记数据源示例：
-
-```text
-/sdlc-init sdlc-electron-scaffold
-```
-
-也可以描述技术需求；主 agent 会读取已安装的 registry，按
-`name/description/stacks/capabilities` 选择唯一候选。没有唯一匹配时必须让用户确认，不能
-静默猜测模板。
-
-GitHub 模板示例：
-
-```text
-/sdlc-init --github https://github.com/acme/service-template.git main
-```
-
-已登记模板和显式 GitHub 模板都会在临时目录完成 clone/checkout 后导入**当前项目目录**，
-并保留原仓库的
-`.git` 历史。它必须提供 `.sdlc-pipeline/lifecycle.json` 和
-`.sdlc-pipeline/scaffold.json`；`.opencode`、`opencode.json`、runner 与运行现场由插件管理，
-不得随 GitHub 模板携带。
+`/sdlc-init` 没有参数。它先检查已有 init evidence；未初始化且没有 lifecycle/scaffold 时，
+读取 registry 的 `id/name/description/stacks/rules/capabilities`，以问答方式展示候选并等待用户选择。
+即使只有一个模板也不会自动选择。选择后按元数据中的 repository/ref 导入并保留模板 Git 历史。
 
 init 严格执行：
 
 ```text
-检查当前目录为空或只含已安装插件文件
-  → 根据数据源元数据解析 repository/ref，或使用显式 GitHub 地址
+检查 init-report 与 lifecycle/scaffold
+  → 已通过则复用 evidence 并停止
+  → 未初始化则询问用户选择登记模板
+  → 根据数据源元数据解析 repository/ref
   → clone 到临时目录再导入当前目录
   → 安装/复用项目级 adapter
   → 校验 lifecycle/scaffold hash
+  → 按模板 rules 生成 active rules manifest
   → 探测工具链和版本
   → install dependencies
   → compile/package
@@ -139,6 +121,11 @@ init 严格执行：
 模板统一复用导入仓库的 HEAD 作为 Git 基线，并在 init-report 中记录数据源 ID、
 repository、请求 ref 与解析后的 commit SHA。任何
 mandatory 步骤失败，init 都返回 blocked/fail，不会生成伪成功报告。
+
+发行包中的 `rules/` 是可选规则目录，不等于当前项目全部加载。init 只把所选模板声明的规则
+写入 `.sdlc-pipeline/rules/active.json` 并记录 SHA-256；AGENTS、status 和 init-report 都暴露
+这份选择，coder/executor 的 context pack 也只读取 active rules。Electron/TypeScript 项目不会加载
+`java.md` 或 `spring.md`。
 
 init 成功后，**就在同一 OpenCode 会话**继续执行 `/sdlc-spec`、`/sdlc-code`、`/sdlc-test`。
 项目将包含：
@@ -189,9 +176,8 @@ curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scri
 curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target . --force
 ```
 
-升级后重启 OpenCode，使项目级 plugin/agent 定义重新加载。`0.8.1` 将 executor 动作改为
-`execute_test_plan`，主会话结果记录动作改为 `record_test_results`；Python core 暂时兼容旧动作名，
-但新 plugin 不再向 agent 暴露旧名称。
+升级后重启 OpenCode，使项目级 plugin/agent 定义重新加载。`0.8.3` 在无参数幂等 init 基础上
+增加模板感知 active rules，并恢复 grilling 式 spec 拷问与固定文档风格契约。
 
 installer 只写入：
 
@@ -218,9 +204,7 @@ probe → install → compile → start → verify → stop，并生成 init-rep
 
 | 命令 | 运行位置 | 用户输入 | 成功门禁 |
 |---|---|---|---|
-| `/sdlc-init <template>` | 当前空项目目录 | 已登记模板数据源 ID | resolve/import/install/compile/start/verify/stop |
-| `/sdlc-init --github <repo> [ref]` | 当前空项目目录 | GitHub 模板与 ref | import/install/compile/start/verify/stop |
-| `/sdlc-init` | 当前已有项目 | 当前 lifecycle/scaffold | install/compile/start/verify/stop |
+| `/sdlc-init` | 当前项目 | 幂等检查；需要时问答选择登记模板 | resolve/import/install/compile/start/verify/stop |
 | `/sdlc-spec` | 当前项目 | 需求、范围、约束、验收标准 | 用户确认且 R→D→T 完整后原子发布 |
 | `/sdlc-code` | 当前项目 | 已发布且无 blocking 问题的 spec | diff 合规且真实 compile/restart/verify |
 | `/sdlc-test` | 当前项目 | code evidence | mandatory T-id 全部执行并生成结果 |
@@ -235,6 +219,10 @@ requirement 与 design 合并为一次主会话交互，但产物仍然独立：
 
 必须满足：
 
+- 需求拷问派生自 `mattpocock/skills` 的 grilling 核心：先查事实，只把决策交给用户，沿决策树
+  一次只问一个问题；每题提供 2–3 个答案、标出推荐项并允许自定义答案；
+- 通过共享术语、明确设计 seam 和测试 seam 缩小用户与 agent 的理解偏差；
+- 达成共享理解前不生成或发布正式 spec；
 - 保存与当前版本相关的用户原始输入，并与 AI 规范化需求分开；
 - 分析明确区分已确认事实、影响范围、假设、待确认问题、风险和决策；
 - 发布前向用户展示候选摘要、允许修改路径、风险和 blocking 问题；
@@ -246,6 +234,11 @@ requirement 与 design 合并为一次主会话交互，但产物仍然独立：
 - `test_plan.items[].command` 引用 lifecycle tests 逻辑键，例如 `unit`；
   不得填写 `pnpm test`、`npm test` 等 shell 命令；
 - 修改后的需求创建新 R-id，并通过 `supersedes` 指向旧 ID。
+
+交互与发布分层：`.sdlc-pipeline/references/spec-interview.md` 保存 grilling、候选答案和统一文档
+风格；command/agent/skill 负责逐题编排；`scripts/sdlc_core/artifacts.py` 负责 schema 校验和确定性
+渲染。最终固定生成 `requirements.md`、`design.md`、`test-plan.md` 及对应 JSON，agent 不直接编辑
+正式 Markdown。
 
 ### `/sdlc-code`
 
@@ -504,7 +497,7 @@ tests/
    lifecycle 与 key-file SHA-256。
 3. 模板仓库增加真实 install/compile/start/readiness/smoke/stop 测试。
 4. 在插件 `templates/manifest.json` 只登记
-   `id/name/description/stacks/capabilities/source(repository/ref)`。
+   `id/name/description/stacks/rules/capabilities/source(repository/ref)`。
 5. 用 `$extract-project-template` 生成 inventory，运行模板门禁和插件完整回归。
 
 插件发布包不包含模板源码或模板专属 assets。模板不能只提供几段示例代码；init 的验收标准
@@ -554,11 +547,6 @@ git diff --check
 
 init 的目标是证明项目能启动并通过验证，而不是长期占用端口。模板可以通过
 `keep_running_after_init` 明确要求保持运行。code 阶段会重新启动最新产物。
-
-### 已安装 OpenCode 桌面版，还需要安装插件吗？
-
-不需要安装另一个 OpenCode 应用。但每个业务项目仍需要 SDLC Pipeline 的项目级 adapter；
-在项目根执行上面的 GitHub installer 命令会负责拉取发行内容并写入受管文件。
 
 ### 为什么没有 `/sdlc-status`？
 

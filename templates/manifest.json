@@ -10,6 +10,11 @@
         "electron",
         "react"
       ],
+      "rules": [
+        "typescript",
+        "electron",
+        "react"
+      ],
       "capabilities": [
         "desktop",
         "electron-main",

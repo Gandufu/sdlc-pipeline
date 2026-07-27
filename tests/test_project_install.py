@@ -465,6 +465,56 @@ class InstallerTests(unittest.TestCase):
         for text in (command, main):
             self.assertIn("正式文档使用中文", text)
 
+    def test_spec_grilling_is_single_question_recommended_choice_workflow(self) -> None:
+        command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(encoding="utf-8")
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        skill = (
+            REPO / ".opencode/skills/sdlc-pipeline/SKILL.md"
+        ).read_text(encoding="utf-8")
+        for text in (command, main, skill):
+            self.assertIn("一次只问一个", text)
+            self.assertIn("推荐", text)
+            self.assertIn("2–3", text)
+            self.assertIn("自定义答案", text)
+            self.assertIn(
+                ".sdlc-pipeline/references/spec-interview.md",
+                text,
+            )
+        self.assertIn("question: allow", main)
+        self.assertIn("requirements.md", command)
+        self.assertIn("design.md", command)
+        self.assertIn("test-plan.md", command)
+
+    def test_template_registry_declares_framework_specific_rules(self) -> None:
+        manifest = json.loads(
+            (REPO / "templates/manifest.json").read_text(encoding="utf-8")
+        )
+        template = manifest["templates"][0]
+        self.assertEqual(
+            template["rules"],
+            ["typescript", "electron", "react"],
+        )
+        self.assertNotIn("java", template["rules"])
+        schema = json.loads(
+            (REPO / "schemas/template-registry.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertIn(
+            "rules",
+            schema["properties"]["templates"]["items"]["required"],
+        )
+        extractor = (
+            REPO / ".opencode/skills/extract-project-template/SKILL.md"
+        ).read_text(encoding="utf-8")
+        contract = (
+            REPO
+            / ".opencode/skills/extract-project-template/references/template-contract.md"
+        ).read_text(encoding="utf-8")
+        for text in (extractor, contract):
+            self.assertIn("rules", text)
+        self.assertNotIn("--github", contract)
+
     def test_coder_is_explicitly_routed_away_from_test_lifecycle_actions(self) -> None:
         coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
         executor = (REPO / ".opencode/agents/sdlc-executor.md").read_text(encoding="utf-8")
@@ -502,19 +552,24 @@ class InstallerTests(unittest.TestCase):
         for name in ("sdlc-main", "sdlc-coder", "sdlc-executor"):
             self.assertTrue((REPO / f".opencode/agents/{name}.md").exists())
 
-    def test_readme_describes_current_project_init_and_github_template(self) -> None:
+    def test_init_is_parameterless_idempotent_and_user_selects_registry_template(
+        self,
+    ) -> None:
         readme = (REPO / "README.md").read_text(encoding="utf-8")
         init_command = (
             REPO / ".opencode/commands/sdlc-init.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("项目目录内", readme)
-        self.assertIn("/sdlc-init --github", readme)
+        self.assertIn("只执行 `/sdlc-init`", readme)
         self.assertIn("raw.githubusercontent.com/Gandufu/sdlc-pipeline", readme)
         self.assertNotIn("<SDLC_PIPELINE_ROOT>", readme)
-        self.assertIn("当前 OpenCode 项目根目录", init_command)
-        self.assertIn("name/description/stacks/capabilities", init_command)
-        self.assertIn("只有唯一匹配", init_command)
-        self.assertNotIn("<repo> <ref> <target>", init_command)
+        self.assertIn("第一步调用 `sdlc_status`", init_command)
+        self.assertIn("init_state.completed", init_command)
+        self.assertIn("templates", init_command)
+        self.assertIn("明确选择", init_command)
+        self.assertIn("即使只有一个候选", init_command)
+        self.assertNotIn("$ARGUMENTS", init_command)
+        self.assertNotIn("--github", init_command)
+        self.assertNotIn("安装 OpenCode", init_command)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_plugin_javascript_syntax(self) -> None:

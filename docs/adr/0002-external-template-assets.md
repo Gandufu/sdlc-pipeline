@@ -9,9 +9,10 @@ SDLC Pipeline 插件不再携带模板源码或模板专属约定。插件的 `t
 `manifest.json` 数据源注册表；每个模板作为独立 Git 仓库维护完整源码、依赖、锁文件、文档、
 测试以及 `.sdlc-pipeline/lifecycle.json`、`.sdlc-pipeline/scaffold.json`。
 
-`/sdlc-init <template-id>` 从 registry 解析 repository/ref，在临时目录 clone/checkout 后导入
-当前空项目并保留模板 Git 历史。`/sdlc-init --github <repo> [ref]` 使用同一导入路径。init
-报告必须记录数据源 ID、仓库、请求 ref 和实际 commit SHA。
+无参数 `/sdlc-init` 先幂等检查 init evidence；未初始化时读取 registry 元数据，以问答方式让
+用户选择模板，再解析 repository/ref，在临时目录 clone/checkout 后导入当前空项目并保留模板
+Git 历史。用户界面不接受 template ID、GitHub 地址或 ref 参数。init 报告必须记录数据源 ID、
+仓库、请求 ref 和实际 commit SHA。
 
 ## 当前参考实现
 
@@ -31,6 +32,6 @@ SDLC Pipeline 插件不再携带模板源码或模板专属约定。插件的 `t
 ## 约束
 
 - 禁止重新向插件加入模板源码、锁文件或模板专属业务文档。
-- registry 没有唯一匹配时必须要求用户确认。
+- registry 模板必须由用户明确选择，即使只有一个候选也不得自动选择。
 - 模板必须携带可验证的 lifecycle/scaffold 契约。
 - 发布模板前必须验证安装、打包、启动、health、artifact、测试和停止流程。

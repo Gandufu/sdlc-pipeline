@@ -37,7 +37,7 @@ def template_registry(root: Path | None = None) -> list[dict[str, Any]]:
             for field in required_text
         ):
             raise SdlcError(f"模板 {item['id']} 缺少 name/description")
-        for field in ("stacks", "capabilities"):
+        for field in ("stacks", "rules", "capabilities"):
             values = item.get(field)
             if (
                 not isinstance(values, list)

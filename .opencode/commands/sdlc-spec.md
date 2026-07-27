@@ -4,7 +4,12 @@ agent: sdlc-main
 subtask: false
 ---
 
-执行 spec 阶段。先调用 `sdlc_status`，在同一主会话澄清目标、范围、约束、验收标准。
+执行 spec 阶段。先调用 `sdlc_status`，读取
+`.sdlc-pipeline/references/spec-interview.md`，并按其中的 grilling 决策树澄清需求。
+能从项目、scaffold、active rules 或 lifecycle 查到的事实直接读取，不询问用户；产品决策归用户。
+使用 OpenCode `question` 工具一次只问一个问题，等待回答后再继续。每题给出 2–3 个互斥候选，
+把首选项标为“（推荐）”并解释依据，同时允许自定义答案；不得一次抛出问题清单或替用户决定。
+持续覆盖目标、范围、非范围、约束、失败路径、验收、设计取舍与测试层级，直到共享理解一致。
 分配永不复用的 R/D/T ID；修改需求用新 R-id 和 supersedes。设计必须引用 scaffold 中真实的
 extension point 和允许路径。每个 R-id 至少一个 mandatory T-id。先读取 `sdlc_status` 返回的
 `lifecycle_tests.available`；`test_plan.items[].command` 必须填写 `unit`、`integration` 等
@@ -13,7 +18,8 @@ lifecycle tests 逻辑键，不能填写 `pnpm test`、`npm test` 等 shell 命�
 结构化记录用户原始输入，并明确区分已确认事实、影响范围、假设、待确认问题、风险和决策。
 正式文档使用中文：R/D/T 的 title、description、acceptance criteria、分析、测试前置条件、输入与预期
 均须使用中文；原始输入、代码标识、命令、协议字段与用户明确要求的英文内容保持原样。
-先向用户展示 R/D/T 候选摘要、允许修改路径、风险以及所有 blocking 问题；只有获得明确确认后，
+所有 blocking 问题逐题解决后，先向用户展示 R/D/T 候选摘要、允许修改路径、风险以及共享理解；
+只有用户明确确认“理解一致并生成 spec”后，
 才设置 `spec_confirmed=true`，将三份结构化对象一次性提交给
 `sdlc_publish(kind=spec)`。未确认时不得发布正式文档。
 增量流程只有机器条件满足且用户确认时启用，否则使用 standard。
@@ -23,3 +29,5 @@ lifecycle tests 逻辑键，不能填写 `pnpm test`、`npm test` 等 shell 命�
 `spec_confirmed: true`、`requirements`、`design`、`test_plan`。其中 `requirements` 不是数组，
 必须是 `{source_inputs, analysis, items}` 对象；`design` 和 `test_plan` 都是 `{items}` 对象。
 所有 ID 固定为四位数字：`R-0001`、`D-0001`、`T-0001`（不能写成 `R-001`）。
+正式 Markdown 不由 agent 编辑；Python core 按固定章节与统一风格原子生成
+`requirements.md`、`design.md`、`test-plan.md` 及对应 JSON。

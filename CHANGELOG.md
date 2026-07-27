@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.3 - 2026-07-27
+
+- init 根据模板 `rules` 显式生成 active rules manifest，status、AGENTS 与 context pack 只暴露
+  当前框架规则，不加载无关 Java/Spring/Vue 规则。
+- 恢复源自 `mattpocock/skills` 的 grilling 契约：事实先查、决策归用户、一次一问、推荐答案、
+  共享理解确认后才发布。
+- 增加 spec interview/reference，command、agent、skill 与 README/设计文档统一引用；设计与测试
+  Markdown 继续由 Python core 按固定章节原子渲染。
+
 ## 0.7.0 - 2026-07-25
 
 - spec 增加原始输入、结构化分析与发布前人工确认门禁。

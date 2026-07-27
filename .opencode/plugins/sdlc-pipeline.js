@@ -84,7 +84,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
   return {
     tool: {
       sdlc_status: tool({
-        description: "只读返回当前 SDLC 版本、阶段、门禁、PID、缺失产物和下一步资格。",
+        description: "只读返回 init 幂等状态、登记模板及 active rules 元数据、当前版本、阶段、门禁、PID 和下一步资格。",
         args: {},
         async execute(_args, context) {
           return JSON.stringify(invoke(rootOf(context, fallbackRoot), "status"))
@@ -115,7 +115,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
             "execute_test_plan", "record_test_results",
           ]),
           options: tool.schema.string().optional().describe(
-            "Optional JSON: init only acts on the current project and accepts template, or github/ref; record_test_results accepts executor_result",
+            "Optional JSON: init accepts only the template ID selected by the user from sdlc_status.templates; record_test_results accepts executor_result",
           ),
         },
         async execute(args, context) {

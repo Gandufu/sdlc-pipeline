@@ -9,10 +9,11 @@ from typing import Any
 from .adapter import after_task, before_task, validate_write_path
 from .artifacts import publish_spec
 from .bootstrap import bootstrap
-from .common import SdlcError, project_root
+from .common import SdlcError, project_root, read_json
 from .lifecycle import (
     compile_restart_verify,
     execute_tests,
+    activate_template_rules,
     init_project,
     install_system_tool,
     probe_tools,
@@ -53,18 +54,42 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         if action == "probe":
             return probe_tools(lifecycle_root)
         if action == "init":
-            if payload.get("target") or payload.get("target_root") or payload.get("repo"):
+            if any(
+                payload.get(name)
+                for name in ("target", "target_root", "repo", "github", "ref")
+            ):
                 raise SdlcError(
-                    "sdlc-init 只在当前项目目录执行；请使用模板数据源 ID 或 github，不要传 target/repo"
+                    "sdlc-init 不接受路径、GitHub 地址或 ref；"
+                    "模板只能从 sdlc_status.templates 中选择"
                 )
-            if payload.get("template") or payload.get("github"):
+            contract_root = lifecycle_root / ".sdlc-pipeline"
+            contracts_present = all(
+                (contract_root / name).is_file()
+                for name in ("lifecycle.json", "scaffold.json")
+            )
+            existing_report = read_json(
+                lifecycle_root / "docs" / "sdlc" / "init-report.json",
+                required=False,
+            )
+            if (
+                contracts_present
+                and existing_report
+                and existing_report.get("status") == "pass"
+            ):
+                active_rules = activate_template_rules(lifecycle_root)
+                return {
+                    "ok": True,
+                    "idempotent": True,
+                    "already_initialized": True,
+                    "project_root": str(lifecycle_root.resolve()),
+                    "report": existing_report,
+                    "active_rules": active_rules,
+                }
+            if payload.get("template"):
                 return bootstrap(
                     root,
                     template=payload.get("template"),
-                    github=payload.get("github"),
-                    ref=payload.get("ref"),
                 )
-            contract_root = lifecycle_root / ".sdlc-pipeline"
             missing_contracts = [
                 name
                 for name in ("lifecycle.json", "scaffold.json")
@@ -73,7 +98,7 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             if missing_contracts:
                 raise SdlcError(
                     "当前目录仅安装了 SDLC adapter，不是已初始化项目；"
-                    "请在首次 init 调用中传入模板数据源 ID 或 github。"
+                    "请先从 sdlc_status.templates 让用户选择模板数据源 ID。"
                     f"缺少项目合约: {', '.join(missing_contracts)}"
                 )
             return init_project(lifecycle_root, auto_install_missing=True)

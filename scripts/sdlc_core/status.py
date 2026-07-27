@@ -9,6 +9,7 @@ from .artifacts import (
     load_current_spec,
     unresolved_blocking_questions,
 )
+from .bootstrap import template_registry
 from .common import read_json
 from .common import sha256_file
 from .runs import pid_alive, read_active
@@ -25,8 +26,16 @@ def status(root: Path) -> dict[str, Any]:
     closed_baseline = bool(
         parent and parent.get("status") == "closed" and not fingerprint["entries"]
     )
+    contract_root = root / ".sdlc-pipeline"
+    contracts_present = all(
+        (contract_root / name).is_file()
+        for name in ("lifecycle.json", "scaffold.json")
+    )
     init = read_json(root / "docs" / "sdlc" / "init-report.json", required=False)
-    gates["init"] = closed_baseline or bool(init and init.get("status") == "pass")
+    init_completed = bool(
+        contracts_present and init and init.get("status") == "pass"
+    )
+    gates["init"] = closed_baseline or init_completed
     if not gates["init"]:
         missing.append("docs/sdlc/init-report.json(pass)")
     spec = None
@@ -113,6 +122,28 @@ def status(root: Path) -> dict[str, Any]:
             "commands": {},
             "error": str(exc),
         }
+    try:
+        templates = template_registry()
+    except Exception as exc:
+        templates = []
+        template_error = str(exc)
+    else:
+        template_error = None
+    scaffold_contract = read_json(
+        contract_root / "scaffold.json",
+        required=False,
+    ) or {}
+    active_rules = read_json(
+        contract_root / "rules" / "active.json",
+        required=False,
+    )
+    init_state = {
+        "completed": init_completed,
+        "report_status": (init or {}).get("status"),
+        "report_created_at": (init or {}).get("created_at"),
+        "contracts_present": contracts_present,
+        "template_id": scaffold_contract.get("template_id"),
+    }
     return {
         "ok": True,
         "current_version": current_version(root),
@@ -130,5 +161,9 @@ def status(root: Path) -> dict[str, Any]:
         "scaffold": {"ok": drift["ok"], "drift": drift["drift"]},
         "incremental": incremental,
         "lifecycle_tests": lifecycle_tests,
+        "init_state": init_state,
+        "templates": templates,
+        "active_rules": active_rules,
+        "template_registry_error": template_error,
         "can_enter_next": prerequisites[stage],
     }

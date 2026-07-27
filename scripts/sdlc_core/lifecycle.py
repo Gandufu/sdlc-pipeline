@@ -55,6 +55,14 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
         for name, command in contract["tests"].items()
         if command
     ]
+    active_rules = read_json(
+        root / ".sdlc-pipeline" / "rules" / "active.json",
+        required=False,
+    ) or {"rules": []}
+    rule_lines = [
+        f"- `{item['path']}`"
+        for item in active_rules.get("rules", [])
+    ]
     lines = [
         "# 项目协作说明",
         "",
@@ -79,6 +87,10 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
         "",
         "## SDLC 规则",
         "",
+        "仅加载所选模板在 init 阶段激活的框架规则：",
+        "",
+        *(rule_lines or ["- 当前模板未声明框架规则。"]),
+        "",
         "- 正式需求、设计、测试计划使用中文；原始输入、代码标识、命令和协议字段保持原样。",
         "- 通过 `/sdlc-spec`、`/sdlc-code`、`/sdlc-test` 依次推进，不直接编辑 `docs/sdlc` 正式产物。",
         "- coder 完成后由 runner 自动执行 compile/restart/health/artifact 门禁；测试由独立 executor 执行。",
@@ -86,6 +98,55 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
     ]
     atomic_write(path, "\n".join(lines))
     return {"status": "created", "path": "AGENTS.md"}
+
+
+def activate_template_rules(root: Path) -> dict[str, Any]:
+    """Materialize the selected template's rule set as init evidence."""
+    contract_root = root / ".sdlc-pipeline"
+    scaffold = read_json(contract_root / "scaffold.json")
+    template_id = scaffold["template_id"]
+    manifest_path = contract_root / "templates" / "manifest.json"
+    rules: list[dict[str, str]] = []
+    source = "unregistered-template"
+    rule_ids = scaffold.get("rules", [])
+    if manifest_path.exists():
+        from .bootstrap import template_registry
+
+        templates = template_registry(contract_root)
+        template = next(
+            (item for item in templates if item["id"] == template_id),
+            None,
+        )
+        if template is not None:
+            source = "templates/manifest.json"
+            rule_ids = template["rules"]
+    if not isinstance(rule_ids, list) or any(
+        not isinstance(name, str) for name in rule_ids
+    ):
+        raise SdlcError(f"模板 {template_id} 的 rules 必须是字符串数组")
+    if rule_ids:
+        if source == "unregistered-template":
+            source = "scaffold.json"
+        for name in rule_ids:
+            if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name):
+                raise SdlcError(f"模板 {template_id} 声明了非法 rule ID: {name}")
+            relative = f".sdlc-pipeline/rules/{name}.md"
+            path = root / relative
+            if not path.is_file():
+                raise SdlcError(f"模板 {template_id} 缺少声明的 rule: {relative}")
+            rules.append({
+                "id": name,
+                "path": relative,
+                "sha256": sha256_file(path),
+            })
+    active = {
+        "schema_version": "1.0",
+        "template_id": template_id,
+        "source": source,
+        "rules": rules,
+    }
+    write_json(contract_root / "rules" / "active.json", active)
+    return active
 
 
 def contract_path(root: Path) -> Path:
@@ -416,6 +477,7 @@ def init_project(
     drift = verify_scaffold(root)
     if not drift["ok"]:
         raise SdlcError(f"脚手架初始校验失败: {drift['drift']}")
+    active_rules = activate_template_rules(root)
     tools = probe_tools(root)
     system_installs = []
     if not tools["ok"] and auto_install_missing:
@@ -429,6 +491,7 @@ def init_project(
             "created_at": utc_now(),
             "tools": tools,
             "system_installs": system_installs,
+            "active_rules": active_rules,
         }
         _write_init_report(root, report)
         return report
@@ -455,6 +518,7 @@ def init_project(
         "artifacts": artifacts,
         "stop": stopped,
         "keep_running_after_init": keep_running,
+        "active_rules": active_rules,
     }
     if status != "pass":
         _write_init_report(root, report)
@@ -477,6 +541,9 @@ def _write_init_report(root: Path, report: dict[str, Any]) -> None:
         lines.append(
             f"- AGENTS.md：`{report['agents_md']['status']}`"
         )
+    if "active_rules" in report:
+        names = [item["id"] for item in report["active_rules"].get("rules", [])]
+        lines.append(f"- Active rules：{', '.join(names) or '无'}")
     for name in ("install", "compile", "start", "health", "artifacts", "stop"):
         if name in report:
             lines.append(f"- {name}：`{'pass' if report[name].get('ok') else 'fail'}`")

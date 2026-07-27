@@ -1,6 +1,6 @@
 # SDLC Pipeline OpenCode-first 架构真值
 
-- 对应版本：`0.8.0`
+- 对应版本：`0.8.3`
 - 状态：当前实现
 
 ## 定位
@@ -24,17 +24,14 @@ uninitialized
 
 init 与后续研发阶段始终位于同一个 OpenCode 项目会话。用户先创建空项目目录，从本仓库
 raw 地址下载 `scripts/install_project.py` 并执行；该单文件入口自动 clone 指定 ref 的完整
-发行内容后安装项目 adapter。随后在该目录执行
-`/sdlc-init <template>` 或
-`/sdlc-init --github <repo> [ref]`。已登记模板先从插件
-`templates/manifest.json` 解析 Git repository/ref；显式 GitHub 模板直接使用用户提供的数据源。
-两种方式都先在临时目录 clone/checkout，再连同 Git 历史导入当前目录。当前 worktree 从 init
-开始就是唯一的 evidence root，后续直接执行
+发行内容后安装项目 adapter。随后在该目录执行无参数 `/sdlc-init`。命令先幂等检查 init evidence；
+没有 lifecycle/scaffold 时返回 registry 元数据并以问答方式让用户选择，即使只有一个候选也不
+自动选择。选定模板从 `templates/manifest.json` 解析 Git repository/ref，在临时目录
+clone/checkout 后连同 Git 历史导入当前目录。后续直接执行
 `/sdlc-spec → /sdlc-code → /sdlc-test`。
 
-GitHub 模板必须提供 lifecycle/scaffold 契约；`.opencode`、`opencode.json`、runner 和运行
-现场由插件统一管理。已有项目已经具备 lifecycle/scaffold 时，直接在项目根运行无参数的
-`/sdlc-init`。
+模板必须提供 lifecycle/scaffold 契约；`.opencode`、`opencode.json`、runner 和运行现场由插件
+统一管理。已有项目已经具备 lifecycle/scaffold 时，`/sdlc-init` 直接执行首次验收或失败续跑。
 
 ## 模板资产边界
 
@@ -42,9 +39,11 @@ GitHub 模板必须提供 lifecycle/scaffold 契约；`.opencode`、`opencode.js
 
 - 插件的 `templates/` 目录只允许保存 `manifest.json` 注册元数据；
 - 模板源码、依赖、锁文件、文档、测试、lifecycle/scaffold 契约均由独立 Git 仓库维护；
-- init 根据用户指定的 ID，或根据 `name/description/stacks/capabilities` 匹配唯一候选；
-- 没有唯一候选时必须要求用户确认，不得静默选择；
+- init 展示 `id/name/description/stacks/rules/capabilities` 并要求用户明确选择；
+- 即使 registry 只有一个候选也不得静默选择；
 - 导入报告记录 template ID、repository、请求 ref 和解析后的 commit SHA。
+- init 把所选模板声明的规则写入 `.sdlc-pipeline/rules/active.json` 并记录 hash；规则目录只是
+  catalogue，coder/executor 只加载 active manifest，非 Java 模板不得加载 `java.md`。
 
 当前参考模板为
 [`sdlc-electron-scaffold`](https://github.com/Gandufu/sdlc-electron-scaffold)，本地维护目录是
@@ -99,6 +98,16 @@ plugin 是薄 adapter：转换 OpenCode 输入输出、注册正式 before/after
 ## Spec 与追溯
 
 `/sdlc-spec` 同一会话生成三份独立机器产物。校验规则：
+
+- 交互设计明确派生自 [`mattpocock/skills`](https://github.com/mattpocock/skills)：保持技能小而
+  可组合，事实从环境获取、决策交给用户，沿决策树一次只问一个问题，每问给推荐答案，达成
+  共享理解前不行动；
+- `grilling` 负责对齐，固定 spec 综合负责发布；本插件把二者编排在一个用户阶段，但以明确
+  确认作为硬边界；
+- 每题由 OpenCode `question` 提供 2–3 个候选、推荐依据和自定义答案；共享术语、模块 seam 与
+  测试 seam 在访谈中逐步收敛；
+- command/agent/skill 只负责编排，Python `artifacts` 模块确定性生成统一风格的
+  requirements/design/test-plan JSON 与 Markdown；
 
 - `R-xxxx`、`D-xxxx`、`T-xxxx` 唯一且格式固定；
 - 每个 R 至少映射一个 D 和一个 T；

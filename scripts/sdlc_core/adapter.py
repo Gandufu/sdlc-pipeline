@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import load_current_spec, require_code_ready
-from .common import SdlcError, read_json, utc_now, write_json
+from .common import SdlcError, read_json, sha256_file, utc_now, write_json
 from .trace import changed_paths, validate_diff, verify_extension_points
 
 
@@ -56,24 +56,28 @@ def _context_files(root: Path) -> list[str]:
         ".sdlc-pipeline/lifecycle.json",
         ".sdlc-pipeline/scaffold.json",
     }
-    contract = read_json(root / ".sdlc-pipeline" / "scaffold.json")
-    template_id = contract["template_id"]
-    manifest_path = root / ".sdlc-pipeline" / "templates" / "manifest.json"
-    if manifest_path.exists():
-        manifest = read_json(manifest_path)
-        templates = (
-            manifest.get("templates", [])
-            if isinstance(manifest, dict)
-            else []
-        )
-        template = next(
-            (item for item in templates if item["id"] == template_id), None
-        )
-        if template:
-            for stack in template.get("stacks", []):
-                path = f".sdlc-pipeline/rules/{stack}.md"
-                if (root / path).exists():
-                    paths.add(path)
+    active_rules = read_json(
+        root / ".sdlc-pipeline" / "rules" / "active.json",
+        required=False,
+    ) or {"rules": []}
+    for rule in active_rules.get("rules", []):
+        path = rule.get("path")
+        if (
+            not isinstance(path, str)
+            or not path.startswith(".sdlc-pipeline/rules/")
+            or not path.endswith(".md")
+        ):
+            raise SdlcError(f"active rule 路径非法: {path!r}")
+        rule_path = root / path
+        try:
+            rule_path.resolve().relative_to(
+                (root / ".sdlc-pipeline" / "rules").resolve()
+            )
+        except ValueError as exc:
+            raise SdlcError(f"active rule 越出规则目录: {path}") from exc
+        if not rule_path.is_file() or sha256_file(rule_path) != rule.get("sha256"):
+            raise SdlcError(f"active rule 缺失或 hash 漂移: {path}")
+        paths.add(path)
     if (root / "docs" / "existing-framework.md").exists():
         paths.add("docs/existing-framework.md")
     for item in spec["design"]["items"]:

@@ -30,6 +30,7 @@ from sdlc_core.common import (  # noqa: E402
     write_json,
 )
 from sdlc_core.common import sha256_json  # noqa: E402
+from sdlc_core.cli import execute  # noqa: E402
 from sdlc_core.lifecycle import (  # noqa: E402
     artifact_evidence,
     compile_restart_verify,
@@ -318,6 +319,16 @@ class SchemaAndTraceTests(unittest.TestCase):
             self.assertIn("## 分析与边界", markdown)
             self.assertIn("## 规范化需求", markdown)
             self.assertIn("用户确认：`true`", markdown)
+            design_markdown = (
+                fixture.root / "docs/sdlc/current/design.md"
+            ).read_text(encoding="utf-8")
+            test_markdown = (
+                fixture.root / "docs/sdlc/current/test-plan.md"
+            ).read_text(encoding="utf-8")
+            self.assertIn("## 设计概述", design_markdown)
+            self.assertIn("## 模块、接口与取舍", design_markdown)
+            self.assertIn("## 测试策略与门禁", test_markdown)
+            self.assertIn("## 测试用例", test_markdown)
             self.assertEqual(
                 load_current_spec(fixture.root)["design"]["items"][0]["id"],
                 "D-0001",
@@ -447,6 +458,35 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(report["artifacts"]["ok"])
         self.assertTrue(report["stop"]["stopped"])
 
+    def test_repeated_init_returns_existing_evidence_without_rerunning(self) -> None:
+        first = init_project(self.fixture.root)
+        with patch("sdlc_core.cli.init_project") as rerun:
+            repeated = execute(
+                self.fixture.root,
+                "lifecycle",
+                {"action": "init"},
+            )
+        rerun.assert_not_called()
+        self.assertTrue(repeated["ok"])
+        self.assertTrue(repeated["idempotent"])
+        self.assertTrue(repeated["already_initialized"])
+        self.assertEqual(repeated["report"]["created_at"], first["created_at"])
+
+    def test_status_exposes_init_state_and_template_metadata(self) -> None:
+        before = status(self.fixture.root)
+        self.assertFalse(before["init_state"]["completed"])
+        self.assertTrue(before["init_state"]["contracts_present"])
+        self.assertEqual(
+            [item["id"] for item in before["templates"]],
+            ["sdlc-electron-scaffold"],
+        )
+        self.assertIn("capabilities", before["templates"][0])
+
+        init_project(self.fixture.root)
+        after = status(self.fixture.root)
+        self.assertTrue(after["init_state"]["completed"])
+        self.assertEqual(after["init_state"]["report_status"], "pass")
+
     def test_init_creates_project_agents_file_without_replacing_existing_rules(self) -> None:
         report = init_project(self.fixture.root)
         agents = self.fixture.root / "AGENTS.md"
@@ -458,6 +498,94 @@ class LifecycleTests(unittest.TestCase):
         report = init_project(self.fixture.root)
         self.assertEqual(report["agents_md"]["status"], "existing")
         self.assertEqual(agents.read_text(encoding="utf-8"), "# 自定义规则\n")
+
+    def test_init_activates_only_rules_declared_by_selected_template(self) -> None:
+        rules = self.fixture.root / ".sdlc-pipeline" / "rules"
+        rules.mkdir()
+        for name in ("typescript", "react", "java"):
+            (rules / f"{name}.md").write_text(
+                f"# {name} rules\n",
+                encoding="utf-8",
+            )
+        write_json(
+            self.fixture.root / ".sdlc-pipeline" / "templates" / "manifest.json",
+            {
+                "schema_version": "1.0",
+                "templates": [{
+                    "id": "fixture",
+                    "name": "Fixture",
+                    "description": "fixture template",
+                    "stacks": ["typescript", "react"],
+                    "rules": ["typescript", "react"],
+                    "capabilities": ["fixture"],
+                    "source": {
+                        "kind": "git",
+                        "repository": "https://example.invalid/fixture.git",
+                        "ref": "main",
+                    },
+                }],
+            },
+        )
+
+        report = init_project(self.fixture.root)
+        active = json.loads(
+            (rules / "active.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            [item["path"] for item in active["rules"]],
+            [
+                ".sdlc-pipeline/rules/typescript.md",
+                ".sdlc-pipeline/rules/react.md",
+            ],
+        )
+        self.assertEqual(report["active_rules"], active)
+        self.assertNotIn("java.md", json.dumps(active))
+        self.assertIn(
+            "typescript.md",
+            (self.fixture.root / "AGENTS.md").read_text(encoding="utf-8"),
+        )
+
+        publish_spec(self.fixture.root, spec_payload())
+        context = build_context_pack(self.fixture.root, "coder")
+        context_paths = {
+            item["path"]
+            for pack_path in context["paths"]
+            for item in json.loads(
+                (self.fixture.root / pack_path).read_text(encoding="utf-8")
+            )["files"]
+        }
+        self.assertIn(".sdlc-pipeline/rules/typescript.md", context_paths)
+        self.assertIn(".sdlc-pipeline/rules/react.md", context_paths)
+        self.assertNotIn(".sdlc-pipeline/rules/java.md", context_paths)
+        self.assertEqual(status(self.fixture.root)["active_rules"], active)
+
+        (rules / "typescript.md").write_text("# drifted\n", encoding="utf-8")
+        with self.assertRaisesRegex(SdlcError, "active rule.*hash"):
+            build_context_pack(self.fixture.root, "coder")
+
+    def test_unregistered_existing_project_uses_optional_scaffold_rules(self) -> None:
+        rules = self.fixture.root / ".sdlc-pipeline" / "rules"
+        rules.mkdir()
+        (rules / "typescript.md").write_text(
+            "# TypeScript rules\n",
+            encoding="utf-8",
+        )
+        shutil.copytree(
+            REPO / "templates",
+            self.fixture.root / ".sdlc-pipeline" / "templates",
+        )
+        scaffold_path = self.fixture.root / ".sdlc-pipeline" / "scaffold.json"
+        scaffold = json.loads(scaffold_path.read_text(encoding="utf-8"))
+        scaffold["rules"] = ["typescript"]
+        write_json(scaffold_path, scaffold)
+
+        report = init_project(self.fixture.root)
+
+        self.assertEqual(report["active_rules"]["source"], "scaffold.json")
+        self.assertEqual(
+            [item["id"] for item in report["active_rules"]["rules"]],
+            ["typescript"],
+        )
 
     def test_artifact_evidence_requires_every_declared_pattern(self) -> None:
         lifecycle_path = self.fixture.root / ".sdlc-pipeline/lifecycle.json"

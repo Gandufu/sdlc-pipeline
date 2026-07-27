@@ -61,4 +61,5 @@ install -> compile/package -> start -> readiness -> functional smoke -> stop
 - 模板中已修复的问题；
 - 因环境或外部依赖未验证的事项；
 - 模板依赖、开发启动、打包、测试和真实冒烟命令；
-- 插件注册表需要登记的 `id/repository/ref/stacks/capabilities`。
+- 插件注册表需要登记的 `id/repository/ref/stacks/rules/capabilities`，其中 `rules` 只能列出
+  与模板实际框架匹配、且插件 `rules/<id>.md` 已存在的规则；不得为非 Java 模板登记 Java/Spring。

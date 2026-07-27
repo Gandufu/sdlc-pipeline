@@ -312,7 +312,22 @@ def _render_requirements(data: dict[str, Any]) -> str:
 
 
 def _render_design(data: dict[str, Any]) -> str:
-    lines = ["# 设计说明", ""]
+    covered = sorted({
+        requirement_id
+        for item in data["items"]
+        for requirement_id in item["requirement_ids"]
+    })
+    lines = [
+        "# 设计说明",
+        "",
+        "## 设计概述",
+        "",
+        f"- 设计决策：`{len(data['items'])}` 项",
+        f"- 覆盖需求：{', '.join(f'`{x}`' for x in covered)}",
+        "",
+        "## 模块、接口与取舍",
+        "",
+    ]
     for item in data["items"]:
         lines += [
             f"## {item['id']} {item['title']}",
@@ -333,7 +348,22 @@ def _render_design(data: dict[str, Any]) -> str:
 
 
 def _render_test_plan(data: dict[str, Any]) -> str:
-    lines = ["# 测试计划", ""]
+    mandatory = sum(1 for item in data["items"] if item["mandatory"])
+    levels = sorted({item["level"] for item in data["items"]})
+    commands = sorted({item["command"] for item in data["items"]})
+    lines = [
+        "# 测试计划",
+        "",
+        "## 测试策略与门禁",
+        "",
+        f"- 用例总数：`{len(data['items'])}`",
+        f"- Mandatory：`{mandatory}`",
+        f"- 测试层级：{', '.join(f'`{x}`' for x in levels)}",
+        f"- Lifecycle commands：{', '.join(f'`{x}`' for x in commands)}",
+        "",
+        "## 测试用例",
+        "",
+    ]
     for item in data["items"]:
         lines += [
             f"## {item['id']} {item['title']}",

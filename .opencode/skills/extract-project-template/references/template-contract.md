@@ -18,6 +18,7 @@ docs/existing-framework.md
 ```
 
 `.sdlc-pipeline` 在模板仓库中只能包含上述两个合约；runner、安装现场和运行日志由插件写入。
+未登记的已有项目可在 `scaffold.json#rules` 声明适用规则；登记模板以 registry `rules` 为准。
 
 ## 数据源注册表
 
@@ -29,6 +30,7 @@ docs/existing-framework.md
   "name": "SDLC Electron 脚手架",
   "description": "可用于需求匹配的说明",
   "stacks": ["typescript", "electron", "react"],
+  "rules": ["typescript", "electron", "react"],
   "capabilities": ["desktop", "typed-ipc"],
   "source": {
     "kind": "git",
@@ -38,12 +40,14 @@ docs/existing-framework.md
 }
 ```
 
-init 根据用户需求选择 `id`，再解析 `repository/ref`，clone 后记录实际 commit SHA。发布稳定模板时优先把 `ref` 固定到 release tag 或 commit；开发期可使用 `main`。
+init 展示元数据并由用户明确选择 `id`，再解析 `repository/ref`，clone 后记录实际 commit SHA。
+init 根据 `rules` 生成 active manifest；只有 active rules 进入 coder/executor context。发布稳定模板时
+优先把 `ref` 固定到 release tag 或 commit；开发期可使用 `main`。
 
 ## 验收
 
 - 数据源 ID 可解析，未知 ID 返回可用列表。
-- 注册模板与显式 `--github` 使用相同远程导入实现。
+- 注册模板统一使用受控远程导入实现，用户命令不暴露 GitHub/ref 参数。
 - 导入保留模板 Git 历史和 remote provenance。
 - 初始化失败后，仅在 scaffold 无漂移且 Git 历史完整时允许续跑。
 - 安装插件后只能发现注册表元数据，不能发现任何内嵌模板源码。

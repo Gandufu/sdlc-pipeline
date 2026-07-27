@@ -35,7 +35,12 @@
     },
     "allowed_paths": {"type": "array", "items": {"type": "string"}},
     "lifecycle_hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
-    "capabilities": {"type": "array", "items": {"type": "string"}}
+    "capabilities": {"type": "array", "items": {"type": "string"}},
+    "rules": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"}
+    }
   },
   "additionalProperties": false
 }
