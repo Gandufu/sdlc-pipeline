@@ -1,6 +1,6 @@
 # SDLC Pipeline OpenCode-first 架构真值
 
-- 对应版本：`0.8.3`
+- 对应版本：`0.11.1`
 - 状态：当前实现
 
 ## 定位
@@ -14,17 +14,22 @@ health、artifact、测试和 Git 证据。
 ```text
 uninitialized
   └─ init(pass)
-      └─ spec(R→D→T valid)
-          └─ code(diff valid + compile/restart/verify pass)
-              └─ test(all mandatory pass)
-                  └─ candidate
-                      └─ explicit confirmation
-                          └─ closed version
+      └─ spec(source/checkpoint/candidate)
+          └─ explicit publish confirmation
+              └─ published Feature Contract + atomic three-view bundle
+                  └─ code(coder dispatch + diff/handoff valid)
+                      └─ test(verify_delivery + all mandatory pass)
+                          └─ candidate
+                              └─ explicit finalize confirmation
+                                  └─ closed version
 ```
 
 init 与后续研发阶段始终位于同一个 OpenCode 项目会话。用户先创建空项目目录，从本仓库
 raw 地址下载 `scripts/install_project.py` 并执行；该单文件入口自动 clone 指定 ref 的完整
-发行内容后安装项目 adapter。随后在该目录执行无参数 `/sdlc-init`。命令先幂等检查 init evidence；
+发行内容后安装项目 adapter。安装器在写入 installation marker 前验证 template registry 与全部
+rule policy，并把 `.opencode/**`、`.sdlc-pipeline/**` 合并进可识别的 Vitest/ESLint ignore
+数组；无法安全合并的配置通过 `tooling_ignore.unresolved` 明确报告。随后在该目录执行无参数
+`/sdlc-init`。命令先幂等检查 init evidence；
 没有 lifecycle/scaffold 时返回 registry 元数据并以问答方式让用户选择，即使只有一个候选也不
 自动选择。选定模板从 `templates/manifest.json` 解析 Git repository/ref，在临时目录
 clone/checkout 后连同 Git 历史导入当前目录。后续直接执行
@@ -54,18 +59,20 @@ Forge，不保留 electron-builder。
 失败不会跳过门禁：
 
 - init 缺少系统工具时生成 blocked report；
-- spec 发布前整体校验，三份产物不会出现半完成状态；
-- code 失败保留 diff、日志和运行现场，回到 code/spec；
+- spec 的“采用推荐”只保存 checkpoint，只有“确认发布”才原子发布 Feature Contract 和三视图；
+- code 失败保留 diff、heartbeat、deadline、日志和运行现场，回到 code/spec；
 - test 失败保存逐 T-id 结果，不创建 tag；
 - finalize 没有明确确认、ready candidate 或完整 trace 时拒绝。
 
 ## OpenCode seam
 
-项目级 plugin 的外部 interface 只有四个工具：
+项目级 plugin 的外部 interface 只有六个窄工具：
 
 - `sdlc_status`：只读状态。
-- `sdlc_ingest_source`、`sdlc_save_checkpoint`、`sdlc_publish_contract`：窄化规格接口。
-- `sdlc_lifecycle`：环境、依赖、进程、验证和测试。
+- `sdlc_ingest_source`：摄取 inline、项目内文件或显式授权复制的项目外文本来源。
+- `sdlc_save_checkpoint`：保存可恢复的 spec 决策。
+- `sdlc_publish_contract`：只发布用户明确确认的 Feature Contract。
+- `sdlc_lifecycle`：只暴露 `init`、`focused_check`、`verify_delivery` 三个意图。
 - `sdlc_finalize`：确认后的版本固化。
 
 plugin 是薄 adapter：转换 OpenCode 输入输出、注册正式 before/after hook、约束 task 目标。
@@ -76,44 +83,58 @@ plugin 是薄 adapter：转换 OpenCode 输入输出、注册正式 before/after
 
 `sdlc-main` 是 primary agent，负责用户交互和阶段编排，不创建额外会话。它只允许派发：
 
-- `sdlc-coder`：实现 D→C 与 T→测试文件。
-- 确定性 Core：按当前指纹一次执行 `verify_delivery`。
+- `sdlc-coder`：实现当前 Feature Slice 与受影响测试，按需执行 focused check。
+- 确定性 Core：在 test 阶段按当前指纹一次执行 `verify_delivery`。
 
-没有固定 reviewer。需求符合性由 trace 校验，规范由编译/lint/static analysis，行为由
-测试计划验证。未来高风险人工 review 是可选策略，不进入默认流水线。
+只有一个 coder subagent，没有 executor 或固定 reviewer。需求符合性由 trace 校验，
+规范由编译/lint/static analysis，行为由测试计划验证。未来高风险人工 review 是可选策略，
+不进入默认流水线。
 
 ## Python core
 
 | Module | 隐藏的实现 | 对外 leverage |
 |---|---|---|
-| `artifacts` | schema、唯一 ID、原子写、固定 Markdown | 一次发布完整 spec |
+| `feature_contracts` / `artifacts` | Feature Contract、schema、原子 bundle、固定 Markdown | 一次发布三视图 |
+| `sources` | SourceEnvelope、anchor、受控外部复制、SHA-256 | 原始来源可追溯且不直接信任外部路径 |
 | `trace` | scaffold hash、path、R/D/C/T、增量资格 | 一次判断漂移和影响 |
 | `lifecycle` | argv、timeout、PID、health、log、artifact、tests | 一个 action 返回证据 |
 | `runs` | active PID、日志、Token、恢复现场 | 状态跨 agent 保持 |
+| `journal` | run/attempt/event、owner lease、deadline、heartbeat、熔断 | 断连后可判定 aborted，而不是遗留 running |
+| `policies` | hard invariant 与 lifecycle verifier | lint/static analysis 不伪装成功能测试 |
+| `memory` | 由 hash 约束的项目事实、决策和已解决失败 | 不保存聊天，不跨契约漂移复用 |
 | `versions` | parent、manifest、commit、annotated tag | 一次确认完成固化 |
-| `adapter` | context pack、write guard、handoff/diff 一致性 | OpenCode hook 只传 role/output |
+| `adapter` | progressive context、write guard、handoff/diff 一致性 | OpenCode hook 只传 role/output |
 
 模块 interface 同时是测试 seam；不再为每个门禁维护一个浅脚本。
 
 ## Spec 与追溯
 
-`/sdlc-spec` 同一会话生成三份独立机器产物。校验规则：
+`/sdlc-spec` 同一会话生成一个模型编写的 Feature Contract；Core 将它原子投影为
+requirements、design、test-plan 三份机器/Markdown 视图。校验规则：
 
 - 交互设计明确派生自 [`mattpocock/skills`](https://github.com/mattpocock/skills)：保持技能小而
   可组合，事实从环境获取、决策交给用户，沿决策树一次只问一个问题，每问给推荐答案，达成
-  共享理解前不行动；
+  共享理解前不发布；
 - `grilling` 负责对齐，固定 spec 综合负责发布；本插件把二者编排在一个用户阶段，但以明确
   确认作为硬边界；
+- “采用推荐”只记录选项、理由与 checkpoint；展示完整候选后，只有“确认发布”才调用
+  `sdlc_publish_contract`；
 - 每题由 OpenCode `question` 提供 2–3 个候选、推荐依据和自定义答案；共享术语、模块 seam 与
   测试 seam 在访谈中逐步收敛；
-- command/agent/skill 只负责编排，Python `artifacts` 模块确定性生成统一风格的
+- command/agent/skill 只负责编排，Python Core 确定性生成统一风格的
   requirements/design/test-plan JSON 与 Markdown；
 
-- `R-xxxx`、`D-xxxx`、`T-xxxx` 唯一且格式固定；
+- Feature/验收 ID 使用 `F-xxxx`、`AC-xxxx`，投影视图中的 `R-xxxx`、`D-xxxx`、`T-xxxx`
+  由 Core 确定性生成；
+- SourceEnvelope 的 content、segment 与 anchor 绑定 SHA-256；
+- 项目外文本文件默认拒绝，只有显式 `allow_external_copy=true` 才复制到
+  `.sdlc-pipeline/runs/source-assets/`，单文件上限 10 MiB；
 - 每个 R 至少映射一个 D 和一个 T；
 - 每个 D 至少被一个 T 覆盖；
 - design.extension_point 必须存在于 scaffold；
 - design.allowed_paths 与 scaffold.allowed_paths 共同形成写入白名单；
+- 常见 `vitest.config.*`、`eslint.config.*` 预登记为 tooling paths，允许作为非业务变更，
+  但不计入 design-to-code 功能证据；
 - 每个 T 指定 level、前置、输入、预期、mandatory 和 lifecycle command。
 
 修改需求生成新 R-id，并以 supersedes 指向旧 R-id。原 ID 永不复用。
@@ -128,13 +149,26 @@ plugin 是薄 adapter：转换 OpenCode 输入输出、注册正式 before/after
 4. 模板 lifecycle 已声明且 runner 白名单允许的自动系统安装。
 
 init 的成功标准是 install、compile、start、health、artifact 全部通过，并完成 stop（除非模板
-明确 keep running）。code 阶段重复执行 compile → stop old → start new → health/artifact，
-因此文档落盘或 coder 的 compiled 声明不能过门。
+明确 keep running）。code 阶段只允许 coder 运行 Feature Contract 已登记测试键的
+`focused_check`；它是快速反馈，不构成交付证据。test 阶段由主会话只调用一次
+`verify_delivery`，Core 执行 compile → stop old → start new → health/artifact → mandatory
+tests/policy，因此文档落盘、focused check 或 coder 的 compiled 声明都不能过门。
 
 health 支持 process、HTTP、TCP、command、file 和 browser smoke。browser smoke 在 core 中
 以无 UI HTTP 页面探针实现；需要真实交互的模板把受控 integration 命令登记为 command。当前
 Electron 模板的 integration 检查应启动打包后的真实窗口，并验证 preload bridge 与 typed IPC，
 不能用 renderer HTTP 可达代替。
+
+## Coder deadline 与可观测性
+
+coder task-before hook 建立一个跨进程 journal attempt，owner 绑定 OpenCode PID，并设置独立
+9 分钟 deadline。coder 的 edit/apply_patch 与 focused check 会追加 `attempt.heartbeat`；
+event JSONL 每次写入都 flush/fsync。正常 task-after 校验 handoff 后才把 attempt 置为
+succeeded。owner 退出或 deadline 到期时，下一次 status 将 attempt 和 run 标为 aborted。
+
+插件不能替调用者强制设置 OpenCode CLI 参数，也不能通过当前 hook API 硬杀正在运行的模型任务。
+Headless 调用方应使用 `opencode run --format json` 实时消费宿主事件；journal 负责独立的项目内
+持久证据和恢复判断。
 
 ## 标准与增量
 
@@ -151,9 +185,10 @@ Electron 模板的 integration 检查应启动打包后的真实窗口，并验�
 ## Token 与上下文
 
 - spec 在一个主会话生成，不拆 requirement/design agent；
-- 固定两个 subagent，无 reviewer；
-- context pack 只含当前 R/D/T、契约和设计允许的相关文件；
-- 单包约 30k 字符，超限按模块拆分；
+- 固定一个 coder subagent，无 executor/reviewer；
+- context pack 是 progressive brief/resource manifest，只包含 ID、目标、验收、允许路径、
+  tooling paths、资源路径、hash、tier 和读取理由；
+- coder 先读 brief，只在实现需要时读取具体 resource，不预读全部源码或完整规则；
 - 完整日志落盘，只返回失败尾部；
 - OpenCode event 中可取得的 input/output/cache Token 按阶段累计；
 - 重复读取字符数和 full-scan reason 进入 telemetry/manifest；

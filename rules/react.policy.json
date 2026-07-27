@@ -11,6 +11,5 @@
       "max_bytes": 500000
     }
   ],
-  "required_test_keys": [],
   "executable_verifiers": []
 }

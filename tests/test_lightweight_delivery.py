@@ -275,7 +275,11 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         typescript = json.loads(
             (REPO / "rules/typescript.policy.json").read_text(encoding="utf-8")
         )
+        react = json.loads(
+            (REPO / "rules/react.policy.json").read_text(encoding="utf-8")
+        )
         self.assertNotIn("required_test_keys", typescript)
+        self.assertNotIn("required_test_keys", react)
 
     def test_repeated_identical_failure_is_bounded(self) -> None:
         from sdlc_core.common import SdlcError

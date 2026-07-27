@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 from pathlib import Path
 from typing import Any
 
 from .common import SdlcError, read_json, utc_now, write_json
 from .schema_validation import validate_schema_instance
+
+MAX_EXTERNAL_SOURCE_BYTES = 10 * 1024 * 1024
 
 
 def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
@@ -18,14 +21,46 @@ def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     }
     content = payload.get("content")
     uri = payload.get("uri")
+    asset = None
     if kind == "file":
         if not isinstance(uri, str) or not uri.strip():
             raise SdlcError("file SourceEnvelope 必须提供项目内 uri")
-        candidate = root / uri
+        candidate = Path(uri).expanduser()
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        candidate = candidate.resolve()
         try:
-            candidate.resolve().relative_to(root.resolve())
+            relative = candidate.relative_to(root.resolve())
         except ValueError as exc:
-            raise SdlcError(f"来源文件越出项目: {uri}") from exc
+            if payload.get("allow_external_copy") is not True:
+                raise SdlcError(
+                    f"来源文件越出项目: {uri}；受控复制必须显式设置 allow_external_copy=true"
+                ) from exc
+            if not candidate.is_file():
+                raise SdlcError(f"来源文件不存在: {uri}")
+            size = candidate.stat().st_size
+            if size > MAX_EXTERNAL_SOURCE_BYTES:
+                raise SdlcError(
+                    f"外部来源文件超过 {MAX_EXTERNAL_SOURCE_BYTES} bytes: {uri}"
+                )
+            asset_sha = _sha256_file(candidate)
+            relative = Path(
+                ".sdlc-pipeline/runs/source-assets"
+            ) / f"{asset_sha}{candidate.suffix.lower()}"
+            copied = root / relative
+            copied.parent.mkdir(parents=True, exist_ok=True)
+            if not copied.is_file() or _sha256_file(copied) != asset_sha:
+                shutil.copy2(candidate, copied)
+            asset = {
+                "original_uri": str(candidate),
+                "uri": relative.as_posix(),
+                "sha256": asset_sha,
+                "size": size,
+                "copied_at": utc_now(),
+            }
+            candidate = copied
+            source = source or str(Path(uri).expanduser().resolve())
+            uri = relative.as_posix()
         if not candidate.is_file():
             raise SdlcError(f"来源文件不存在: {uri}")
         if not media_type.startswith("text/") and candidate.suffix.lower() not in {
@@ -73,6 +108,8 @@ def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "content": content,
         "ingested_at": utc_now(),
     }
+    if asset is not None:
+        envelope["asset"] = asset
     validate_schema_instance(root, "source-envelope.schema.json", envelope)
     path = (
         root / ".sdlc-pipeline" / "runs" / "sources" / f"{source_id}.json"
@@ -99,6 +136,17 @@ def validate_source_envelopes(root: Path, sources: list[dict[str, Any]]) -> None
                 raise SdlcError(
                     f"{identifier} segment {segment['anchor']} SHA-256 不匹配"
                 )
+        asset = source.get("asset")
+        if asset:
+            candidate = root / asset["uri"]
+            try:
+                candidate.resolve().relative_to(
+                    (root / ".sdlc-pipeline" / "runs" / "source-assets").resolve()
+                )
+            except ValueError as exc:
+                raise SdlcError(f"{identifier} 外部来源副本越出受控目录") from exc
+            if not candidate.is_file() or _sha256_file(candidate) != asset["sha256"]:
+                raise SdlcError(f"{identifier} 外部来源副本缺失或 SHA-256 不匹配")
 
 
 def source_index(sources: list[dict[str, Any]]) -> dict[str, set[str]]:
@@ -119,3 +167,11 @@ def load_source(root: Path, source_id: str) -> dict[str, Any]:
 
 def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()

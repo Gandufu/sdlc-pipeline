@@ -8,7 +8,12 @@ from typing import Any
 
 from .artifacts import load_current_spec, require_code_ready
 from .common import SdlcError, read_json, sha256_file, utc_now, write_json
-from .trace import changed_path_fingerprints, validate_diff, verify_extension_points
+from .trace import (
+    TOOLING_CONFIG_PATHS,
+    changed_path_fingerprints,
+    validate_diff,
+    verify_extension_points,
+)
 
 from .schema_validation import validate_schema_instance
 
@@ -23,12 +28,12 @@ def validate_write_path(root: Path, path_value: str) -> dict[str, Any]:
         relative = path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError as exc:
         raise SdlcError("禁止写入项目之外的路径") from exc
-    from .trace import allowed_design_paths, matches_path, scaffold
+    from .trace import allowed_change_paths, matches_path, scaffold
 
     contract = scaffold(root)
     if matches_path(relative, contract["protected_paths"]):
         raise SdlcError(f"禁止修改 protected path: {relative}")
-    allowed = sorted(set(contract["allowed_paths"]) | set(allowed_design_paths(root)))
+    allowed = allowed_change_paths(root)
     if not matches_path(relative, allowed):
         raise SdlcError(f"路径不在设计/脚手架允许范围: {relative}")
     return {"ok": True, "path": relative}
@@ -39,10 +44,10 @@ def _validate_mapping_paths(
     mapping: dict[str, Any],
     label: str,
 ) -> tuple[dict[str, list[str]], dict[str, dict[str, Any]]]:
-    from .trace import allowed_design_paths, matches_path, scaffold
+    from .trace import allowed_change_paths, matches_path, scaffold
 
     contract = scaffold(root)
-    allowed = sorted(set(contract["allowed_paths"]) | set(allowed_design_paths(root)))
+    allowed = allowed_change_paths(root)
     normalized: dict[str, list[str]] = {}
     evidence: dict[str, dict[str, Any]] = {}
     for identifier, raw_paths in mapping.items():
@@ -177,6 +182,7 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
         "allowed_paths": sorted({
             path for item in designs for path in item["allowed_paths"]
         }),
+        "tooling_paths": TOOLING_CONFIG_PATHS,
         "test_ids": [item["id"] for item in tests],
         "acceptance": [
             criterion

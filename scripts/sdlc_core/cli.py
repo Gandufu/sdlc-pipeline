@@ -31,7 +31,9 @@ from .journal import (
     begin_attempt,
     close_run,
     finish_attempt,
+    heartbeat_attempt,
     record_spec_checkpoint,
+    running_attempt,
 )
 from .status import status
 from .versions import finalize
@@ -148,6 +150,12 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
         return before_task(root, payload["role"])
     if operation == "task-after":
         return after_task(root, payload["role"], payload["output"])
+    if operation == "task-heartbeat":
+        return heartbeat_attempt(
+            root,
+            operation="task-before",
+            owner_pid=payload.get("owner_pid"),
+        )
     if operation == "path-check":
         return validate_write_path(root, payload["path"])
     if operation == "finalize":
@@ -186,6 +194,41 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if operation == "task-heartbeat":
+        return _execute(root, operation, payload)
+    if operation == "task-before":
+        phase, step = _phase_step(operation, payload)
+        attempt = begin_attempt(
+            root,
+            phase=phase,
+            step=step,
+            operation=operation,
+            payload=payload,
+            owner_pid=payload.get("owner_pid"),
+            deadline_seconds=payload.get("deadline_seconds"),
+        )
+        try:
+            result = _execute(root, operation, payload)
+        except Exception as exc:
+            finish_attempt(root, attempt, state="failed", error=str(exc))
+            raise
+        return {
+            **result,
+            "attempt_id": attempt["attempt_id"],
+            "deadline_seconds": payload.get("deadline_seconds"),
+            "deadline_at": attempt.get("deadline_at"),
+        }
+    if operation == "task-after":
+        attempt = running_attempt(root, operation="task-before")
+        if not attempt:
+            raise SdlcError("coder dispatch 不存在、已超时或已回收")
+        try:
+            result = _execute(root, operation, payload)
+        except Exception as exc:
+            finish_attempt(root, attempt, state="failed", error=str(exc))
+            raise
+        finish_attempt(root, attempt, state="succeeded", result=result)
+        return result
     if operation in {"status", "path-check"} or (
         operation == "publish" and payload.get("kind") in {"tokens", "checkpoint"}
     ):
@@ -230,7 +273,7 @@ def main() -> int:
         "operation",
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
-            "path-check", "finalize",
+            "task-heartbeat", "path-check", "finalize",
         ),
     )
     parser.add_argument("--root", help="项目根目录")

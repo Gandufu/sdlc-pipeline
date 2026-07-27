@@ -110,6 +110,29 @@ class InstallerTests(unittest.TestCase):
             installer.install(target)
             self.assertEqual(custom.read_text(encoding="utf-8"), "mine")
 
+    def test_install_self_checks_contracts_and_injects_tool_ignores(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            vitest = target / "vitest.config.ts"
+            eslint = target / "eslint.config.mjs"
+            vitest.write_text(
+                "export default { test: { exclude: ['node_modules/**'] } }\n",
+                encoding="utf-8",
+            )
+            eslint.write_text(
+                "export default [{ ignores: ['node_modules/**'] }]\n",
+                encoding="utf-8",
+            )
+
+            result = installer.install(target)
+
+            self.assertTrue(result["contract_self_check"]["ok"])
+            self.assertEqual(result["tooling_ignore"]["unresolved"], [])
+            for path in (vitest, eslint):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn(".opencode/**", text)
+                self.assertIn(".sdlc-pipeline/**", text)
+
     def test_install_adds_plugin_sdk_dependency_and_preserves_existing_dependencies(
         self,
     ) -> None:

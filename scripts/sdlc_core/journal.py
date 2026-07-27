@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,8 @@ def begin_attempt(
     operation: str,
     payload: dict[str, Any],
     idempotency_key: str | None = None,
+    owner_pid: int | None = None,
+    deadline_seconds: int | None = None,
 ) -> dict[str, Any]:
     run = ensure_run(root, phase)
     if run.get("state") == "blocked":
@@ -100,6 +103,14 @@ def begin_attempt(
                 }
     attempt_number = int(run.get("attempt_count", 0)) + 1
     attempt_id = f"A{attempt_number:06d}"
+    started_at = utc_now()
+    deadline_at = None
+    if deadline_seconds is not None:
+        if deadline_seconds < 1:
+            raise SdlcError("attempt deadline_seconds 必须大于 0")
+        deadline_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=deadline_seconds)
+        ).isoformat()
     attempt = {
         "schema_version": "1.0",
         "run_id": run_id,
@@ -110,8 +121,10 @@ def begin_attempt(
         "state": "running",
         "input_hash": binding,
         "idempotency_key": idempotency_key,
-        "owner": _owner_identity(),
-        "started_at": utc_now(),
+        "owner": _owner_identity(owner_pid),
+        "started_at": started_at,
+        "last_heartbeat_at": started_at,
+        "deadline_at": deadline_at,
         "finished_at": None,
         "result": None,
         "error": None,
@@ -135,6 +148,63 @@ def begin_attempt(
         data={"operation": operation, "input_hash": binding},
     )
     return {"cached": False, **attempt}
+
+
+def heartbeat_attempt(
+    root: Path,
+    *,
+    operation: str,
+    owner_pid: int | None = None,
+) -> dict[str, Any]:
+    run = active_run(root)
+    if not run:
+        return {"ok": True, "active": False}
+    attempts = [
+        item for item in _running_attempts(root, run["run_id"])
+        if item.get("operation") == operation
+    ]
+    if not attempts:
+        return {"ok": True, "active": False}
+    attempt = attempts[-1]
+    if owner_pid is not None and attempt.get("owner") != _owner_identity(owner_pid):
+        raise SdlcError("heartbeat owner 与 coder dispatch owner 不匹配")
+    attempt["last_heartbeat_at"] = utc_now()
+    write_json(
+        _attempt_path(
+            root, run["run_id"], attempt["phase"], attempt["attempt_id"]
+        ),
+        attempt,
+    )
+    append_event(
+        root,
+        run["run_id"],
+        "attempt.heartbeat",
+        phase=attempt["phase"],
+        step=attempt["step"],
+        attempt_id=attempt["attempt_id"],
+        data={"deadline_at": attempt.get("deadline_at")},
+    )
+    return {
+        "ok": True,
+        "active": True,
+        "attempt_id": attempt["attempt_id"],
+        "deadline_at": attempt.get("deadline_at"),
+    }
+
+
+def running_attempt(
+    root: Path,
+    *,
+    operation: str,
+) -> dict[str, Any] | None:
+    run = active_run(root)
+    if not run:
+        return None
+    matches = [
+        item for item in _running_attempts(root, run["run_id"])
+        if item.get("operation") == operation
+    ]
+    return matches[-1] if matches else None
 
 
 def finish_attempt(
@@ -287,6 +357,8 @@ def journal_status(root: Path) -> dict[str, Any]:
     run = active_run(root)
     if not run:
         return {"active": False}
+    _reconcile_abandoned_attempts(root, run)
+    run = active_run(root) or run
     running = _running_attempts(root, run["run_id"])
     return {
         "active": True,
@@ -303,6 +375,8 @@ def journal_status(root: Path) -> dict[str, Any]:
                 "phase": item["phase"],
                 "step": item["step"],
                 "owner_alive": _owner_alive(item.get("owner")),
+                "last_heartbeat_at": item.get("last_heartbeat_at"),
+                "deadline_at": item.get("deadline_at"),
             }
             for item in running
         ],
@@ -360,10 +434,10 @@ def _idempotency_record(
     return read_json(_idempotency_path(root, run_id, key), required=False)
 
 
-def _owner_identity() -> dict[str, Any]:
+def _owner_identity(pid: int | None = None) -> dict[str, Any]:
     from .runs import process_identity
 
-    pid = os.getpid()
+    pid = os.getpid() if pid is None else int(pid)
     return {"pid": pid, "process_identity": process_identity(pid)}
 
 
@@ -393,16 +467,28 @@ def _running_attempts(root: Path, run_id: str) -> list[dict[str, Any]]:
 
 
 def _reconcile_abandoned_attempts(root: Path, run: dict[str, Any]) -> None:
+    recovered = False
     for attempt in _running_attempts(root, run["run_id"]):
-        if _owner_alive(attempt.get("owner")):
+        deadline_at = attempt.get("deadline_at")
+        expired = bool(
+            deadline_at
+            and datetime.fromisoformat(deadline_at) <= datetime.now(timezone.utc)
+        )
+        if _owner_alive(attempt.get("owner")) and not expired:
             continue
+        recovered = True
+        reason = (
+            "attempt deadline expired before completion"
+            if expired
+            else "owner process exited before attempt completion"
+        )
         path = _attempt_path(
             root, run["run_id"], attempt["phase"], attempt["attempt_id"]
         )
         attempt.update({
             "state": "aborted",
             "finished_at": utc_now(),
-            "error": "owner process exited before attempt completion",
+            "error": reason,
         })
         write_json(path, attempt)
         append_event(
@@ -413,4 +499,18 @@ def _reconcile_abandoned_attempts(root: Path, run: dict[str, Any]) -> None:
             step=attempt["step"],
             attempt_id=attempt["attempt_id"],
             data={"error": attempt["error"], "recovered": True},
+        )
+    if recovered:
+        run.update({
+            "state": "aborted",
+            "updated_at": utc_now(),
+            "last_error": reason,
+        })
+        write_json(_run_dir(root, run["run_id"]) / "run.json", run)
+        append_event(
+            root,
+            run["run_id"],
+            "run.aborted",
+            phase=run.get("phase"),
+            data={"reason": run["last_error"], "recovered": True},
         )

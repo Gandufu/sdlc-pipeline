@@ -6,6 +6,7 @@ import path from "node:path"
 const AGENTS = {
   "sdlc-coder": "coder",
 }
+const CODER_DEADLINE_SECONDS = 9 * 60
 const PLUGIN_PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", ".."
 )
@@ -104,6 +105,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
           source: tool.schema.string().optional(),
           uri: tool.schema.string().optional(),
           media_type: tool.schema.string().optional(),
+          allow_external_copy: tool.schema.boolean().optional(),
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_ingest_source")
@@ -115,6 +117,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
               source: args.source,
               uri: args.uri,
               media_type: args.media_type,
+              allow_external_copy: args.allow_external_copy,
             },
           }))
         },
@@ -166,6 +169,12 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
           if (!allowed[context?.agent]?.includes(args.action)) {
             throw new Error(`agent ${context?.agent || "unknown"} cannot run lifecycle ${args.action}`)
           }
+          if (context?.agent === "sdlc-coder") {
+            invoke(rootOf(context, fallbackRoot), "task-heartbeat", {
+              role: "coder",
+              owner_pid: process.pid,
+            })
+          }
           return JSON.stringify(invoke(rootOf(context, fallbackRoot), "lifecycle", {
             action: args.action,
             ...options,
@@ -190,6 +199,10 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
 
     "tool.execute.before": async (input, output) => {
       if (["edit", "write", "apply_patch"].includes(input.tool)) {
+        invoke(fallbackRoot, "task-heartbeat", {
+          role: "coder",
+          owner_pid: process.pid,
+        })
         const target = output.args?.filePath || output.args?.path
         if (target) invoke(fallbackRoot, "path-check", { path: target })
         return
@@ -199,10 +212,16 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
       if (!role) {
         throw new Error("sdlc-main 只能派发 sdlc-coder")
       }
-      const result = invoke(fallbackRoot, "task-before", { role })
+      const result = invoke(fallbackRoot, "task-before", {
+        role,
+        owner_pid: process.pid,
+        deadline_seconds: CODER_DEADLINE_SECONDS,
+      })
       const paths = result.context_pack.paths.join(", ")
       output.args.prompt = `${output.args.prompt || ""}\n\n`
         + `[SDLC context pack] ${paths}\n${result.instruction}`
+        + `\nCoder deadline: ${CODER_DEADLINE_SECONDS}s; 每完成一个可验证增量即运行 focused check，`
+        + "无法在 deadline 内完成时返回已完成摘要与 open_issues，不要静默等待。"
     },
 
     "tool.execute.after": async (input, output) => {

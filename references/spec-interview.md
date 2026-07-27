@@ -16,6 +16,13 @@
 和 AC 到 unit/integration 逻辑测试键的验证映射。功能和验收 ID 使用 `F-xxxx`、`AC-xxxx`。
 正式文档使用项目配置语言（默认中文），代码标识、协议字段和原文保持原样。
 
-发布前读取 `.sdlc-pipeline/schemas/feature-contract.schema.json`，展示共享理解并取得用户明确
-确认，然后只调用一次 `sdlc_publish_contract`。Core 负责 Schema 校验、来源 anchor 校验和
+推荐方案与正式发布是两个独立动作：
+
+1. 用户说“采用推荐”时，只把选项和理由保存到 checkpoint，继续生成候选；
+2. 展示完整候选及其 source refs、范围、AC、接口与验证映射；
+3. 只有用户明确说“确认发布”时，才把 checkpoint 标为 confirmed 并调用 publish。
+
+不得把“采用推荐”“继续”“没问题”等局部答复推断为发布授权。发布前读取
+`.sdlc-pipeline/schemas/feature-contract.schema.json`，然后只调用一次
+`sdlc_publish_contract`。Core 负责 Schema 校验、来源 anchor 校验和
 requirements/design/test-plan 三视图原子投影。

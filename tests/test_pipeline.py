@@ -921,6 +921,113 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(recovered["state"], "aborted")
         self.assertEqual(next_attempt["attempt_id"], "A000002")
 
+    def test_status_reconciles_abandoned_attempt_without_next_action(self) -> None:
+        abandoned = begin_attempt(
+            self.fixture.root,
+            phase="code",
+            step="coder-dispatch",
+            operation="task-before",
+            payload={"role": "coder"},
+        )
+        path = (
+            self.fixture.root
+            / ".sdlc-pipeline/runs/journal"
+            / abandoned["run_id"]
+            / "attempts/code"
+            / f"{abandoned['attempt_id']}.json"
+        )
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["owner"] = {
+            "pid": 4242,
+            "process_identity": {
+                "scheme": "windows-filetime",
+                "created": "gone",
+            },
+        }
+        write_json(path, value)
+
+        current = journal_status(self.fixture.root)
+
+        recovered = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(recovered["state"], "aborted")
+        self.assertEqual(current["state"], "aborted")
+        self.assertEqual(current["running_attempts"], [])
+
+    def test_status_aborts_alive_owner_after_attempt_deadline(self) -> None:
+        attempt = begin_attempt(
+            self.fixture.root,
+            phase="code",
+            step="coder-dispatch",
+            operation="task-before",
+            payload={"role": "coder"},
+            deadline_seconds=540,
+        )
+        path = (
+            self.fixture.root
+            / ".sdlc-pipeline/runs/journal"
+            / attempt["run_id"]
+            / "attempts/code"
+            / f"{attempt['attempt_id']}.json"
+        )
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["deadline_at"] = "2000-01-01T00:00:00+00:00"
+        write_json(path, value)
+
+        current = journal_status(self.fixture.root)
+
+        self.assertEqual(current["state"], "aborted")
+        self.assertIn("deadline expired", current["last_error"])
+
+    def test_tooling_configs_are_predeclared_non_business_changes(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+
+        result = validate_write_path(
+            self.fixture.root,
+            str(self.fixture.root / "vitest.config.ts"),
+        )
+        context = build_context_pack(self.fixture.root, "coder")
+        manifest = json.loads(
+            (self.fixture.root / context["paths"][0]).read_text(encoding="utf-8")
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertIn("vitest.config.ts", manifest["brief"]["tooling_paths"])
+        self.assertIn("eslint.config.mjs", manifest["brief"]["tooling_paths"])
+
+    def test_coder_dispatch_has_deadline_heartbeat_and_terminal_handoff(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+
+        started = execute(self.fixture.root, "task-before", {
+            "role": "coder",
+            "owner_pid": os.getpid(),
+            "deadline_seconds": 540,
+        })
+        running = journal_status(self.fixture.root)
+        heartbeat = execute(self.fixture.root, "task-heartbeat", {
+            "role": "coder",
+            "owner_pid": os.getpid(),
+        })
+
+        self.assertEqual(started["deadline_seconds"], 540)
+        self.assertEqual(len(running["running_attempts"]), 1)
+        self.assertTrue(running["running_attempts"][0]["deadline_at"])
+        self.assertTrue(heartbeat["ok"])
+
+        (self.fixture.root / "src/feature.py").write_text(
+            "value = 1\n", encoding="utf-8"
+        )
+        (self.fixture.root / "tests/test_feature.py").write_text(
+            "def test_feature(): assert True\n", encoding="utf-8"
+        )
+        execute(self.fixture.root, "task-after", {
+            "role": "coder",
+            "output": json.dumps({"summary": "done", "open_issues": []}),
+        })
+
+        self.assertEqual(journal_status(self.fixture.root)["running_attempts"], [])
+
     def test_handoff_ignores_agent_authored_mapping_fields(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
@@ -989,6 +1096,25 @@ class ReliabilityTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("AC-R-0001-01", markdown)
         self.assertIn(ingested["source_id"], markdown)
+
+    def test_external_file_source_is_copied_and_hash_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            external = Path(temporary) / "prototype.html"
+            external.write_text("<main>Home prototype</main>\n", encoding="utf-8")
+
+            ingested = ingest_source(self.fixture.root, {
+                "kind": "file",
+                "uri": str(external),
+                "media_type": "text/html",
+                "allow_external_copy": True,
+            })["envelope"]
+
+        asset = ingested["asset"]
+        copied = self.fixture.root / asset["uri"]
+        self.assertTrue(copied.is_file())
+        self.assertEqual(asset["original_uri"], str(external.resolve()))
+        self.assertEqual(asset["sha256"], sha256_file(copied))
+        self.assertEqual(ingested["uri"], asset["uri"])
 
     def test_journal_idempotency_and_spec_checkpoint_resume(self) -> None:
         payload = {

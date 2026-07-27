@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.11.0`。
+OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.11.1`。
 
 它面向固定脚手架和给定需求完成一个可交付功能：需求澄清、设计、编码、确定性验证和版本固化。
 Python Core 保存机器真值与运行证据，OpenCode plugin 只负责薄适配和最小上下文编排。
@@ -22,6 +22,10 @@ curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scri
 安装器自动准备 `@opencode-ai/plugin` 依赖。重启 OpenCode 后只执行 `/sdlc-init`，再依次使用
 `/sdlc-spec`、`/sdlc-code`、`/sdlc-test`。
 
+安装会对发行包内模板 registry 与 rule policy 做 contract self-check，并把 `.opencode/**`、
+`.sdlc-pipeline/**` 合并进常见 Vitest/ESLint 配置的 ignore 数组。若配置存在但结构无法安全
+合并，安装结果的 `tooling_ignore.unresolved` 会显式列出，不能把它当成已处理。
+
 ## 轻量流程
 
 ```text
@@ -32,7 +36,8 @@ init
 spec
   → 摄取 SourceEnvelope
   → 最多三个阻塞问题
-  → 用户确认单功能 Feature Contract
+  → “采用推荐”只保存 checkpoint
+  → 用户明确“确认发布”单功能 Feature Contract
   → Core 原子生成 requirement/design/test-plan 三个视图
 
 code
@@ -51,6 +56,8 @@ test
 
 不设置测试 subagent、默认 reviewer 或隐式完整生命周期 hook。相同输入指纹的成功交付证据可以复用；
 相同失败连续出现两次时 Run Journal 将流程置为 blocked，避免 agent 无界反思和重试。
+coder dispatch 单独绑定 OpenCode PID、9 分钟 deadline 和工具活动 heartbeat；owner 退出或
+deadline 到期后，下一次 status 会把 attempt/run 标为 aborted，不遗留伪 running 状态。
 
 Context manifest 不嵌入源码、长需求或完整规则，只提供 brief、资源路径、hash、tier 和读取理由。
 Delivery Memory 自动派生稳定项目事实、已确认决策以及“失败后成功”的指纹经验；它不保存聊天，
@@ -75,6 +82,18 @@ Delivery Memory 自动派生稳定项目事实、已确认决策以及“失败�
 
 `.sdlc-pipeline/runs/journal/` 记录 run/phase/step/attempt/event，包含进程身份、失败分类和输入指纹。
 Spec 问答检查点保存 source refs、已确认事实、假设和风险；中断后从最后检查点继续。
+项目外文本来源只有显式 `allow_external_copy=true` 才会复制到
+`.sdlc-pipeline/runs/source-assets/`；副本与 SourceEnvelope 同时绑定 SHA-256。默认单文件上限
+10 MiB，目录和未经 extractor 处理的二进制来源仍拒绝。
+
+Headless 运行建议实时消费 OpenCode 的原始事件流，不要等进程结束后才读取 stdout：
+
+```powershell
+opencode run --format json "/sdlc-code"
+```
+
+`--format json` 是宿主 CLI 的调用参数，插件无法替调用者强制开启；journal heartbeat 是独立的
+项目内持久证据。
 
 正式机器产物包括：
 
@@ -117,6 +136,8 @@ Feature Contract 已登记的测试逻辑键，不构成交付证据。内部仍
 `lifecycle.json` 使用 argv 数组声明 install/compile/start/stop/health/artifact，以及
 unit、integration、lint、static_analysis 逻辑键。`scaffold.json` 声明关键文件 fingerprint、
 protected paths、allowed paths 与 extension points。
+常见 `vitest.config.*`、`eslint.config.*` 作为预登记 tooling paths，可记录为非业务变更，
+但不会被错误计入 design-to-code 功能证据。
 
 Electron profile 是当前参考实现；状态机和证据契约稳定后再增加 Spring、Node Web、Python API
 profile，避免模板数量先于 Core 稳定性扩张。

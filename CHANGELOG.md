@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.1 - 2026-07-27
+
+- 安装后校验 template registry 与 rule policy，修复 React policy/schema 漂移。
+- 自动合并 Vitest/ESLint 插件目录 ignore，并预登记 tooling config 非业务变更路径。
+- 支持显式授权的项目外文本来源 copy + SHA-256 SourceEnvelope 摄取。
+- coder dispatch 增加独立 deadline、PID lease、heartbeat 和 status 自动 aborted 回收。
+- 将“采用推荐”checkpoint 与“确认发布”授权拆成两个明确交互。
+- 同步 OpenCode-first 架构设计真值到 0.11.1 的状态机、工具边界与验证语义。
+
 ## 0.11.0 - 2026-07-27
 
 - Context pack 改为 progressive brief/resource manifest，不再嵌入源码和完整规则。

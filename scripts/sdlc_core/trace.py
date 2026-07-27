@@ -16,6 +16,17 @@ from .common import (
 
 from .schema_validation import validate_schema_instance
 
+TOOLING_CONFIG_PATHS = [
+    "vitest.config.ts",
+    "vitest.config.js",
+    "vitest.config.mts",
+    "vitest.config.mjs",
+    "eslint.config.mjs",
+    "eslint.config.js",
+    "eslint.config.cjs",
+    "eslint.config.ts",
+]
+
 def scaffold(root: Path) -> dict[str, Any]:
     path = root / ".sdlc-pipeline" / "scaffold.json"
     data = read_json(path)
@@ -143,6 +154,15 @@ def allowed_design_paths(root: Path) -> list[str]:
     )
 
 
+def allowed_change_paths(root: Path) -> list[str]:
+    contract = scaffold(root)
+    return sorted(
+        set(contract["allowed_paths"])
+        | set(allowed_design_paths(root))
+        | set(TOOLING_CONFIG_PATHS)
+    )
+
+
 def validate_diff(
     root: Path,
     before: dict[str, Any] | list[str] | None = None,
@@ -162,9 +182,7 @@ def validate_diff(
     elif before is not None:
         actual = sorted(set(actual) - set(before))
     protected = [path for path in actual if matches_path(path, contract["protected_paths"])]
-    allowed_patterns = sorted(
-        set(contract["allowed_paths"]) | set(allowed_design_paths(root))
-    )
+    allowed_patterns = allowed_change_paths(root)
     outside = [
         path for path in actual
         if not matches_path(path, allowed_patterns)

@@ -5,8 +5,10 @@ import argparse
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -18,10 +20,11 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.11.0"
+VERSION = "0.11.1"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.7"
+TOOLING_IGNORE_PATTERNS = (".opencode/**", ".sdlc-pipeline/**")
 MANAGED = (
     ("scripts", ".sdlc-pipeline/scripts"),
     ("templates", ".sdlc-pipeline/templates"),
@@ -99,6 +102,73 @@ def _ensure_opencode_dependencies(target: Path) -> None:
         package_path,
         json.dumps(package, ensure_ascii=False, indent=2) + "\n",
     )
+
+
+def _merge_ignore_array(path: Path, key: str) -> bool:
+    text = path.read_text(encoding="utf-8")
+    match = re.search(
+        rf"(?P<prefix>\b{re.escape(key)}\s*:\s*\[)(?P<body>.*?)(?P<suffix>\])",
+        text,
+        re.DOTALL,
+    )
+    if not match:
+        return False
+    body = match.group("body")
+    missing = [pattern for pattern in TOOLING_IGNORE_PATTERNS if pattern not in body]
+    if not missing:
+        return True
+    separator = "" if not body.strip() else ("" if body.rstrip().endswith(",") else ",")
+    addition = separator + "".join(f" {pattern!r}," for pattern in missing)
+    updated = text[:match.end("body")] + addition + text[match.end("body"):]
+    atomic_write(path, updated)
+    return True
+
+
+def _ensure_tooling_ignores(target: Path) -> dict[str, object]:
+    updated: list[str] = []
+    unresolved: list[str] = []
+    groups = (
+        ("exclude", ("vitest.config.ts", "vitest.config.js", "vitest.config.mts", "vitest.config.mjs")),
+        ("ignores", ("eslint.config.mjs", "eslint.config.js", "eslint.config.cjs", "eslint.config.ts")),
+    )
+    for key, names in groups:
+        for name in names:
+            path = target / name
+            if not path.is_file():
+                continue
+            if _merge_ignore_array(path, key):
+                updated.append(name)
+            else:
+                unresolved.append(name)
+    return {
+        "patterns": list(TOOLING_IGNORE_PATTERNS),
+        "updated": sorted(updated),
+        "unresolved": sorted(unresolved),
+    }
+
+
+def _contract_self_check(target: Path) -> dict[str, object]:
+    runtime_scripts = target / ".sdlc-pipeline" / "scripts"
+    runtime_text = str(runtime_scripts)
+    if runtime_text not in sys.path:
+        sys.path.insert(0, runtime_text)
+    from sdlc_core.schema_validation import validate_schema_instance
+
+    checked: list[str] = []
+    for path in sorted((target / ".sdlc-pipeline" / "rules").glob("*.policy.json")):
+        validate_schema_instance(target, "rule-policy.schema.json", json.loads(
+            path.read_text(encoding="utf-8")
+        ))
+        checked.append(path.relative_to(target).as_posix())
+    manifest = target / ".sdlc-pipeline" / "templates" / "manifest.json"
+    if manifest.is_file():
+        validate_schema_instance(
+            target,
+            "template-registry.schema.json",
+            json.loads(manifest.read_text(encoding="utf-8")),
+        )
+        checked.append(manifest.relative_to(target).as_posix())
+    return {"ok": True, "checked": checked}
 
 
 def _source(name: str) -> Path:
@@ -199,6 +269,7 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
             obsolete = target / obsolete_name
             if obsolete.is_file():
                 obsolete.unlink()
+    contract_self_check = _contract_self_check(target)
     _ensure_opencode_dependencies(target)
     config_path = target / "opencode.json"
     config = {}
@@ -214,12 +285,19 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
         "layout": "project-local",
         "desktop_compatible": True,
     }
-    atomic_write(marker, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
     atomic_write(
         target / ".sdlc-pipeline" / ".gitignore",
         "runs/\n**/__pycache__/\n*.py[cod]\n",
     )
-    return {"ok": True, "target": str(target), **value}
+    tooling_ignore = _ensure_tooling_ignores(target)
+    atomic_write(marker, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    return {
+        "ok": True,
+        "target": str(target),
+        **value,
+        "contract_self_check": contract_self_check,
+        "tooling_ignore": tooling_ignore,
+    }
 
 
 def prepare_opencode_plugin_dependencies(target: Path) -> dict[str, str]:
