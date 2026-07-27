@@ -94,7 +94,9 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         description: "校验并原子发布固定格式 SDLC 产物；AI 不能直接编辑正式文档。",
         args: {
           kind: tool.schema.enum(["spec", "tokens"]),
-          payload: tool.schema.string().describe("JSON object encoded as a string"),
+          payload: tool.schema.string().describe(
+            "JSON object encoded as a string. For kind=spec, read .sdlc-pipeline/schemas/spec.schema.json first: include schema_version='1.0', flow, spec_confirmed=true; requirements is {source_inputs,analysis,items}, design/test_plan are {items}; use R-0001/D-0001/T-0001 IDs."
+          ),
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_publish")
@@ -105,7 +107,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         },
       }),
       sdlc_lifecycle: tool({
-        description: "执行确定性的探测、init、编译、启停、健康检查、产物验证和测试。",
+        description: "执行确定性的生命周期动作。角色范围：coder：仅 `compile`、`health`；executor：仅 `run_tests`、`health`；主会话负责其余动作（包括 `test`）。",
         args: {
           action: tool.schema.enum([
             "probe", "init", "install", "compile", "start", "stop", "restart",
@@ -173,6 +175,11 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         role,
         output: output.output || "",
       })
+      if (role === "coder") {
+        invoke(fallbackRoot, "lifecycle", {
+          action: "compile_restart_verify",
+        })
+      }
     },
 
     event: async ({ event }) => {

@@ -19,7 +19,9 @@ permission:
 2. 不修改 requirements、design、test-plan、版本记录、lifecycle 或 protected paths。
 3. 为测试计划中的 T-id 编写对应自动化测试或明确的验证实现。
 4. 不安装系统软件，不执行 commit、tag、push。
-5. 可调用 `sdlc_lifecycle` 做局部 compile，但最终证据由主会话重新执行。
+5. `sdlc_lifecycle` 仅可调用 `compile` 或 `health`；禁止调用 `run_tests` 或 `test`。
+   `run_tests` 仅由 sdlc-executor 调用，`test` 仅由主会话在 executor handoff 后调用；最终证据
+   仍由主会话重新执行。
 
 最终回复只能包含一个 JSON 对象：
 

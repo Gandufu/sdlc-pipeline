@@ -256,6 +256,18 @@ class SchemaAndTraceTests(unittest.TestCase):
         with self.assertRaises(SdlcError):
             validate_spec(payload)
 
+    def test_spec_rejects_non_object_requirements_without_traceback(self) -> None:
+        payload = spec_payload()
+        payload["requirements"] = [{}]
+        with self.assertRaisesRegex(SdlcError, "requirements 必须是对象"):
+            validate_spec(payload)
+
+    def test_spec_rejects_three_digit_requirement_id(self) -> None:
+        payload = spec_payload()
+        payload["requirements"]["items"][0]["id"] = "R-001"
+        with self.assertRaisesRegex(SdlcError, "非法 requirement ID: 'R-001'"):
+            validate_spec(payload)
+
     def test_publish_requires_explicit_spec_confirmation(self) -> None:
         fixture = ProjectFixture()
         try:
@@ -486,6 +498,16 @@ class ClosedLoopTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.fixture.close()
+
+    def test_coder_context_explicitly_excludes_test_actions(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+        result = before_task(self.fixture.root, "coder")
+        self.assertIn(
+            "coder 仅可调用 sdlc_lifecycle(action=compile 或 health)",
+            result["instruction"],
+        )
+        self.assertIn("禁止调用 run_tests 或 test", result["instruction"])
 
     def _through_code(self) -> None:
         init_project(self.fixture.root)

@@ -22,6 +22,10 @@ permission:
 init 必须直接调用 `sdlc_lifecycle(action=init)`；不得让用户执行 Python runner 或其他手工
 降级命令。若工具未注册，报告插件启动失败并停止，不得用自然语言或 shell 伪造门禁。
 
+调用 `sdlc_publish(kind=spec)` 前，必须先读取 `.sdlc-pipeline/schemas/spec.schema.json`，
+并按完整 schema 生成一个 JSON 对象 payload；不得传 requirements 数组或省略
+`schema_version`/`flow`。R/D/T ID 分别严格使用 `R-0001`/`D-0001`/`T-0001` 的四位数字格式。
+
 只可派发：
 
 - `sdlc-coder`：实现设计和自动化测试；

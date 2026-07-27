@@ -168,13 +168,21 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         repeated_chars=context["repeated_chars"],
         source="context-pack",
     )
+    role_instruction = (
+        "coder 仅可调用 sdlc_lifecycle(action=compile 或 health)；"
+        "禁止调用 run_tests 或 test，测试执行由 executor 和主会话负责。"
+        if role == "coder"
+        else "executor 仅可调用 sdlc_lifecycle(action=run_tests 或 health)；"
+        "test 结果固化由主会话负责。"
+    )
     return {
         "ok": True,
         "role": role,
         "context_pack": context,
         "instruction": (
             "只读取列出的 context pack；超过一包时按模块逐包处理。"
-            "最终只返回约定 JSON handoff。"
+            + role_instruction
+            + "最终只返回约定 JSON handoff。"
         ),
     }
 

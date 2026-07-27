@@ -438,6 +438,21 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("edit: deny", executor)
         self.assertIn("task: deny", executor)
 
+    def test_spec_command_and_agent_require_schema_before_publish(self) -> None:
+        command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(encoding="utf-8")
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        for text in (command, main):
+            self.assertIn(".sdlc-pipeline/schemas/spec.schema.json", text)
+            self.assertIn("R-0001", text)
+
+    def test_coder_is_explicitly_routed_away_from_test_lifecycle_actions(self) -> None:
+        coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
+        plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
+        adapter = (REPO / "scripts/sdlc_core/adapter.py").read_text(encoding="utf-8")
+        self.assertIn("禁止调用 `run_tests` 或 `test`", coder)
+        self.assertIn("coder：仅 `compile`、`health`", plugin)
+        self.assertIn("coder 仅可调用 sdlc_lifecycle(action=compile 或 health)", adapter)
+
     def test_desktop_project_assets_are_discoverable(self) -> None:
         self.assertTrue((REPO / ".opencode/plugins/sdlc-pipeline.js").exists())
         self.assertTrue((REPO / ".opencode/skills/sdlc-pipeline/SKILL.md").exists())
@@ -473,6 +488,60 @@ class InstallerTests(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_coder_task_hook_validates_handoff_then_runs_code_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary).resolve()
+            plugin_path = target / ".opencode" / "plugins" / "sdlc-pipeline.js"
+            plugin_path.parent.mkdir(parents=True)
+            shutil.copy2(REPO / ".opencode/plugins/sdlc-pipeline.js", plugin_path)
+            core = target / ".sdlc-pipeline" / "scripts" / "sdlc.py"
+            core.parent.mkdir(parents=True)
+            core.write_text(
+                "import json, sys\n"
+                "from pathlib import Path\n"
+                "root = Path(sys.argv[sys.argv.index('--root') + 1])\n"
+                "payload = json.load(sys.stdin)\n"
+                "with (root / 'operations.jsonl').open('a', encoding='utf-8') as handle:\n"
+                "    handle.write(json.dumps({'operation': sys.argv[1], 'payload': payload}) + '\\n')\n"
+                "print(json.dumps({'ok': True}))\n",
+                encoding="utf-8",
+            )
+            sdk = target / ".opencode" / "node_modules" / "@opencode-ai" / "plugin"
+            sdk.mkdir(parents=True)
+            (sdk / "package.json").write_text(
+                json.dumps({"name": "@opencode-ai/plugin", "type": "module", "exports": "./index.js"}),
+                encoding="utf-8",
+            )
+            (sdk / "index.js").write_text(
+                "const schema = () => ({ optional() { return this }, describe() { return this } })\n"
+                "export const tool = (input) => input\n"
+                "tool.schema = { enum: schema, string: schema, boolean: schema }\n",
+                encoding="utf-8",
+            )
+            script = (
+                "import(process.argv[1]).then(async m => {"
+                "const plugin = await m.SdlcPipelinePlugin({directory: process.argv[2], worktree: '/'});"
+                "await plugin['tool.execute.after']({tool: 'task', args: {subagent_type: 'sdlc-coder'}}, {output: '{}'})"
+                "}).catch(e => { console.error(e); process.exit(1) })"
+            )
+            result = subprocess.run(
+                ["node", "-e", script, plugin_path.as_uri(), str(target)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            operations = [
+                json.loads(line)
+                for line in (target / "operations.jsonl").read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertEqual([item["operation"] for item in operations], ["task-after", "lifecycle"])
+            self.assertEqual(operations[0]["payload"]["role"], "coder")
+            self.assertEqual(
+                operations[1]["payload"]["action"], "compile_restart_verify"
+            )
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_plugin_ignores_filesystem_root_worktree_when_project_core_exists(

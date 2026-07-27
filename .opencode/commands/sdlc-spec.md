@@ -13,3 +13,9 @@ extension point 和允许路径。每个 R-id 至少一个 mandatory T-id，并�
 才设置 `spec_confirmed=true`，将三份结构化对象一次性提交给
 `sdlc_publish(kind=spec)`。未确认时不得发布正式文档。
 增量流程只有机器条件满足且用户确认时启用，否则使用 standard。
+
+发布前必须读取 `.sdlc-pipeline/schemas/spec.schema.json`，并以其作为唯一 payload 契约。
+`payload` 顶层必须是对象，至少包含：`schema_version: "1.0"`、`flow: "standard"`、
+`spec_confirmed: true`、`requirements`、`design`、`test_plan`。其中 `requirements` 不是数组，
+必须是 `{source_inputs, analysis, items}` 对象；`design` 和 `test_plan` 都是 `{items}` 对象。
+所有 ID 固定为四位数字：`R-0001`、`D-0001`、`T-0001`（不能写成 `R-001`）。

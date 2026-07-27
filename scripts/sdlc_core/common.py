@@ -148,6 +148,8 @@ def next_version(root: Path) -> str:
 
 
 def require_fields(value: dict[str, Any], fields: tuple[str, ...], context: str) -> None:
+    if not isinstance(value, dict):
+        raise SdlcError(f"{context} 必须是对象")
     missing = [field for field in fields if value.get(field) in (None, "", [])]
     if missing:
         raise SdlcError(f"{context} 缺少必填字段: {', '.join(missing)}")
