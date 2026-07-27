@@ -24,8 +24,15 @@ from .lifecycle import (
     verify_health,
 )
 from .runs import record_tokens
+from .journal import (
+    begin_attempt,
+    close_run,
+    finish_attempt,
+    record_spec_checkpoint,
+)
 from .status import status
 from .versions import finalize
+from .sources import ingest_source
 
 
 def _input() -> dict[str, Any]:
@@ -38,7 +45,7 @@ def _input() -> dict[str, Any]:
     return value
 
 
-def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
     if operation == "status":
         return status(root)
     if operation == "publish":
@@ -47,6 +54,10 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             return publish_spec(root, payload["payload"])
         if kind == "tokens":
             return record_tokens(root, **payload["payload"])
+        if kind == "checkpoint":
+            return record_spec_checkpoint(root, payload["payload"])
+        if kind == "source":
+            return ingest_source(root, payload["payload"])
         raise SdlcError(f"不支持的 publish kind: {kind}")
     if operation == "lifecycle":
         action = payload.get("action")
@@ -135,6 +146,61 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             bool(payload.get("confirmed")),
         )
     raise SdlcError(f"未知 operation: {operation}")
+
+
+def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
+    if operation == "publish":
+        return "spec", str(payload.get("kind", "publish"))
+    if operation == "lifecycle":
+        action = str(payload.get("action", "unknown"))
+        if action == "init" or action == "probe" or action == "system_install":
+            return "init", action
+        if action in {"execute_test_plan", "run_tests", "record_test_results", "test"}:
+            return "test", action
+        return "code", action
+    if operation in {"task-before", "task-after"}:
+        role = str(payload.get("role", "unknown"))
+        return ("test" if role == "executor" else "code"), f"{operation}:{role}"
+    if operation == "finalize":
+        return "version", "finalize"
+    if operation == "path-check":
+        return "code", "write-guard"
+    return "unknown", operation
+
+
+def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if operation == "status" or (
+        operation == "publish" and payload.get("kind") in {"tokens", "checkpoint"}
+    ):
+        return _execute(root, operation, payload)
+    effective_payload = dict(payload)
+    idempotency_key = effective_payload.pop("idempotency_key", None)
+    if idempotency_key is not None and (
+        not isinstance(idempotency_key, str) or not idempotency_key.strip()
+    ):
+        raise SdlcError("idempotency_key 必须是非空字符串")
+    phase, step = _phase_step(operation, effective_payload)
+    attempt = begin_attempt(
+        root,
+        phase=phase,
+        step=step,
+        operation=operation,
+        payload=effective_payload,
+        idempotency_key=idempotency_key,
+    )
+    if attempt.get("cached"):
+        return attempt["result"]
+    try:
+        result = _execute(root, operation, effective_payload)
+    except Exception as exc:
+        finish_attempt(root, attempt, state="failed", error=str(exc))
+        raise
+    finish_attempt(root, attempt, state="succeeded", result=result)
+    if operation == "publish" and effective_payload.get("kind") == "spec":
+        record_spec_checkpoint(root, {"state": "published"})
+    if operation == "finalize":
+        close_run(root, "succeeded")
+    return result
 
 
 def main() -> int:

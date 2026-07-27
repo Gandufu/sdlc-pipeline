@@ -29,7 +29,9 @@ from .common import (
 )
 from .runs import pid_alive, read_active, record_active, retain_process, stop_active
 from .trace import verify_scaffold, worktree_fingerprint
+from .schema_validation import validate_schema_instance
 
+from .policies import evaluate_hard_policies, executable_verifiers
 
 ALLOWED_VARIABLES = {"PROJECT_ROOT", "PYTHON", "PORT"}
 MANDATORY_CONTRACT_FIELDS = {
@@ -106,7 +108,7 @@ def activate_template_rules(root: Path) -> dict[str, Any]:
     scaffold = read_json(contract_root / "scaffold.json")
     template_id = scaffold["template_id"]
     manifest_path = contract_root / "templates" / "manifest.json"
-    rules: list[dict[str, str]] = []
+    rules: list[dict[str, Any]] = []
     source = "unregistered-template"
     rule_ids = scaffold.get("rules", [])
     if manifest_path.exists():
@@ -134,11 +136,21 @@ def activate_template_rules(root: Path) -> dict[str, Any]:
             path = root / relative
             if not path.is_file():
                 raise SdlcError(f"模板 {template_id} 缺少声明的 rule: {relative}")
-            rules.append({
+            entry: dict[str, Any] = {
                 "id": name,
                 "path": relative,
                 "sha256": sha256_file(path),
-            })
+                "classification": ["guidance"],
+            }
+            policy_relative = f".sdlc-pipeline/rules/{name}.policy.json"
+            policy_path = root / policy_relative
+            if policy_path.is_file():
+                policy = read_json(policy_path)
+                validate_schema_instance(root, "rule-policy.schema.json", policy)
+                entry["policy_path"] = policy_relative
+                entry["policy_sha256"] = sha256_file(policy_path)
+                entry["classification"] = policy["classification"]
+            rules.append(entry)
     active = {
         "schema_version": "1.0",
         "template_id": template_id,
@@ -156,6 +168,7 @@ def contract_path(root: Path) -> Path:
 def load_contract(root: Path) -> dict[str, Any]:
     value = read_json(contract_path(root))
     missing = sorted(MANDATORY_CONTRACT_FIELDS - set(value))
+    validate_schema_instance(root, "lifecycle.schema.json", value)
     if missing:
         raise SdlcError(f"lifecycle.json 缺少字段: {', '.join(missing)}")
     commands = value["commands"]
@@ -249,6 +262,44 @@ def execute_command(root: Path, name: str, command: dict[str, Any]) -> dict[str,
         "tail": (result.stderr or result.stdout)[-4000:],
         "argv": argv,
     }
+
+
+def run_policy_gate(root: Path, phase: str) -> dict[str, Any]:
+    hard = evaluate_hard_policies(root)
+    commands = load_contract(root)["tests"]
+    results = []
+    for verifier in executable_verifiers(root, phase):
+        key = verifier["test_key"]
+        if key not in commands:
+            raise SdlcError(
+                f"policy {verifier['rule_id']}:{verifier['id']} "
+                f"引用未知 lifecycle test key: {key}"
+            )
+        result = execute_command(
+            root,
+            f"policy-{verifier['rule_id']}-{verifier['id']}",
+            commands[key],
+        )
+        results.append({**verifier, **result})
+    report = {
+        "schema_version": "1.0",
+        "phase": phase,
+        "ok": hard["ok"] and all(item["ok"] for item in results),
+        "hard": hard,
+        "verifiers": results,
+        "created_at": utc_now(),
+        "source_fingerprint": worktree_fingerprint(root),
+    }
+    write_json(
+        root / ".sdlc-pipeline" / "runs" / f"policy-{phase}-evidence.json",
+        report,
+    )
+    if not report["ok"]:
+        raise SdlcError(
+            f"{phase} policy gate 未通过；hard={hard['violations']}，"
+            f"verifiers={[item['id'] for item in results if not item['ok']]}"
+        )
+    return report
 
 
 def probe_tools(root: Path) -> dict[str, Any]:
@@ -448,6 +499,7 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
     if not drift["ok"]:
         raise SdlcError(f"脚手架漂移，拒绝编译: {drift['drift']}")
     compile_result = run_phase(root, "compile")
+    policy = run_policy_gate(root, "code")
     stopped = stop_active(root)
     started = start(root)
     health = verify_health(root)
@@ -462,6 +514,7 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
         "start": started,
         "health": health,
         "artifact_evidence": artifacts,
+        "policy": policy,
         "source_fingerprint": worktree_fingerprint(root),
         "spec_hashes": current_spec_hashes(root),
     }
@@ -577,10 +630,36 @@ def run_test_plan(root: Path) -> dict[str, Any]:
             "log": result["log"],
             "tail": result["tail"] if not result["ok"] else "",
         })
+    policy_verifiers = executable_verifiers(root, "test")
+    policy_results = []
+    for verifier in policy_verifiers:
+        case_ids = [
+            case["id"] for case in spec["test_plan"]["items"]
+            if case["command"] == verifier["test_key"]
+        ]
+        measured = [item for item in results if item["id"] in case_ids]
+        policy_results.append({
+            **verifier,
+            "test_ids": case_ids,
+            "ok": bool(measured) and all(item["status"] == "pass" for item in measured),
+            "logs": [item["log"] for item in measured],
+        })
+    policy = {
+        "schema_version": "1.0",
+        "phase": "test",
+        "ok": all(item["ok"] for item in policy_results),
+        "verifiers": policy_results,
+        "created_at": utc_now(),
+    }
+    write_json(
+        root / ".sdlc-pipeline" / "runs" / "policy-test-evidence.json",
+        policy,
+    )
     execution = {
         "schema_version": "1.0",
         "started_at": started_at,
         "finished_at": utc_now(),
+        "policy": policy,
         "results": results,
         "binding": {
             "spec_hashes": spec_hashes,
@@ -589,7 +668,7 @@ def run_test_plan(root: Path) -> dict[str, Any]:
         },
     }
     write_json(root / ".sdlc-pipeline" / "runs" / "test-execution.json", execution)
-    return {"ok": all(item["status"] == "pass" for item in results), **execution}
+    return {"ok": policy["ok"] and all(item["status"] == "pass" for item in results), **execution}
 
 
 def execute_tests(root: Path, executor_result: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -634,10 +713,12 @@ def execute_tests(root: Path, executor_result: dict[str, Any] | None = None) -> 
         "finished_at": utc_now(),
         "results": results,
         "executor": executor_result or {},
+        "policy": execution.get("policy", {}),
         "mandatory_failed": mandatory_failed,
         "open_issues": (executor_result or {}).get("open_issues", []),
     }
     directory = root / "docs" / "sdlc" / "test-results"
+    validate_schema_instance(root, "test-results.schema.json", output)
     write_json(directory / f"{version}.json", output)
     atomic_write(directory / f"{version}.md", render_test_results(output))
     candidate = {

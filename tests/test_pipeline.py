@@ -40,7 +40,10 @@ from sdlc_core.lifecycle import (  # noqa: E402
     load_contract,
     run_test_plan,
 )
-from sdlc_core.runs import record_tokens, stop_active  # noqa: E402
+from sdlc_core.journal import begin_attempt, journal_status  # noqa: E402
+from sdlc_core.policies import evaluate_hard_policies  # noqa: E402
+from sdlc_core.runs import clear_active, record_active, record_tokens, stop_active  # noqa: E402
+from sdlc_core.sources import ingest_source  # noqa: E402
 from sdlc_core.status import status  # noqa: E402
 from sdlc_core.trace import (  # noqa: E402
     incremental_eligibility,
@@ -853,11 +856,264 @@ class ClosedLoopTests(unittest.TestCase):
         publish_spec(self.fixture.root, spec_payload())
         incomplete = trace_matrix(self.fixture.root)
         self.assertFalse(incomplete["ok"])
+        (self.fixture.root / "src/feature.py").write_text(
+            "def feature(): return 'ok'\n", encoding="utf-8"
+        )
+        (self.fixture.root / "tests/test_feature.py").write_text(
+            "def test_feature(): assert True\n", encoding="utf-8"
+        )
         complete = trace_matrix(self.fixture.root, {
             "D-0001": ["src/feature.py"],
             "tests": {"T-0001": ["tests/test_feature.py"]},
         })
         self.assertTrue(complete["ok"])
+
+
+class ReliabilityTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.fixture = ProjectFixture()
+
+    def tearDown(self) -> None:
+        self.fixture.close()
+
+    def test_dirty_baseline_detects_second_edit_to_existing_dirty_path(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+        feature = self.fixture.root / "src/feature.py"
+        test_file = self.fixture.root / "tests/test_feature.py"
+        feature.write_text("value = 'before'\n", encoding="utf-8")
+        test_file.write_text("def test_feature(): assert True\n", encoding="utf-8")
+        before_task(self.fixture.root, "coder")
+        feature.write_text("value = 'after'\n", encoding="utf-8")
+        handoff = {
+            "design_to_code": {"D-0001": ["src/feature.py"]},
+            "test_to_files": {"T-0001": ["tests/test_feature.py"]},
+            "changed_files": ["src/feature.py"],
+            "open_issues": [],
+        }
+
+        result = validate_coder_handoff(
+            self.fixture.root, json.dumps(handoff)
+        )
+
+        self.assertEqual(result["diff"]["changed_paths"], ["src/feature.py"])
+        self.assertEqual(
+            result["diff"]["fingerprints"][0]["sha256"], sha256_file(feature)
+        )
+
+    def test_coder_retry_reuses_original_spec_baseline(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+        first = before_task(self.fixture.root, "coder")
+        feature = self.fixture.root / "src/feature.py"
+        test_file = self.fixture.root / "tests/test_feature.py"
+        feature.write_text("value = 'retry'\n", encoding="utf-8")
+        test_file.write_text("def test_feature(): assert True\n", encoding="utf-8")
+
+        retry = before_task(self.fixture.root, "coder")
+        handoff = {
+            "design_to_code": {"D-0001": ["src/feature.py"]},
+            "test_to_files": {"T-0001": ["tests/test_feature.py"]},
+            "changed_files": ["src/feature.py", "tests/test_feature.py"],
+            "open_issues": [],
+        }
+        result = validate_coder_handoff(
+            self.fixture.root, json.dumps(handoff)
+        )
+
+        self.assertEqual(first["baseline"], "created")
+        self.assertEqual(retry["baseline"], "reused")
+        self.assertEqual(
+            result["diff"]["changed_paths"],
+            ["src/feature.py", "tests/test_feature.py"],
+        )
+
+    def test_abandoned_attempt_is_reconciled_on_next_action(self) -> None:
+        abandoned = begin_attempt(
+            self.fixture.root,
+            phase="code",
+            step="compile",
+            operation="lifecycle",
+            payload={"action": "compile"},
+        )
+        path = (
+            self.fixture.root
+            / ".sdlc-pipeline/runs/journal"
+            / abandoned["run_id"]
+            / "attempts/code"
+            / f"{abandoned['attempt_id']}.json"
+        )
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["owner"] = {
+            "pid": 4242,
+            "process_identity": {
+                "scheme": "windows-filetime",
+                "created": "gone",
+            },
+        }
+        write_json(path, value)
+
+        next_attempt = begin_attempt(
+            self.fixture.root,
+            phase="code",
+            step="health",
+            operation="lifecycle",
+            payload={"action": "health"},
+        )
+
+        recovered = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(recovered["state"], "aborted")
+        self.assertEqual(next_attempt["attempt_id"], "A000002")
+
+    def test_handoff_rejects_nonexistent_mapping_path(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+        before_task(self.fixture.root, "coder")
+        feature = self.fixture.root / "src/feature.py"
+        test_file = self.fixture.root / "tests/test_feature.py"
+        feature.write_text("value = 1\n", encoding="utf-8")
+        test_file.write_text("def test_feature(): assert True\n", encoding="utf-8")
+        handoff = {
+            "design_to_code": {"D-0001": ["src/fake.py"]},
+            "test_to_files": {"T-0001": ["tests/test_feature.py"]},
+            "changed_files": ["src/feature.py", "tests/test_feature.py"],
+            "open_issues": [],
+        }
+        with self.assertRaisesRegex(SdlcError, "文件不存在"):
+            validate_coder_handoff(self.fixture.root, json.dumps(handoff))
+
+    def test_spec_bundle_is_authoritative_and_repairs_current_mirror(self) -> None:
+        published = publish_spec(self.fixture.root, spec_payload())
+        pointer = json.loads(
+            (self.fixture.root / "docs/sdlc/spec-current.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertEqual(pointer["bundle_id"], published["bundle_id"])
+        mirror = self.fixture.root / "docs/sdlc/current/requirements.json"
+        mirror.write_text("corrupt", encoding="utf-8")
+
+        loaded = load_current_spec(self.fixture.root)
+
+        self.assertEqual(loaded["requirements"]["items"][0]["id"], "R-0001")
+        self.assertEqual(json.loads(mirror.read_text(encoding="utf-8"))["items"][0]["id"], "R-0001")
+
+    def test_schema_rejects_unknown_top_level_property(self) -> None:
+        payload = spec_payload()
+        payload["unexpected"] = True
+        with self.assertRaisesRegex(SdlcError, "不允许的字段"):
+            validate_spec(payload, self.fixture.root)
+
+    def test_source_envelope_and_spec_11_anchor_trace(self) -> None:
+        ingested = ingest_source(self.fixture.root, {
+            "kind": "inline",
+            "source": "用户需求.md",
+            "media_type": "text/markdown",
+            "content": "用户必须能够保存设置。",
+            "segments": [{"anchor": "p:1", "text": "用户必须能够保存设置。"}],
+        })["envelope"]
+        ref = f"{ingested['source_id']}#p:1"
+        payload = spec_payload()
+        payload["schema_version"] = "1.1"
+        payload["requirements"]["source_inputs"] = [ingested]
+        requirement = payload["requirements"]["items"][0]
+        requirement["source_refs"] = [ref]
+        requirement["acceptance_criteria"] = [{
+            "id": "AC-R-0001-01",
+            "description": "设置可以持久化保存",
+            "source_refs": [ref],
+        }]
+
+        result = publish_spec(self.fixture.root, payload)
+
+        self.assertTrue(result["ok"])
+        markdown = (
+            self.fixture.root / "docs/sdlc/current/requirements.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("AC-R-0001-01", markdown)
+        self.assertIn(ingested["source_id"], markdown)
+
+    def test_journal_idempotency_and_spec_checkpoint_resume(self) -> None:
+        payload = {
+            "kind": "spec",
+            "payload": spec_payload(),
+            "idempotency_key": "publish-spec-0001",
+        }
+        first = execute(self.fixture.root, "publish", payload)
+        second = execute(self.fixture.root, "publish", payload)
+        self.assertEqual(first["bundle_id"], second["bundle_id"])
+        self.assertEqual(journal_status(self.fixture.root)["attempt_count"], 1)
+
+        execute(self.fixture.root, "publish", {
+            "kind": "checkpoint",
+            "payload": {
+                "state": "interviewing",
+                "question": {
+                    "id": "Q-0001",
+                    "prompt": "是否需要离线支持？",
+                    "answer": "需要",
+                    "status": "resolved",
+                    "rationale": "现场网络不稳定",
+                },
+            },
+        })
+        current = status(self.fixture.root)
+        self.assertEqual(
+            current["spec_checkpoint"]["decisions"][0]["answer"], "需要"
+        )
+        self.assertEqual(journal_status(self.fixture.root)["phase"], "spec")
+
+    def test_hard_policy_produces_machine_violation(self) -> None:
+        rules = self.fixture.root / ".sdlc-pipeline/rules"
+        rules.mkdir(exist_ok=True)
+        shutil.copy2(REPO / "rules/typescript.md", rules / "typescript.md")
+        shutil.copy2(
+            REPO / "rules/typescript.policy.json",
+            rules / "typescript.policy.json",
+        )
+        write_json(rules / "active.json", {
+            "schema_version": "1.0",
+            "template_id": "fixture",
+            "source": "test",
+            "rules": [{
+                "id": "typescript",
+                "path": ".sdlc-pipeline/rules/typescript.md",
+                "sha256": sha256_file(rules / "typescript.md"),
+                "policy_path": ".sdlc-pipeline/rules/typescript.policy.json",
+                "policy_sha256": sha256_file(rules / "typescript.policy.json"),
+                "classification": ["guidance", "hard", "executable"],
+            }],
+        })
+        (self.fixture.root / "src/unsafe.ts").write_text(
+            "const value: any = 1\n", encoding="utf-8"
+        )
+        report = evaluate_hard_policies(self.fixture.root)
+        self.assertFalse(report["ok"])
+        self.assertEqual(report["violations"][0]["policy"], "typescript:no-explicit-any")
+
+    def test_pid_identity_mismatch_refuses_to_kill(self) -> None:
+        path = self.fixture.root / ".sdlc-pipeline/runs/active.json"
+        write_json(path, {
+            "pid": 4242,
+            "process_identity": {
+                "scheme": "windows-filetime",
+                "created": "recorded",
+            },
+        })
+        with (
+            patch("sdlc_core.runs.pid_alive", return_value=True),
+            patch(
+                "sdlc_core.runs.process_identity",
+                return_value={
+                    "scheme": "windows-filetime",
+                    "created": "reused",
+                },
+            ),
+            patch("sdlc_core.runs.subprocess.run") as taskkill,
+        ):
+            with self.assertRaisesRegex(SdlcError, "创建身份不匹配"):
+                stop_active(self.fixture.root)
+        taskkill.assert_not_called()
 
 
 if __name__ == "__main__":

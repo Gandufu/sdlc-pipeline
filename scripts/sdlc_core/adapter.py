@@ -8,8 +8,9 @@ from typing import Any
 
 from .artifacts import load_current_spec, require_code_ready
 from .common import SdlcError, read_json, sha256_file, utc_now, write_json
-from .trace import changed_paths, validate_diff, verify_extension_points
+from .trace import changed_path_fingerprints, validate_diff, verify_extension_points
 
+from .schema_validation import validate_schema_instance
 
 MAX_CONTEXT_CHARS = 30_000
 
@@ -31,6 +32,48 @@ def validate_write_path(root: Path, path_value: str) -> dict[str, Any]:
     if not matches_path(relative, allowed):
         raise SdlcError(f"路径不在设计/脚手架允许范围: {relative}")
     return {"ok": True, "path": relative}
+
+
+def _validate_mapping_paths(
+    root: Path,
+    mapping: dict[str, Any],
+    label: str,
+) -> tuple[dict[str, list[str]], dict[str, dict[str, Any]]]:
+    from .trace import allowed_design_paths, matches_path, scaffold
+
+    contract = scaffold(root)
+    allowed = sorted(set(contract["allowed_paths"]) | set(allowed_design_paths(root)))
+    normalized: dict[str, list[str]] = {}
+    evidence: dict[str, dict[str, Any]] = {}
+    for identifier, raw_paths in mapping.items():
+        if (
+            not isinstance(raw_paths, list)
+            or not raw_paths
+            or any(not isinstance(item, str) or not item.strip() for item in raw_paths)
+        ):
+            raise SdlcError(f"{label}.{identifier} 必须是非空路径数组")
+        paths: list[str] = []
+        for raw in raw_paths:
+            candidate = root / raw
+            try:
+                relative = candidate.resolve().relative_to(root.resolve()).as_posix()
+            except ValueError as exc:
+                raise SdlcError(f"{label}.{identifier} 路径越出项目: {raw}") from exc
+            if not candidate.is_file():
+                raise SdlcError(f"{label}.{identifier} 引用的文件不存在: {relative}")
+            if matches_path(relative, contract["protected_paths"]):
+                raise SdlcError(f"{label}.{identifier} 引用了 protected path: {relative}")
+            if not matches_path(relative, allowed):
+                raise SdlcError(f"{label}.{identifier} 路径不在允许范围: {relative}")
+            if relative not in paths:
+                paths.append(relative)
+                evidence[relative] = {
+                    "path": relative,
+                    "sha256": sha256_file(candidate),
+                    "size": candidate.stat().st_size,
+                }
+        normalized[identifier] = sorted(paths)
+    return normalized, evidence
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -158,11 +201,26 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
     if role == "coder":
         require_code_ready(load_current_spec(root))
     verify_extension_points(root)
-    before = changed_paths(root)
-    write_json(root / ".sdlc-pipeline" / "runs" / f"{role}-before.json", {
-        "created_at": utc_now(),
-        "changed_paths": before,
-    })
+    before_path = root / ".sdlc-pipeline" / "runs" / f"{role}-before.json"
+    spec_pointer = read_json(
+        root / "docs" / "sdlc" / "spec-current.json",
+        required=False,
+    ) or {}
+    previous = read_json(before_path, required=False)
+    reuse_baseline = (
+        role == "coder"
+        and previous is not None
+        and previous.get("spec_bundle_id") == spec_pointer.get("bundle_id")
+        and not current["gates"]["code"]
+    )
+    if not reuse_baseline:
+        before = changed_path_fingerprints(root)
+        write_json(before_path, {
+            "created_at": utc_now(),
+            "spec_bundle_id": spec_pointer.get("bundle_id"),
+            "changed_paths": [item["path"] for item in before["entries"]],
+            "worktree": before,
+        })
     context = build_context_pack(root, role)
     from .runs import record_tokens
 
@@ -183,6 +241,7 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
     return {
         "ok": True,
         "role": role,
+        "baseline": "reused" if reuse_baseline else "created",
         "context_pack": context,
         "instruction": (
             "只读取列出的 context pack；超过一包时按模块逐包处理。"
@@ -194,12 +253,13 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
 
 def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     value = _extract_json(text)
+    validate_schema_instance(root, "handoff.schema.json", value)
     required = {"design_to_code", "test_to_files", "changed_files", "open_issues"}
     missing = sorted(required - set(value))
     if missing:
         raise SdlcError(f"coder handoff 缺少字段: {missing}")
     before = read_json(root / ".sdlc-pipeline" / "runs" / "coder-before.json")
-    diff = validate_diff(root, before.get("changed_paths", []))
+    diff = validate_diff(root, before.get("worktree", before.get("changed_paths", [])))
     declared = sorted(set(value["changed_files"]))
     actual = sorted(set(diff["changed_paths"]))
     missing_actual = sorted(set(actual) - set(declared))
@@ -215,9 +275,28 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
         raise SdlcError("design_to_code 必须完整覆盖当前 D-id")
     if set(value["test_to_files"]) != t_ids:
         raise SdlcError("test_to_files 必须完整覆盖当前 T-id")
-    for mapping in (value["design_to_code"], value["test_to_files"]):
-        if any(not paths for paths in mapping.values()):
-            raise SdlcError("D/T 映射不能包含空路径列表")
+    design_mapping, design_evidence = _validate_mapping_paths(
+        root, value["design_to_code"], "design_to_code"
+    )
+    test_mapping, test_evidence = _validate_mapping_paths(
+        root, value["test_to_files"], "test_to_files"
+    )
+    value["design_to_code"] = design_mapping
+    value["test_to_files"] = test_mapping
+    mapped = set(design_evidence) | set(test_evidence)
+    unmapped = sorted(
+        path for path in actual
+        if (root / path).is_file()
+        and not path.startswith("docs/sdlc/")
+        and not path.startswith(".sdlc-pipeline/runs/")
+        and path not in mapped
+    )
+    if unmapped:
+        raise SdlcError(f"coder 变更没有对应 D/T evidence edge: {unmapped}")
+    value["mapping_evidence"] = {
+        "design": design_evidence,
+        "tests": test_evidence,
+    }
     value["validated_at"] = utc_now()
     value["compiled_claim_ignored"] = True
     write_json(root / ".sdlc-pipeline" / "runs" / "coder-handoff.json", value)
@@ -227,6 +306,7 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
 def validate_executor_handoff(root: Path, text: str) -> dict[str, Any]:
     value = _extract_json(text)
     required = {"results", "open_issues"}
+    validate_schema_instance(root, "handoff.schema.json", value)
     missing = sorted(required - set(value))
     if missing:
         raise SdlcError(f"executor handoff 缺少字段: {missing}")

@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/rule-policy.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version", "rule_id", "classification", "hard_invariants",
+    "required_test_keys", "executable_verifiers"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "rule_id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "classification": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"enum": ["guidance", "hard", "executable"]}
+    },
+    "hard_invariants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "paths"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "kind": {"enum": ["forbidden_regex", "required_file"]},
+          "paths": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "pattern": {"type": "string", "minLength": 1},
+          "max_bytes": {"type": "integer", "minimum": 1}
+        },
+        "additionalProperties": false
+      }
+    },
+    "required_test_keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "executable_verifiers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "phase", "test_key"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "phase": {"enum": ["code", "test"]},
+          "test_key": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

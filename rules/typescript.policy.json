@@ -1,0 +1,19 @@
+{
+  "schema_version": "1.0",
+  "rule_id": "typescript",
+  "classification": ["guidance", "hard", "executable"],
+  "hard_invariants": [
+    {
+      "id": "no-explicit-any",
+      "kind": "forbidden_regex",
+      "paths": ["**/*.ts", "**/*.tsx"],
+      "pattern": "(:\\s*any\\b|\\bas\\s+any\\b|<any>)",
+      "max_bytes": 500000
+    }
+  ],
+  "required_test_keys": ["lint", "static_analysis"],
+  "executable_verifiers": [
+    {"id": "lint", "phase": "code", "test_key": "lint"},
+    {"id": "static-analysis", "phase": "code", "test_key": "static_analysis"}
+  ]
+}

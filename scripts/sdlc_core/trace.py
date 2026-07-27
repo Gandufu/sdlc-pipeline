@@ -14,10 +14,12 @@ from .common import (
     sha256_json,
 )
 
+from .schema_validation import validate_schema_instance
 
 def scaffold(root: Path) -> dict[str, Any]:
     path = root / ".sdlc-pipeline" / "scaffold.json"
     data = read_json(path)
+    validate_schema_instance(root, "scaffold.schema.json", data)
     required = {
         "schema_version", "template_id", "template_version", "protected_paths",
         "extension_points", "allowed_paths", "lifecycle_hash", "key_files",
@@ -80,17 +82,25 @@ def changed_paths(root: Path, base: str | None = None) -> list[str]:
     return sorted({line.replace("\\", "/") for line in output.splitlines() if line})
 
 
-def worktree_fingerprint(root: Path) -> dict[str, Any]:
-    entries = []
+def changed_path_fingerprints(root: Path) -> dict[str, Any]:
+    entries: list[dict[str, Any]] = []
     for name in changed_paths(root):
-        if name.startswith("docs/sdlc/test-results/"):
-            continue
         path = root / name
         entries.append({
             "path": name,
             "state": "file" if path.is_file() else "deleted_or_directory",
             "sha256": sha256_file(path) if path.is_file() else None,
         })
+    return {"sha256": sha256_json(entries), "entries": entries}
+
+
+def worktree_fingerprint(root: Path) -> dict[str, Any]:
+    entries = [
+        item for item in changed_path_fingerprints(root)["entries"]
+        if not item["path"].startswith("docs/sdlc/test-results/")
+        and not item["path"].startswith("docs/sdlc/bundles/")
+        and item["path"] != "docs/sdlc/spec-current.json"
+    ]
     return {"sha256": sha256_json(entries), "entries": entries}
 
 
@@ -113,10 +123,23 @@ def allowed_design_paths(root: Path) -> list[str]:
     )
 
 
-def validate_diff(root: Path, before: list[str] | None = None) -> dict[str, Any]:
+def validate_diff(
+    root: Path,
+    before: dict[str, Any] | list[str] | None = None,
+) -> dict[str, Any]:
     contract = scaffold(root)
-    actual = changed_paths(root)
-    if before is not None:
+    current = changed_path_fingerprints(root)
+    current_by_path = {item["path"]: item for item in current["entries"]}
+    actual = sorted(current_by_path)
+    if isinstance(before, dict):
+        before_by_path = {
+            item["path"]: item for item in before.get("entries", [])
+        }
+        actual = sorted(
+            path for path in set(before_by_path) | set(current_by_path)
+            if before_by_path.get(path) != current_by_path.get(path)
+        )
+    elif before is not None:
         actual = sorted(set(actual) - set(before))
     protected = [path for path in actual if matches_path(path, contract["protected_paths"])]
     allowed_patterns = sorted(
@@ -132,8 +155,16 @@ def validate_diff(root: Path, before: list[str] | None = None) -> dict[str, Any]
         raise SdlcError(f"修改了 protected path: {protected}")
     if outside:
         raise SdlcError(f"修改超出设计/脚手架允许范围: {outside}")
-    return {"ok": True, "changed_paths": actual, "allowed_patterns": allowed_patterns}
+    return {
+        "ok": True,
+        "changed_paths": actual,
+        "allowed_patterns": allowed_patterns,
+        "fingerprints": [
+            current_by_path.get(path, {"path": path, "state": "clean", "sha256": None})
+            for path in actual
+        ],
 
+    }
 
 def verify_extension_points(root: Path) -> dict[str, Any]:
     contract = scaffold(root)
@@ -144,6 +175,32 @@ def verify_extension_points(root: Path) -> dict[str, Any]:
     if unknown:
         raise SdlcError(f"设计引用未知 extension point: {unknown}")
     return {"ok": True, "used": sorted(used)}
+
+
+def _file_evidence(root: Path, paths: Any) -> tuple[list[dict[str, Any]], list[str]]:
+    evidence: list[dict[str, Any]] = []
+    invalid: list[str] = []
+    if not isinstance(paths, list):
+        return evidence, [repr(paths)]
+    for raw in paths:
+        if not isinstance(raw, str) or not raw.strip():
+            invalid.append(repr(raw))
+            continue
+        candidate = root / raw
+        try:
+            relative = candidate.resolve().relative_to(root.resolve()).as_posix()
+        except ValueError:
+            invalid.append(raw)
+            continue
+        if not candidate.is_file():
+            invalid.append(relative)
+            continue
+        evidence.append({
+            "path": relative,
+            "sha256": sha256_file(candidate),
+            "size": candidate.stat().st_size,
+        })
+    return evidence, sorted(set(invalid))
 
 
 def trace_matrix(root: Path, code_map: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -161,20 +218,36 @@ def trace_matrix(root: Path, code_map: dict[str, Any] | None = None) -> dict[str
                 item for item in spec["test_plan"]["items"]
                 if r_id in item["requirement_ids"] and design["id"] in item["design_ids"]
             ]
+            code_paths = code_map.get(design["id"], [])
+            code_evidence, invalid_paths = _file_evidence(root, code_paths)
+            raw_test_map = code_map.get("tests", {})
+            if not isinstance(raw_test_map, dict):
+                raw_test_map = {}
+            test_paths = {
+                item["id"]: raw_test_map.get(item["id"], [])
+                for item in tests
+            }
+            test_evidence: dict[str, list[dict[str, Any]]] = {}
+            for identifier, paths in test_paths.items():
+                evidence, invalid = _file_evidence(root, paths)
+                test_evidence[identifier] = evidence
+                invalid_paths.extend(invalid)
             rows.append({
                 "requirement_id": r_id,
                 "design_id": design["id"],
-                "code_paths": code_map.get(design["id"], []),
+                "code_paths": code_paths,
+                "code_evidence": code_evidence,
                 "test_ids": [item["id"] for item in tests],
-                "test_paths": {
-                    item["id"]: code_map.get("tests", {}).get(item["id"], [])
-                    for item in tests
-                },
+                "test_paths": test_paths,
+                "test_evidence": test_evidence,
+                "invalid_paths": sorted(set(invalid_paths)),
             })
     incomplete = [
         row for row in rows
         if not row["code_paths"] or not row["test_ids"]
         or any(not paths for paths in row["test_paths"].values())
+        or not row["code_evidence"] or row["invalid_paths"]
+        or any(not paths for paths in row["test_evidence"].values())
     ]
     return {"ok": not incomplete, "rows": rows, "incomplete": incomplete}
 

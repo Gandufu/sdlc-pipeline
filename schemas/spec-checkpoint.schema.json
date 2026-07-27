@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/spec-checkpoint.schema.json",
+  "type": "object",
+  "properties": {
+    "state": {
+      "enum": ["interviewing", "ready", "confirmed", "published"]
+    },
+    "question": {
+      "type": "object",
+      "required": ["id", "prompt", "answer", "status", "rationale"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^Q-[0-9]{4}$"},
+        "prompt": {"type": "string", "minLength": 1},
+        "answer": {"type": "string", "minLength": 1},
+        "status": {"enum": ["resolved"]},
+        "rationale": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "source_envelopes": {
+      "type": "array",
+      "items": {"type": "object"}
+    },
+    "confirmed_facts": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "risks": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "additionalProperties": false
+}

@@ -10,6 +10,15 @@ subtask: false
 使用 OpenCode `question` 工具一次只问一个问题，等待回答后再继续。每题给出 2–3 个互斥候选，
 把首选项标为“（推荐）”并解释依据，同时允许自定义答案；不得一次抛出问题清单或替用户决定。
 持续覆盖目标、范围、非范围、约束、失败路径、验收、设计取舍与测试层级，直到共享理解一致。
+先检查 `sdlc_status.spec_checkpoint`。若存在 `interviewing/ready/confirmed` checkpoint，恢复其中
+的来源、事实、假设、风险和已回答 decision，从下一未解决问题继续。每次用户回答后立即调用
+`sdlc_publish(kind=checkpoint)` 持久化 question 的 `id/prompt/answer/status/rationale` 和当前
+分析快照，成功后才继续下一题。第一份 checkpoint 必须包含 `source_envelopes`；共享理解完成、
+用户确认时分别写入 `state=ready`、`state=confirmed`。不得只依赖聊天上下文保存访谈进度。
+第一份 checkpoint 前必须先调用 `sdlc_publish(kind=source)` 摄取原始输入，使用其返回的完整
+`envelope`；不得自行编造 SourceEnvelope。checkpoint payload 不接受
+`resolved_questions`、`pending_questions` 或其他 schema 外字段。
+
 分配永不复用的 R/D/T ID；修改需求用新 R-id 和 supersedes。设计必须引用 scaffold 中真实的
 extension point 和允许路径。每个 R-id 至少一个 mandatory T-id。先读取 `sdlc_status` 返回的
 `lifecycle_tests.available`；`test_plan.items[].command` 必须填写 `unit`、`integration` 等

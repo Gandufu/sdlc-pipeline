@@ -39,6 +39,17 @@ spec 阶段必须读取 `.sdlc-pipeline/references/spec-interview.md`。先查�
 推荐依据，同时允许自定义答案。沿答案逐层解决依赖，不得一次列出多问，也不得替用户决定。
 在用户确认共享理解前不得发布；确认后由 Python core 统一生成固定风格的 requirements、design、
 test-plan JSON/Markdown，主会话不得直接编辑正式文档。
+每次进入 spec 先读取 `sdlc_status.spec_checkpoint`：存在未发布 checkpoint 时从最后一个已记录
+问题继续，不得重复询问已回答决策。每得到一个回答，立即调用
+`sdlc_publish(kind=checkpoint)`，payload 记录 question 的 `id/prompt/answer/status/rationale`
+以及当前 `confirmed_facts/assumptions/risks`；首轮还要记录 `source_envelopes`。checkpoint 成功
+后才能提出下一题。共享理解完成时记录 `state=ready`，用户确认后记录 `state=confirmed`；正式
+spec 发布成功后 runner 自动记录 `state=published`。checkpoint 是恢复真值，不依赖会话记忆。
+首轮先用 `sdlc_publish(kind=source)` 摄取原始需求，并把返回的完整 `envelope` 原样放入
+`source_envelopes`；不得自行编造简化 envelope。checkpoint 只接受
+`state/question/source_envelopes/confirmed_facts/assumptions/risks`，不得使用
+`resolved_questions`、`pending_questions` 等旁路字段。
+
 
 只可派发：
 

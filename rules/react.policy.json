@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.0",
+  "rule_id": "react",
+  "classification": ["guidance", "hard"],
+  "hard_invariants": [
+    {
+      "id": "no-node-import-in-renderer",
+      "kind": "forbidden_regex",
+      "paths": ["**/renderer/**/*.ts", "**/renderer/**/*.tsx"],
+      "pattern": "from\\s+['\\\"](electron|node:[^'\\\"]+|fs|child_process)['\\\"]",
+      "max_bytes": 500000
+    }
+  ],
+  "required_test_keys": [],
+  "executable_verifiers": []
+}

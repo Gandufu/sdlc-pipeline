@@ -31,8 +31,15 @@ function invoke(root, operation, payload = {}) {
     cwd: root,
     input: JSON.stringify(payload),
     encoding: "utf8",
+    env: {
+      ...process.env,
+      PYTHONUTF8: "1",
+      PYTHONIOENCODING: "utf-8",
+    },
     windowsHide: true,
     shell: false,
+    timeout: 30 * 60 * 1000,
+    maxBuffer: 10 * 1024 * 1024,
   })
   if (result.error) throw result.error
   const lines = (result.stdout || "").trim().split(/\r?\n/)
@@ -93,16 +100,18 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
       sdlc_publish: tool({
         description: "校验并原子发布固定格式 SDLC 产物；AI 不能直接编辑正式文档。",
         args: {
-          kind: tool.schema.enum(["spec", "tokens"]),
+          kind: tool.schema.enum(["source", "spec", "checkpoint", "tokens"]),
           payload: tool.schema.string().describe(
-            "JSON object encoded as a string. For kind=spec, read .sdlc-pipeline/schemas/spec.schema.json first: include schema_version='1.0', flow, spec_confirmed=true; requirements is {source_inputs,analysis,items}, design/test_plan are {items}; use R-0001/D-0001/T-0001 IDs."
+            "JSON object encoded as a string. source requires {content, source?, kind?, uri?, media_type?}. checkpoint must follow spec-checkpoint.schema.json. For spec, read spec.schema.json and submit the full object with R-0001/D-0001/T-0001 IDs."
           ),
+          idempotency_key: tool.schema.string().optional(),
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_publish")
           return JSON.stringify(invoke(rootOf(context, fallbackRoot), "publish", {
             kind: args.kind,
             payload: JSON.parse(args.payload),
+            idempotency_key: args.idempotency_key || context?.callID,
           }))
         },
       }),
@@ -117,6 +126,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
           options: tool.schema.string().optional().describe(
             "Optional JSON: init accepts only the template ID selected by the user from sdlc_status.templates; record_test_results accepts executor_result",
           ),
+          idempotency_key: tool.schema.string().optional(),
         },
         async execute(args, context) {
           const options = args.options ? JSON.parse(args.options) : {}
@@ -135,6 +145,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
           return JSON.stringify(invoke(rootOf(context, fallbackRoot), "lifecycle", {
             action: args.action,
             ...options,
+            idempotency_key: args.idempotency_key || context?.callID,
           }))
         },
       }),
@@ -144,10 +155,14 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
           version: tool.schema.string(),
           summary: tool.schema.string(),
           confirmed: tool.schema.boolean(),
+          idempotency_key: tool.schema.string().optional(),
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_finalize")
-          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "finalize", args))
+          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "finalize", {
+            ...args,
+            idempotency_key: args.idempotency_key || context?.callID,
+          }))
         },
       }),
     },

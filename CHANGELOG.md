@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.0 - 2026-07-27
+
+- 修复 dirty worktree fingerprint baseline、真实路径映射与 Windows PID identity，避免重试误判和 PID 复用误杀。
+- 增加不可变 spec bundle、原子 current pointer、正式 Draft 2020 Schema runtime validator。
+- 增加 durable Run Journal：run/phase/step/attempt/event/idempotency、spec grilling checkpoint 与 abandoned attempt 恢复。
+- 将 TypeScript、Electron、React 关键规则升级为 machine policy 和受控 lifecycle verifier。
+- 增加 SourceEnvelope、原文 anchor、AC-id 与 R/D/T/文件/测试机器 evidence edge。
+- 强制 OpenCode adapter 与 Python core 使用 UTF-8，修复 Windows 中文 checkpoint 传输。
+
 ## 0.8.3 - 2026-07-27
 
 - init 根据模板 `rules` 显式生成 active rules manifest，status、AGENTS 与 context pack 只暴露

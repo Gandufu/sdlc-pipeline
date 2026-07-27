@@ -19,6 +19,7 @@ from .lifecycle import artifact_evidence, load_contract
 from .runs import token_summary
 from .trace import trace_matrix, verify_scaffold
 
+from .schema_validation import validate_schema_instance
 
 def manifests(root: Path) -> list[Path]:
     directory = root / "docs" / "sdlc" / "versions"
@@ -167,6 +168,10 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
             "health": code_evidence["health"],
             "artifacts": artifact_evidence(root),
             "tests": candidate["test_results"],
+            "policy": {
+                "code": code_evidence.get("policy", {}),
+                "test": results.get("policy", {}),
+            },
         },
         "token_usage": token_summary(root),
         "open_issues": sorted(set(
@@ -203,6 +208,7 @@ def finalize(root: Path, version: str, summary: str, confirmed: bool) -> dict[st
     manifest["final_git_sha"] = delivery_sha
     manifest["commit"] = delivery_sha
     manifest["closed_at"] = utc_now()
+    validate_schema_instance(root, "manifest.schema.json", manifest)
     write_json(path, manifest)
     summary_path = path.with_name("summary.md")
     atomic_write(summary_path, render_version_summary(manifest))

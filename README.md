@@ -2,7 +2,7 @@
 
 > OpenCode-first、证据驱动的项目交付状态机。
 
-当前版本：`0.8.3`。
+当前版本：`0.9.0`。
 
 SDLC Pipeline 用项目脚手架契约、确定性 Python runner、真实编译/启动/测试和 Git
 版本证据，把一次需求从澄清推进到可追溯版本。
@@ -176,7 +176,7 @@ curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scri
 curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target . --force
 ```
 
-升级后重启 OpenCode，使项目级 plugin/agent 定义重新加载。`0.8.3` 在无参数幂等 init 基础上
+升级后重启 OpenCode，使项目级 plugin/agent 定义重新加载。`0.9.0` 在无参数幂等 init 基础上
 增加模板感知 active rules，并恢复 grilling 式 spec 拷问与固定文档风格契约。
 
 installer 只写入：

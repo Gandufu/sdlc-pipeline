@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "rule_id": "electron",
+  "classification": ["guidance", "hard", "executable"],
+  "hard_invariants": [
+    {
+      "id": "secure-web-preferences",
+      "kind": "forbidden_regex",
+      "paths": ["**/*.ts", "**/*.js"],
+      "pattern": "(nodeIntegration\\s*:\\s*true|contextIsolation\\s*:\\s*false)",
+      "max_bytes": 500000
+    }
+  ],
+  "required_test_keys": ["e2e"],
+  "executable_verifiers": [
+    {"id": "electron-e2e", "phase": "test", "test_key": "e2e"}
+  ]
+}

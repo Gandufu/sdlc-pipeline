@@ -31,6 +31,38 @@ def read_active(root: Path) -> dict[str, Any] | None:
 def pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = [
+                wintypes.DWORD,
+                wintypes.BOOL,
+                wintypes.DWORD,
+            ]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.GetExitCodeProcess.argtypes = [
+                wintypes.HANDLE,
+                ctypes.POINTER(wintypes.DWORD),
+            ]
+            kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                return False
+            try:
+                exit_code = wintypes.DWORD()
+                return bool(
+                    kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+                    and exit_code.value == 259
+                )
+            finally:
+                kernel32.CloseHandle(handle)
+        except (AttributeError, OSError, ValueError):
+            return False
     try:
         os.kill(pid, 0)
     except (OSError, ProcessLookupError):
@@ -38,8 +70,100 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+def process_identity(pid: int) -> dict[str, Any] | None:
+    """Return an OS creation marker that changes when a PID is reused."""
+    if not pid_alive(pid):
+        return None
+    if os.name == "nt":
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class FILETIME(ctypes.Structure):
+                _fields_ = [
+                    ("dwLowDateTime", wintypes.DWORD),
+                    ("dwHighDateTime", wintypes.DWORD),
+                ]
+
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.OpenProcess.argtypes = [
+                wintypes.DWORD,
+                wintypes.BOOL,
+                wintypes.DWORD,
+            ]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.GetProcessTimes.argtypes = [
+                wintypes.HANDLE,
+                ctypes.POINTER(FILETIME),
+                ctypes.POINTER(FILETIME),
+                ctypes.POINTER(FILETIME),
+                ctypes.POINTER(FILETIME),
+            ]
+            kernel32.GetProcessTimes.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+            handle = kernel32.OpenProcess(0x1000, False, pid)
+            if not handle:
+                return None
+            try:
+                creation = FILETIME()
+                exit_time = FILETIME()
+                kernel_time = FILETIME()
+                user_time = FILETIME()
+                if not kernel32.GetProcessTimes(
+                    handle,
+                    ctypes.byref(creation),
+                    ctypes.byref(exit_time),
+                    ctypes.byref(kernel_time),
+                    ctypes.byref(user_time),
+                ):
+                    return None
+                marker = (
+                    int(creation.dwHighDateTime) << 32
+                ) | int(creation.dwLowDateTime)
+                return {"scheme": "windows-filetime", "created": str(marker)}
+            finally:
+                kernel32.CloseHandle(handle)
+        except (AttributeError, OSError, ValueError):
+            return None
+    proc_stat = Path(f"/proc/{pid}/stat")
+    if proc_stat.is_file():
+        try:
+            text = proc_stat.read_text(encoding="utf-8")
+            remainder = text[text.rfind(")") + 2:].split()
+            return {"scheme": "proc-starttime", "created": remainder[19]}
+        except (OSError, IndexError):
+            return None
+    try:
+        result = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    marker = result.stdout.strip()
+    return {"scheme": "ps-lstart", "created": marker} if marker else None
+
+
+def active_identity_matches(active: dict[str, Any] | None) -> bool:
+    if not active:
+        return False
+    recorded = active.get("process_identity")
+    current = process_identity(int(active.get("pid", 0)))
+    return isinstance(recorded, dict) and recorded == current
+
+
 def record_active(root: Path, value: dict[str, Any]) -> None:
-    write_json(active_path(root), {**value, "recorded_at": utc_now()})
+    pid = int(value.get("pid", 0))
+    identity = process_identity(pid)
+    if identity is None:
+        raise SdlcError(f"无法取得进程 {pid} 的创建身份，拒绝记录不安全 PID")
+    write_json(active_path(root), {
+        **value, "process_identity": identity, "recorded_at": utc_now()
+    })
 
 
 def retain_process(process: subprocess.Popen[Any]) -> None:
@@ -61,6 +185,10 @@ def stop_active(root: Path, timeout: int = 15) -> dict[str, Any]:
     if not pid_alive(pid):
         clear_active(root)
         return {"ok": True, "stopped": False, "reason": "stale_pid", "pid": pid}
+    if not active_identity_matches(active):
+        raise SdlcError(
+            f"active PID {pid} 的创建身份不匹配，拒绝停止可能无关的进程"
+        )
     try:
         if os.name == "nt":
             result = subprocess.run(

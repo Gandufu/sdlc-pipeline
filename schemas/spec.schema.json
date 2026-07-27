@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["schema_version", "flow", "spec_confirmed", "requirements", "design", "test_plan"],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"enum": ["1.0", "1.1"]},
     "flow": {"enum": ["standard", "incremental"]},
     "spec_confirmed": {"const": true},
     "incremental_confirmed": {"type": "boolean"},
@@ -16,13 +16,46 @@
           "type": "array",
           "minItems": 1,
           "items": {
-            "type": "object",
-            "required": ["source", "content"],
-            "properties": {
-              "source": {"type": "string", "minLength": 1},
-              "content": {"type": "string", "minLength": 1}
-            },
-            "additionalProperties": false
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["source", "content"],
+                "properties": {
+                  "source": {"type": "string", "minLength": 1},
+                  "content": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "schema_version", "source_id", "kind", "source", "media_type",
+                  "sha256", "extractor", "segments", "content", "ingested_at"
+                ],
+                "properties": {
+                  "schema_version": {"const": "1.0"},
+                  "source_id": {"type": "string", "pattern": "^SRC-[A-F0-9]{12}$"},
+                  "kind": {"enum": ["inline", "file", "url", "document"]},
+                  "source": {"type": "string", "minLength": 1},
+                  "uri": {"type": ["string", "null"]},
+                  "media_type": {"type": "string", "minLength": 1},
+                  "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+                  "extractor": {
+                    "type": "object",
+                    "required": ["name", "version"],
+                    "properties": {
+                      "name": {"type": "string", "minLength": 1},
+                      "version": {"type": "string", "minLength": 1}
+                    },
+                    "additionalProperties": false
+                  },
+                  "segments": {"type": "array", "minItems": 1},
+                  "content": {"type": "string", "minLength": 1},
+                  "ingested_at": {"type": "string", "minLength": 1}
+                },
+                "additionalProperties": false
+              }
+            ]
           }
         },
         "analysis": {
@@ -88,8 +121,29 @@
               "id": {"type": "string", "pattern": "^R-[0-9]{4}$"},
               "title": {"type": "string"},
               "description": {"type": "string"},
-              "acceptance_criteria": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-              "supersedes": {"type": ["string", "null"], "pattern": "^R-[0-9]{4}$"}
+              "acceptance_criteria": {
+                "type": "array", "minItems": 1,
+                "items": {
+                  "oneOf": [
+                    {"type": "string", "minLength": 1},
+                    {
+                      "type": "object",
+                      "required": ["id", "description", "source_refs"],
+                      "properties": {
+                        "id": {"type": "string", "pattern": "^AC-R-[0-9]{4}-[0-9]{2}$"},
+                        "description": {"type": "string", "minLength": 1},
+                        "source_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+                      },
+                      "additionalProperties": false
+                    }
+                  ]
+                }
+              },
+              "supersedes": {"type": ["string", "null"], "pattern": "^R-[0-9]{4}$"},
+              "source_refs": {
+                "type": "array", "minItems": 1,
+                "items": {"type": "string", "minLength": 1}
+              }
             }
           }
         },

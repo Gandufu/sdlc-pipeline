@@ -28,6 +28,7 @@
         "additionalProperties": false
       }
     },
+    "policy": {"type": "object"},
     "executor": {"type": "object"},
     "mandatory_failed": {"type": "array", "items": {"type": "string", "pattern": "^T-[0-9]{4}$"}},
     "open_issues": {"type": "array", "items": {"type": "string"}}

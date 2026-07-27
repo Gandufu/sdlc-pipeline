@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .artifact_store import current_artifact_path, materialize_bundle, publish_bundle
 from .common import (
     ID_PATTERNS,
     SdlcError,
@@ -15,6 +16,9 @@ from .common import (
     write_json,
     atomic_write,
 )
+from .schema_validation import validate_schema_instance
+from .sources import source_index, validate_source_envelopes
+from .policies import validate_spec_policy
 
 
 CURRENT_FILES = {
@@ -37,9 +41,10 @@ def lifecycle_test_commands(root: Path) -> dict[str, dict[str, Any]]:
 
 
 def current_spec_hashes(root: Path) -> dict[str, str]:
-    current = root / "docs" / "sdlc" / "current"
     return {
-        kind: sha256_file(current / f"{base}.json")
+        kind: sha256_file(
+            current_artifact_path(root, "spec", f"{base}.json")
+        )
         for kind, base in CURRENT_FILES.items()
     }
 
@@ -94,6 +99,30 @@ def _require_keys(value: dict[str, Any], fields: tuple[str, ...], context: str) 
         raise SdlcError(f"{context} 缺少必填字段: {', '.join(missing)}")
 
 
+def _validate_source_refs(
+    refs: Any,
+    sources: dict[str, set[str]],
+    context: str,
+) -> None:
+    if not isinstance(refs, list) or not refs:
+        raise SdlcError(f"{context} source_refs 必须是非空数组")
+    for ref in refs:
+        if not isinstance(ref, str) or "#" not in ref:
+            raise SdlcError(f"{context} 非法 source_ref: {ref!r}")
+        source_id, anchor = ref.split("#", 1)
+        if source_id not in sources:
+            raise SdlcError(f"{context} 引用未知 SourceEnvelope: {source_id}")
+        if anchor not in sources[source_id]:
+            raise SdlcError(f"{context} 引用未知原文 anchor: {ref}")
+
+
+def _criterion_text(value: Any) -> str:
+    if isinstance(value, dict):
+        refs = ", ".join(value.get("source_refs", []))
+        return f"`{value.get('id', '')}` {value.get('description', '')}（来源：{refs}）"
+    return str(value)
+
+
 def unresolved_blocking_questions(spec: dict[str, Any]) -> list[dict[str, Any]]:
     analysis = spec.get("requirements", {}).get("analysis", {})
     return [
@@ -110,7 +139,10 @@ def require_code_ready(spec: dict[str, Any]) -> None:
         raise SdlcError(f"code 门禁拒绝未解决的 blocking 问题: {identifiers}")
 
 
-def validate_spec(payload: dict[str, Any]) -> dict[str, set[str]]:
+def validate_spec(
+    payload: dict[str, Any],
+    root: Path | None = None,
+) -> dict[str, set[str]]:
     require_fields(
         payload,
         (
@@ -137,6 +169,11 @@ def validate_spec(payload: dict[str, Any]) -> dict[str, set[str]]:
             raise SdlcError(f"source_inputs[{index}].source 必须是非空字符串")
         if not isinstance(source["content"], str) or not source["content"].strip():
             raise SdlcError(f"source_inputs[{index}].content 必须是非空字符串")
+
+    sources: dict[str, set[str]] = {}
+    if payload.get("schema_version") == "1.1":
+        validate_source_envelopes(root or Path(__file__).resolve().parents[2], source_inputs)
+        sources = source_index(source_inputs)
 
     analysis = payload["requirements"]["analysis"]
     _require_keys(
@@ -198,6 +235,26 @@ def validate_spec(payload: dict[str, Any]) -> dict[str, set[str]]:
         )
         if not isinstance(requirement["acceptance_criteria"], list):
             raise SdlcError(f"{requirement['id']} acceptance_criteria 必须是数组")
+        if payload.get("schema_version") == "1.1":
+            _validate_source_refs(
+                requirement.get("source_refs"), sources, requirement["id"]
+            )
+            criteria = requirement["acceptance_criteria"]
+            for index, criterion in enumerate(criteria, 1):
+                if not isinstance(criterion, dict):
+                    raise SdlcError(
+                        f"{requirement['id']} 在 spec 1.1 中必须使用结构化 AC-id"
+                    )
+                expected_id = f"AC-{requirement['id']}-{index:02d}"
+                if criterion.get("id") != expected_id:
+                    raise SdlcError(
+                        f"{requirement['id']} 验收标准 ID 必须连续为 {expected_id}"
+                    )
+                _validate_source_refs(
+                    criterion.get("source_refs"),
+                    sources,
+                    criterion["id"],
+                )
         supersedes = requirement.get("supersedes")
         if supersedes and not ID_PATTERNS["requirement"].fullmatch(supersedes):
             raise SdlcError(f"{requirement['id']} supersedes 非法: {supersedes}")
@@ -249,6 +306,9 @@ def validate_spec(payload: dict[str, Any]) -> dict[str, set[str]]:
         raise SdlcError(f"存在无测试覆盖的设计: {sorted(d_ids - tested_d)}")
     if not any(item["mandatory"] for item in tests):
         raise SdlcError("测试计划至少包含一个 mandatory 用例")
+    validate_schema_instance(
+        root or Path(__file__).resolve().parents[2], "spec.schema.json", payload
+    )
     return {"R": r_ids, "D": d_ids, "T": t_ids}
 
 
@@ -267,7 +327,13 @@ def _render_requirements(data: dict[str, Any]) -> str:
             f"> {line}" if line else ">"
             for line in source["content"].splitlines()
         ]
-        lines += [f"### {source['source']}", "", *quoted, ""]
+        metadata = []
+        if source.get("source_id"):
+            metadata = [
+                f"- Source ID：`{source['source_id']}`",
+                f"- SHA-256：`{source['sha256']}`",
+            ]
+        lines += [f"### {source['source']}", "", *metadata, "", *quoted, ""]
     analysis = data["analysis"]
     lines += ["## 分析与边界", ""]
     sections = (
@@ -303,7 +369,7 @@ def _render_requirements(data: dict[str, Any]) -> str:
             "",
             "验收标准：",
             "",
-            *[f"- {criterion}" for criterion in item["acceptance_criteria"]],
+            *[f"- {_criterion_text(criterion)}" for criterion in item["acceptance_criteria"]],
             "",
         ]
         if item.get("supersedes"):
@@ -382,9 +448,10 @@ def _render_test_plan(data: dict[str, Any]) -> str:
 
 
 def publish_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    ids = validate_spec(payload)
+    ids = validate_spec(payload, root)
     validate_lifecycle_test_references(root, payload)
     historical: dict[str, str] = {}
+    validate_spec_policy(root, payload)
     versions = root / "docs" / "sdlc" / "versions"
     if versions.exists():
         for manifest_path in sorted(versions.glob("V????/manifest.json")):
@@ -427,7 +494,6 @@ def publish_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         ]
         if reasons:
             raise SdlcError(f"不满足增量流程机器条件: {sorted(set(reasons))}")
-    current = root / "docs" / "sdlc" / "current"
     generated = utc_now()
     artifacts = {
         "requirements": {
@@ -453,25 +519,39 @@ def publish_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         "design": _render_design,
         "test_plan": _render_test_plan,
     }
-    staged: list[tuple[Path, str]] = []
+    staged: dict[str, str] = {}
     for kind, data in artifacts.items():
         base = CURRENT_FILES[kind]
-        staged.append((current / f"{base}.json", __import__("json").dumps(
+        staged[f"{base}.json"] = __import__("json").dumps(
             data, ensure_ascii=False, indent=2
-        ) + "\n"))
-        staged.append((current / f"{base}.md", renderers[kind](data)))
-    # All validation happens before any target is replaced.
-    for path, content in staged:
-        atomic_write(path, content)
+        ) + "\n"
+        staged[f"{base}.md"] = renderers[kind](data)
+    bundle = publish_bundle(
+        root,
+        kind="spec",
+        files=staged,
+        metadata={
+            "schema_version": payload["schema_version"],
+            "flow": payload["flow"],
+            "generated_at": generated,
+        },
+    )
     hashes = current_spec_hashes(root)
-    return {"ok": True, "ids": {k: sorted(v) for k, v in ids.items()}, "hashes": hashes}
+    return {
+        "ok": True,
+        "ids": {k: sorted(v) for k, v in ids.items()},
+        "hashes": hashes,
+        "bundle_id": bundle["bundle_id"],
+    }
 
 
 def load_current_spec(root: Path) -> dict[str, Any]:
-    current = root / "docs" / "sdlc" / "current"
-    requirements = read_json(current / "requirements.json")
-    design = read_json(current / "design.json")
-    test_plan = read_json(current / "test-plan.json")
+    materialize_bundle(root, "spec")
+    requirements = read_json(current_artifact_path(root, "spec", "requirements.json"))
+    design = read_json(current_artifact_path(root, "spec", "design.json"))
+    test_plan = read_json(
+        current_artifact_path(root, "spec", "test-plan.json")
+    )
     combined = {
         "schema_version": requirements["schema_version"],
         "flow": requirements["flow"],
@@ -480,7 +560,7 @@ def load_current_spec(root: Path) -> dict[str, Any]:
         "design": design,
         "test_plan": test_plan,
     }
-    validate_spec(combined)
+    validate_spec(combined, root)
     return combined
 
 
