@@ -15,7 +15,7 @@ from .common import (
     utc_now,
     write_json,
 )
-from .lifecycle import artifact_evidence, load_contract
+from .lifecycle import load_contract
 from .runs import token_summary
 from .trace import trace_matrix, verify_scaffold
 
@@ -38,7 +38,7 @@ def parent_manifest(root: Path) -> dict[str, Any] | None:
 
 def render_version_summary(manifest: dict[str, Any]) -> str:
     evidence = manifest["evidence"]
-    restart = evidence.get("restart", {})
+    runtime = evidence.get("runtime", {})
     changed_files = manifest.get("impact", {}).get("changed_files", [])
     open_issues = manifest.get("open_issues", [])
     artifacts = evidence.get("artifacts", {}).get("artifacts", [])
@@ -60,8 +60,8 @@ def render_version_summary(manifest: dict[str, Any]) -> str:
         "## 交付证据",
         "",
         f"- Compile：`{'pass' if evidence.get('compile', {}).get('ok') else 'fail'}`",
-        f"- Stop：`{'pass' if restart.get('stop', {}).get('ok') else 'fail'}`",
-        f"- Start：`{'pass' if restart.get('start', {}).get('ok') else 'fail'}`",
+        f"- Cleanup：`{'pass' if runtime.get('cleanup', {}).get('ok') else 'fail'}`",
+        f"- Start：`{'pass' if runtime.get('start', {}).get('ok') else 'fail'}`",
         f"- Health：`{'pass' if evidence.get('health', {}).get('ok') else 'fail'}`",
         f"- Tests：`{evidence.get('tests', '')}`",
         "",
@@ -95,6 +95,9 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
     if results.get("status") != "pass":
         raise SdlcError("mandatory 测试未全部通过")
     code_evidence = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json")
+    delivery_evidence = read_json(
+        root / ".sdlc-pipeline" / "runs" / "delivery-evidence.json"
+    )
     handoff = read_json(
         root / ".sdlc-pipeline" / "runs" / "coder-handoff.json",
         required=False,
@@ -164,9 +167,12 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
         "trace": trace["rows"],
         "evidence": {
             "compile": code_evidence["compile"],
-            "restart": {"stop": code_evidence["stop"], "start": code_evidence["start"]},
-            "health": code_evidence["health"],
-            "artifacts": artifact_evidence(root),
+            "runtime": {
+                "start": delivery_evidence["start"],
+                "cleanup": delivery_evidence["cleanup"],
+            },
+            "health": delivery_evidence["health"],
+            "artifacts": code_evidence["artifact_evidence"],
             "tests": candidate["test_results"],
             "policy": {
                 "code": code_evidence.get("policy", {}),

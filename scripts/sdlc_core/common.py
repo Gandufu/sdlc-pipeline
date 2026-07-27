@@ -5,6 +5,7 @@ import json
 import os
 import re
 import subprocess
+import signal
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -106,18 +107,40 @@ def run_command(
     if not argv or not all(isinstance(item, str) and item for item in argv):
         raise SdlcError("命令必须是非空 argv 数组")
     try:
-        result = subprocess.run(
+        process = subprocess.Popen(
             argv,
             cwd=cwd,
-            timeout=timeout,
             text=True,
             encoding="utf-8",
             errors="replace",
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env=env,
             shell=False,
+            creationflags=(
+                subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+            ),
+            start_new_session=os.name != "nt",
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    shell=False,
+                )
+            else:
+                os.killpg(process.pid, signal.SIGKILL)
+            stdout, stderr = process.communicate(timeout=15)
+            raise SdlcError(
+                f"命令 deadline 到期并已终止进程树 {argv!r}: {exc}"
+            ) from exc
+        result = subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+    except OSError as exc:
         raise SdlcError(f"命令执行失败 {argv!r}: {exc}") from exc
     if check and result.returncode:
         tail = (result.stderr or result.stdout)[-4000:]

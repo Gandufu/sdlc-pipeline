@@ -29,6 +29,7 @@ from .lifecycle import (
 from .runs import record_tokens
 from .journal import (
     begin_attempt,
+    cancel_running_attempt,
     close_run,
     finish_attempt,
     heartbeat_attempt,
@@ -37,7 +38,7 @@ from .journal import (
 )
 from .status import status
 from .versions import finalize
-from .sources import ingest_source
+from .sources import ingest_source, query_source
 
 
 def _input() -> dict[str, Any]:
@@ -53,6 +54,8 @@ def _input() -> dict[str, Any]:
 def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
     if operation == "status":
         return status(root)
+    if operation == "source-query":
+        return query_source(root, payload["source_id"], payload["anchor"])
     if operation == "publish":
         kind = payload.get("kind")
         if kind == "spec":
@@ -127,7 +130,7 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
         if action == "focused_check":
             return run_focused_checks(
                 lifecycle_root,
-                payload.get("test_keys"),
+                payload.get("test_ids"),
             )
         if action == "start":
             return start(lifecycle_root)
@@ -156,6 +159,16 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
             operation="task-before",
             owner_pid=payload.get("owner_pid"),
         )
+    if operation == "task-cancel":
+        stop = stop_active(root)
+        return {
+            **cancel_running_attempt(
+                root,
+                operation="task-before",
+                reason=str(payload.get("reason", "coder deadline cancelled")),
+            ),
+            "process_cleanup": stop,
+        }
     if operation == "path-check":
         return validate_write_path(root, payload["path"])
     if operation == "finalize":
@@ -194,7 +207,7 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if operation == "task-heartbeat":
+    if operation in {"task-heartbeat", "task-cancel"}:
         return _execute(root, operation, payload)
     if operation == "task-before":
         phase, step = _phase_step(operation, payload)
@@ -229,7 +242,7 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             raise
         finish_attempt(root, attempt, state="succeeded", result=result)
         return result
-    if operation in {"status", "path-check"} or (
+    if operation in {"status", "source-query", "path-check"} or (
         operation == "publish" and payload.get("kind") in {"tokens", "checkpoint"}
     ):
         return _execute(root, operation, payload)
@@ -255,6 +268,10 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
     except Exception as exc:
         finish_attempt(root, attempt, state="failed", error=str(exc))
         raise
+    if isinstance(result, dict) and result.get("ok") is False:
+        error = str(result.get("error") or f"{phase}:{step} returned ok=false")
+        finish_attempt(root, attempt, state="failed", result=result, error=error)
+        return result
     finish_attempt(root, attempt, state="succeeded", result=result)
     if operation == "publish" and effective_payload.get("kind") in {"spec", "contract"}:
         record_spec_checkpoint(root, {"state": "published"})

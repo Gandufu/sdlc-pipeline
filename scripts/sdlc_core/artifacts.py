@@ -438,6 +438,7 @@ def _render_test_plan(data: dict[str, Any]) -> str:
             f"- 级别：`{item['level']}`",
             f"- Mandatory：`{str(item['mandatory']).lower()}`",
             f"- Lifecycle command：`{item['command']}`",
+            f"- Selector：`{item['selector']}`",
             f"- 前置条件：{item['preconditions']}",
             f"- 输入：{item['input']}",
             f"- 预期：{item['expected']}",

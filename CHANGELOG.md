@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.0 - 2026-07-28
+
+- 安装复制排除 `.opencode/node_modules`，并在模板导入后的 init 再次强制合并
+  Vitest/ESLint tooling ignore。
+- focused check 改为 T-id 与受控文件 selector，成功和失败均按源码/spec 指纹复用。
+- code gate 负责 compile/package 与 lint/typecheck policy；test gate 只执行
+  start、readiness、无头浏览器 functional case 和 cleanup。
+- 删除活动 E2E/smoke/installer 测试契约，新增 Playwright functional 文件约定。
+- Python 与 OpenCode adapter 改为异步、可取消的进程树执行；deadline 会 abort session
+  并清理子进程。
+- `result.ok=false` 在 journal 中记录为 failed；新增 source anchor query 窄接口。
+
 ## 0.11.1 - 2026-07-27
 
 - 安装后校验 template registry 与 rule policy，修复 React policy/schema 漂移。

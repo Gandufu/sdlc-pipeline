@@ -184,13 +184,13 @@
           "minItems": 1,
           "items": {
             "type": "object",
-            "required": ["id", "title", "requirement_ids", "design_ids", "level", "preconditions", "input", "expected", "mandatory", "command"],
+            "required": ["id", "title", "requirement_ids", "design_ids", "level", "preconditions", "input", "expected", "mandatory", "command", "selector"],
             "properties": {
               "id": {"type": "string", "pattern": "^T-[0-9]{4}$"},
               "title": {"type": "string"},
               "requirement_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^R-[0-9]{4}$"}},
               "design_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^D-[0-9]{4}$"}},
-              "level": {"enum": ["unit", "integration"]},
+              "level": {"enum": ["unit", "integration", "functional"]},
               "preconditions": {"type": "string"},
               "input": {"type": "string"},
               "expected": {"type": "string"},
@@ -199,6 +199,10 @@
                 "type": "string",
                 "minLength": 1,
                 "description": "lifecycle.json tests 中的逻辑键（如 unit），不是 pnpm test 等 shell 命令"
+              },
+              "selector": {
+                "type": "string",
+                "pattern": "^tests/[A-Za-z0-9._/-]+$"
               }
             }
           }

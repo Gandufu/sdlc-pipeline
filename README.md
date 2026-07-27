@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.11.1`。
+OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.12.0`。
 
 它面向固定脚手架和给定需求完成一个可交付功能：需求澄清、设计、编码、确定性验证和版本固化。
 Python Core 保存机器真值与运行证据，OpenCode plugin 只负责薄适配和最小上下文编排。
@@ -49,8 +49,8 @@ code
 
 test
   → 主会话只调用一次 verify_delivery
-  → compile/restart/PID identity/health/artifact
-  → unit/integration + lint/static-analysis policy
+  → 校验 code 阶段 compile/package/lint/typecheck evidence
+  → start/readiness/headless functional/cleanup
   → 用户确认后 finalize
 ```
 
@@ -73,9 +73,9 @@ Delivery Memory 自动派生稳定项目事实、已确认决策以及“失败�
 - 简洁主流程及必要异常流程；
 - `AC-xxxx` 验收条件；
 - 模块、接口、data contract、真实 scaffold extension point；
-- 每个 AC 对应的 unit 或 integration 测试逻辑键。
+- 每个 AC 对应一个 functional T-id、受控测试逻辑键和功能文件 selector。
 
-`lint` 和 `static_analysis` 属于 active policy，不伪装成功能需求测试。Core 将 Feature Contract
+`lint` 和 `static_analysis` 属于 code policy，不伪装成功能需求测试。Core 将 Feature Contract
 投影为兼容的 requirements、design、test-plan JSON/Markdown；这些文件不是模型重复编写的三份输入。
 
 ## 状态、恢复与追溯
@@ -115,13 +115,14 @@ OpenCode 暴露六个窄工具：
 
 - `sdlc_status`
 - `sdlc_ingest_source`
+- `sdlc_query_source`
 - `sdlc_save_checkpoint`
 - `sdlc_publish_contract`
 - `sdlc_lifecycle`（仅 `init`、`focused_check`、`verify_delivery`）
 - `sdlc_finalize`
 
 模型不能提供 idempotency key，也不能直接编辑正式 SDLC 文档。`focused_check` 只运行当前
-Feature Contract 已登记的测试逻辑键，不构成交付证据。内部仍保留可恢复的确定性操作，
+Feature Contract 已登记的 T-id 与对应文件，不构成交付证据。内部仍保留可恢复的确定性操作，
 但幂等性由 Core 根据规范化输入计算和管理。
 
 ## 生命周期契约
@@ -134,7 +135,8 @@ Feature Contract 已登记的测试逻辑键，不构成交付证据。内部仍
 ```
 
 `lifecycle.json` 使用 argv 数组声明 install/compile/start/stop/health/artifact，以及
-unit、integration、lint、static_analysis 逻辑键。`scaffold.json` 声明关键文件 fingerprint、
+functional、unit、integration、lint、static_analysis 逻辑键。功能测试命令只有显式
+`allow_selector=true` 才能追加 `tests/` 内的测试文件。`scaffold.json` 声明关键文件 fingerprint、
 protected paths、allowed paths 与 extension points。
 常见 `vitest.config.*`、`eslint.config.*` 作为预登记 tooling paths，可记录为非业务变更，
 但不会被错误计入 design-to-code 功能证据。

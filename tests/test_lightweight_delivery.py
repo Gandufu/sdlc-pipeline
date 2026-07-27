@@ -54,12 +54,22 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             init_project(fixture.root)
             publish_spec(fixture.root, spec_payload())
 
-            result = run_focused_checks(fixture.root, ["unit"])
+            (fixture.root / "tests/test_feature.py").write_text(
+                "def test_feature(): assert True\n",
+                encoding="utf-8",
+            )
+            result = run_focused_checks(fixture.root, ["T-0001"])
+            repeated = run_focused_checks(fixture.root, ["T-0001"])
 
             self.assertTrue(result["ok"])
-            self.assertEqual(result["selected"], ["unit"])
+            self.assertEqual(result["selected"], ["T-0001"])
+            self.assertTrue(repeated["results"][0]["cached"])
+            self.assertEqual(
+                repeated["results"][0]["log"],
+                result["results"][0]["log"],
+            )
             with self.assertRaisesRegex(SdlcError, "Feature Contract"):
-                run_focused_checks(fixture.root, ["lint"])
+                run_focused_checks(fixture.root, ["T-9999"])
         finally:
             fixture.close()
 
@@ -200,8 +210,9 @@ class LightweightDeliveryContractTests(unittest.TestCase):
                 },
                 "verification": [{
                     "ac_id": "AC-0001",
-                    "test_key": "unit",
-                    "level": "unit",
+                    "test_key": "functional",
+                    "level": "functional",
+                    "selector": "tests/functional/device-system-info.functional.ts",
                     "expected": "系统信息字段可见",
                 }],
             }

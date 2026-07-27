@@ -30,6 +30,7 @@ from .common import (
 from .runs import pid_alive, read_active, record_active, retain_process, stop_active
 from .trace import verify_scaffold, worktree_fingerprint
 from .schema_validation import validate_schema_instance
+from .tooling import ensure_tooling_ignores
 
 from .policies import evaluate_hard_policies, executable_verifiers
 
@@ -241,8 +242,29 @@ def log_dir(root: Path) -> Path:
     return path
 
 
-def execute_command(root: Path, name: str, command: dict[str, Any]) -> dict[str, Any]:
+def execute_command(
+    root: Path,
+    name: str,
+    command: dict[str, Any],
+    *,
+    selector: str | None = None,
+) -> dict[str, Any]:
     argv, cwd, timeout = resolve_command(root, command)
+    if selector is not None:
+        if command.get("allow_selector") is not True:
+            raise SdlcError(f"{name} 不允许 selector")
+        selector_path = root / selector
+        try:
+            relative_selector = selector_path.resolve().relative_to(root.resolve())
+        except ValueError as exc:
+            raise SdlcError(f"{name} selector 越出项目: {selector}") from exc
+        if (
+            not selector.startswith("tests/")
+            or not selector_path.is_file()
+            or relative_selector.as_posix() != selector
+        ):
+            raise SdlcError(f"{name} selector 必须是已存在的 tests/ 项目内文件: {selector}")
+        argv.append(selector)
     started = time.monotonic()
     result = run_command(argv, cwd=cwd, timeout=timeout, check=False)
     duration = int((time.monotonic() - started) * 1000)
@@ -430,7 +452,7 @@ def verify_health(root: Path) -> dict[str, Any]:
                 pid = int((active or {}).get("pid", 0))
                 ok = pid_alive(pid)
                 detail = f"pid={pid}"
-            elif kind in {"http", "browser"}:
+            elif kind == "http":
                 url = _expand(check["url"], _variables(root, contract))
                 request = urllib.request.Request(url, method="GET")
                 with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -500,19 +522,13 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
         raise SdlcError(f"脚手架漂移，拒绝编译: {drift['drift']}")
     compile_result = run_phase(root, "compile")
     policy = run_policy_gate(root, "code")
-    stopped = stop_active(root)
-    started = start(root)
-    health = verify_health(root)
     artifacts = artifact_evidence(root)
-    if not health["ok"] or not artifacts["ok"]:
-        raise SdlcError("重启后的 health 或 artifact 验证未通过")
+    if not artifacts["ok"]:
+        raise SdlcError("code 阶段 artifact 验证未通过")
     evidence = {
         "ok": True,
         "compiled_at": utc_now(),
         "compile": compile_result,
-        "stop": stopped,
-        "start": started,
-        "health": health,
         "artifact_evidence": artifacts,
         "policy": policy,
         "source_fingerprint": worktree_fingerprint(root),
@@ -530,6 +546,7 @@ def init_project(
     drift = verify_scaffold(root)
     if not drift["ok"]:
         raise SdlcError(f"脚手架初始校验失败: {drift['drift']}")
+    tooling_ignore = ensure_tooling_ignores(root, strict=True)
     active_rules = activate_template_rules(root)
     tools = probe_tools(root)
     system_installs = []
@@ -572,6 +589,7 @@ def init_project(
         "stop": stopped,
         "keep_running_after_init": keep_running,
         "active_rules": active_rules,
+        "tooling_ignore": tooling_ignore,
     }
     if status != "pass":
         _write_init_report(root, report)
@@ -620,7 +638,12 @@ def run_test_plan(root: Path) -> dict[str, Any]:
         command_name = case["command"]
         if command_name not in commands:
             raise SdlcError(f"{case['id']} 引用未知 lifecycle test command: {command_name}")
-        result = execute_command(root, f"test-{case['id']}", commands[command_name])
+        result = execute_command(
+            root,
+            f"test-{case['id']}",
+            commands[command_name],
+            selector=case["selector"],
+        )
         status = "pass" if result["ok"] else "fail"
         results.append({
             "id": case["id"],
@@ -630,25 +653,11 @@ def run_test_plan(root: Path) -> dict[str, Any]:
             "log": result["log"],
             "tail": result["tail"] if not result["ok"] else "",
         })
-    policy_verifiers = executable_verifiers(root, "test")
-    policy_results = []
-    for verifier in policy_verifiers:
-        case_ids = [
-            case["id"] for case in spec["test_plan"]["items"]
-            if case["command"] == verifier["test_key"]
-        ]
-        measured = [item for item in results if item["id"] in case_ids]
-        policy_results.append({
-            **verifier,
-            "test_ids": case_ids,
-            "ok": bool(measured) and all(item["status"] == "pass" for item in measured),
-            "logs": [item["log"] for item in measured],
-        })
     policy = {
         "schema_version": "1.0",
         "phase": "test",
-        "ok": all(item["ok"] for item in policy_results),
-        "verifiers": policy_results,
+        "ok": True,
+        "verifiers": [],
         "created_at": utc_now(),
     }
     write_json(
@@ -677,39 +686,71 @@ def run_focused_checks(
 ) -> dict[str, Any]:
     """Run coder-selected feature checks without executing the delivery lifecycle."""
     spec = load_current_spec(root)
-    feature_keys = sorted({
-        item["command"] for item in spec["test_plan"]["items"]
-    })
-    requested = feature_keys if selected is None else selected
+    cases = {item["id"]: item for item in spec["test_plan"]["items"]}
+    feature_ids = sorted(cases)
+    requested = feature_ids if selected is None else selected
     if (
         not isinstance(requested, list)
         or not requested
         or any(not isinstance(item, str) or not item for item in requested)
     ):
-        raise SdlcError("focused_check test_keys 必须是非空字符串数组")
-    selected_keys = list(dict.fromkeys(requested))
-    unknown = sorted(set(selected_keys) - set(feature_keys))
+        raise SdlcError("focused_check test_ids 必须是非空字符串数组")
+    selected_ids = list(dict.fromkeys(requested))
+    unknown = sorted(set(selected_ids) - set(feature_ids))
     if unknown:
         raise SdlcError(
-            f"focused_check 只能选择当前 Feature Contract 的测试逻辑键；"
-            f"未知={unknown}，允许={feature_keys}"
+            f"focused_check 只能选择当前 Feature Contract 的 T-id；"
+            f"未知={unknown}，允许={feature_ids}"
         )
     commands = load_contract(root)["tests"]
     results = []
-    for key in selected_keys:
-        result = execute_command(root, f"focused-{key}", commands[key])
-        results.append({
-            "test_key": key,
+    cache_dir = root / ".sdlc-pipeline" / "runs" / "focused"
+    for test_id in selected_ids:
+        case = cases[test_id]
+        selector = case["selector"]
+        binding = {
+            "test_id": test_id,
+            "command": case["command"],
+            "selector": selector,
+            "selector_sha256": sha256_file(root / selector) if (root / selector).is_file() else None,
+            "spec_hashes": current_spec_hashes(root),
+            "source_fingerprint": worktree_fingerprint(root),
+        }
+        cache_path = cache_dir / f"{test_id}.json"
+        cached = read_json(cache_path, required=False)
+        if cached and cached.get("binding") == binding:
+            results.append({**cached["result"], "cached": True})
+            continue
+        result = execute_command(
+            root,
+            f"focused-{test_id}",
+            commands[case["command"]],
+            selector=selector,
+        )
+        focused_result = {
+            "test_id": test_id,
+            "test_key": case["command"],
+            "selector": selector,
             "status": "pass" if result["ok"] else "fail",
             "duration_ms": result["duration_ms"],
             "log": result["log"],
             "tail": "" if result["ok"] else result["tail"],
+            "cached": False,
+        }
+        write_json(cache_path, {
+            "schema_version": "1.0",
+            "binding": binding,
+            "result": focused_result,
+            "created_at": utc_now(),
+        })
+        results.append({
+            **focused_result,
         })
     evidence = {
         "schema_version": "1.0",
         "ok": all(item["status"] == "pass" for item in results),
-        "selected": selected_keys,
-        "available": feature_keys,
+        "selected": selected_ids,
+        "available": feature_ids,
         "results": results,
         "binding": {
             "spec_hashes": current_spec_hashes(root),
@@ -790,14 +831,20 @@ def verify_delivery(root: Path) -> dict[str, Any]:
     }
     evidence_path = root / ".sdlc-pipeline" / "runs" / "delivery-evidence.json"
     cached = read_json(evidence_path, required=False)
-    if cached and cached.get("ok") and cached.get("binding") == binding:
+    if cached and cached.get("binding") == binding:
         result_path = root / cached.get("test_results", "")
         if result_path.is_file():
             return {**cached, "cached": True}
 
+    code = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json")
+    if not code.get("ok") or code.get("source_fingerprint") != binding["source_fingerprint"]:
+        raise SdlcError("code evidence 缺失或已失效；请先重新执行 code gate")
     cleanup: dict[str, Any] = {"stopped": False}
     try:
-        code = compile_restart_verify(root)
+        started = start(root)
+        health = verify_health(root)
+        if not health["ok"]:
+            raise SdlcError("test 阶段 readiness 未通过")
         execution = run_test_plan(root)
         results = execute_tests(root)
     finally:
@@ -807,6 +854,8 @@ def verify_delivery(root: Path) -> dict[str, Any]:
         "cached": False,
         "binding": binding,
         "code": code,
+        "start": started,
+        "health": health,
         "execution": execution,
         "test_results": f"docs/sdlc/test-results/{results['version']}.json",
         "version": results["version"],

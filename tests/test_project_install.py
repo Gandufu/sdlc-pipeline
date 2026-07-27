@@ -110,6 +110,13 @@ class InstallerTests(unittest.TestCase):
             installer.install(target)
             self.assertEqual(custom.read_text(encoding="utf-8"), "mine")
 
+    def test_install_does_not_copy_distribution_node_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            installer.install(target)
+            copied = target / ".sdlc-pipeline" / "opencode" / "node_modules"
+            self.assertFalse(copied.exists())
+
     def test_install_self_checks_contracts_and_injects_tool_ignores(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
@@ -542,6 +549,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("focused_check", coder)
         self.assertIn('"sdlc-coder": ["focused_check"]', plugin)
         self.assertIn("禁止调用完整 compile/restart/health/test", adapter)
+        self.assertIn("client.session.abort", plugin)
+        self.assertIn('"task-cancel"', plugin)
 
     def test_spec_guidance_distinguishes_test_key_from_shell_command(self) -> None:
         text = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
@@ -638,7 +647,14 @@ class InstallerTests(unittest.TestCase):
                 json.loads(line)
                 for line in (target / "operations.jsonl").read_text(encoding="utf-8").splitlines()
             ]
-            self.assertEqual([item["operation"] for item in operations], ["task-after"])
+            self.assertEqual(
+                [item["operation"] for item in operations],
+                ["task-after", "lifecycle"],
+            )
+            self.assertEqual(
+                operations[1]["payload"]["action"],
+                "compile_restart_verify",
+            )
             self.assertEqual(operations[0]["payload"]["role"], "coder")
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")

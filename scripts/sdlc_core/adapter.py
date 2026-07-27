@@ -189,6 +189,11 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
             for item in requirements
             for criterion in item["acceptance_criteria"]
         ],
+        "source_refs": sorted({
+            ref
+            for item in requirements
+            for ref in item.get("source_refs", [])
+        }),
         "confirmed_decisions": delivery_memory(root)["decisions"],
     }
     pack = {

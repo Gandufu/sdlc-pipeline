@@ -127,6 +127,7 @@ def publish_feature_contract(root: Path, contract: dict[str, Any]) -> dict[str, 
                 "expected": item["expected"],
                 "mandatory": True,
                 "command": item["test_key"],
+                "selector": item["selector"],
             }
             for index, item in enumerate(contract["verification"], 1)
         ]},

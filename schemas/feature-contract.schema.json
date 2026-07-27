@@ -147,11 +147,15 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["ac_id", "test_key", "level", "expected"],
+        "required": ["ac_id", "test_key", "level", "selector", "expected"],
         "properties": {
           "ac_id": {"type": "string", "pattern": "^AC-[0-9]{4}$"},
           "test_key": {"type": "string", "minLength": 1},
-          "level": {"enum": ["unit", "integration"]},
+          "level": {"const": "functional"},
+          "selector": {
+            "type": "string",
+            "pattern": "^tests/functional/[A-Za-z0-9._/-]+\\.functional\\.(ts|js)$"
+          },
           "expected": {"type": "string", "minLength": 1}
         },
         "additionalProperties": false

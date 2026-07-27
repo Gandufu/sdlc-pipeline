@@ -42,7 +42,7 @@
         "type": "object",
         "required": ["type"],
         "properties": {
-          "type": {"enum": ["process", "http", "tcp", "command", "file", "browser"]},
+          "type": {"enum": ["process", "http", "tcp", "command", "file"]},
           "url": {"type": "string"},
           "host": {"type": "string"},
           "port": {"type": ["integer", "string"]},
@@ -73,6 +73,7 @@
         "startup_grace_seconds": {"type": "number", "minimum": 0},
         "background": {"type": "boolean"}
         ,"windows_only": {"type": "boolean"}
+        ,"allow_selector": {"type": "boolean"}
       },
       "additionalProperties": false
     }

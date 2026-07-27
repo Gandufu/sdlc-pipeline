@@ -22,9 +22,7 @@
         "typed-ipc",
         "react-renderer",
         "forge-package",
-        "electron-smoke",
-        "squirrel-installer",
-        "installer-smoke"
+        "headless-functional"
       ],
       "source": {
         "kind": "git",

@@ -7,6 +7,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -24,6 +25,7 @@ from sdlc_core.adapter import (  # noqa: E402
 from sdlc_core.artifacts import load_current_spec, publish_spec, validate_spec  # noqa: E402
 from sdlc_core.common import (  # noqa: E402
     SdlcError,
+    run_command,
     sha256_contract_file,
     sha256_file,
     write_json,
@@ -42,8 +44,8 @@ from sdlc_core.lifecycle import (  # noqa: E402
 )
 from sdlc_core.journal import begin_attempt, journal_status  # noqa: E402
 from sdlc_core.policies import evaluate_hard_policies  # noqa: E402
-from sdlc_core.runs import clear_active, record_active, record_tokens, stop_active  # noqa: E402
-from sdlc_core.sources import ingest_source  # noqa: E402
+from sdlc_core.runs import clear_active, pid_alive, record_active, record_tokens, stop_active  # noqa: E402
+from sdlc_core.sources import ingest_source, query_source  # noqa: E402
 from sdlc_core.status import status  # noqa: E402
 from sdlc_core.trace import (  # noqa: E402
     incremental_eligibility,
@@ -115,6 +117,7 @@ def spec_payload() -> dict:
             "expected": "退出码为 0",
             "mandatory": True,
             "command": "unit",
+            "selector": "tests/test_feature.py",
         }]},
     }
 
@@ -186,20 +189,21 @@ class ProjectFixture:
                     "contains": "ok",
                     "timeout_seconds": 5,
                 },
-                {
-                    "type": "browser",
-                    "url": f"http://127.0.0.1:{self.port}",
-                    "contains": "ok",
-                    "timeout_seconds": 5,
-                },
                 {"type": "file", "path": "dist/artifact.txt", "timeout_seconds": 5},
             ],
             "artifacts": ["dist/artifact.txt"],
             "tests": {
-                "unit": command("print('unit pass')"),
+                "unit": {
+                    **command("print('unit pass')"),
+                    "allow_selector": True,
+                },
                 "integration": command("print('integration pass')"),
                 "lint": command("print('lint pass')"),
                 "static_analysis": command("print('static pass')"),
+                "functional": {
+                    **command("print('functional pass')"),
+                    "allow_selector": True,
+                },
             },
         }
         write_json(self.root / ".sdlc-pipeline" / "lifecycle.json", lifecycle)
@@ -628,7 +632,7 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["system_installs"], [installed])
 
-    def test_compile_restart_has_real_evidence(self) -> None:
+    def test_code_gate_has_compile_policy_and_artifact_evidence(self) -> None:
         publish_spec(self.fixture.root, spec_payload())
         write_json(
             self.fixture.root / ".sdlc-pipeline/runs/coder-handoff.json",
@@ -639,7 +643,7 @@ class LifecycleTests(unittest.TestCase):
         )
         evidence = compile_restart_verify(self.fixture.root)
         self.assertTrue(evidence["compile"]["ok"])
-        self.assertTrue(evidence["health"]["ok"])
+        self.assertTrue(evidence["policy"]["ok"])
         self.assertEqual(len(evidence["artifact_evidence"]["artifacts"]), 1)
 
 
@@ -739,7 +743,7 @@ class ClosedLoopTests(unittest.TestCase):
         current = status(self.fixture.root)
         self.assertEqual(
             current["lifecycle_tests"]["available"],
-            ["integration", "lint", "static_analysis", "unit"],
+            ["functional", "integration", "lint", "static_analysis", "unit"],
         )
         self.assertEqual(
             current["lifecycle_tests"]["commands"]["unit"]["argv"][-1],
@@ -995,6 +999,40 @@ class ReliabilityTests(unittest.TestCase):
         self.assertIn("vitest.config.ts", manifest["brief"]["tooling_paths"])
         self.assertIn("eslint.config.mjs", manifest["brief"]["tooling_paths"])
 
+    def test_init_applies_tooling_ignores_after_template_import(self) -> None:
+        vitest = self.fixture.root / "vitest.config.ts"
+        eslint = self.fixture.root / "eslint.config.mjs"
+        vitest.write_text(
+            "export default { test: { exclude: ['node_modules/**'] } }\n",
+            encoding="utf-8",
+        )
+        eslint.write_text(
+            "export default [{ ignores: ['node_modules/**'] }]\n",
+            encoding="utf-8",
+        )
+
+        report = init_project(self.fixture.root)
+
+        self.assertTrue(report["tooling_ignore"]["ok"])
+        for path in (vitest, eslint):
+            text = path.read_text(encoding="utf-8")
+            self.assertIn(".opencode/**", text)
+            self.assertIn(".sdlc-pipeline/**", text)
+
+    def test_result_ok_false_is_recorded_as_failed(self) -> None:
+        with patch("sdlc_core.cli._execute", return_value={
+            "ok": False,
+            "error": "functional assertion failed",
+        }):
+            result = execute(self.fixture.root, "lifecycle", {
+                "action": "verify_delivery",
+            })
+
+        self.assertFalse(result["ok"])
+        current = journal_status(self.fixture.root)
+        self.assertEqual(current["state"], "failed")
+        self.assertIn("functional assertion failed", current["last_error"])
+
     def test_coder_dispatch_has_deadline_heartbeat_and_terminal_handoff(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
@@ -1115,6 +1153,46 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(asset["original_uri"], str(external.resolve()))
         self.assertEqual(asset["sha256"], sha256_file(copied))
         self.assertEqual(ingested["uri"], asset["uri"])
+
+    def test_source_query_returns_only_requested_anchor(self) -> None:
+        source = ingest_source(self.fixture.root, {
+            "kind": "inline",
+            "content": "设备管理系统信息",
+            "segments": [
+                {"anchor": "feature:device", "text": "设备管理"},
+                {"anchor": "field:system", "text": "系统信息"},
+            ],
+        })["envelope"]
+
+        result = query_source(
+            self.fixture.root,
+            source["source_id"],
+            "field:system",
+        )
+
+        self.assertEqual(result["text"], "系统信息")
+        self.assertEqual(result["anchor"], "field:system")
+        self.assertNotIn("设备管理", result["text"])
+
+    def test_command_deadline_terminates_child_process_tree(self) -> None:
+        pid_file = self.fixture.root / "child.pid"
+        code = (
+            "import subprocess,sys,time,pathlib;"
+            "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']);"
+            f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid));"
+            "time.sleep(60)"
+        )
+
+        with self.assertRaisesRegex(SdlcError, "已终止进程树"):
+            run_command(
+                [sys.executable, "-c", code],
+                cwd=self.fixture.root,
+                timeout=1,
+            )
+
+        child_pid = int(pid_file.read_text(encoding="utf-8"))
+        time.sleep(0.2)
+        self.assertFalse(pid_alive(child_pid))
 
     def test_journal_idempotency_and_spec_checkpoint_resume(self) -> None:
         payload = {

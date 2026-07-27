@@ -46,10 +46,11 @@ Electron 项目必须检查：
 生命周期至少覆盖：
 
 ```text
-install -> compile/package -> start -> readiness -> functional smoke -> stop
+install -> compile/package -> start -> readiness -> headless functional -> stop
 ```
 
-功能测试计划只描述 unit 和 integration；lint 与 static analysis 属于 profile policy verifier。空测试集或只检查端口均算失败。
+功能测试计划只描述由无头浏览器执行的 functional T-id；lint、typecheck 与 static analysis
+属于 code policy verifier。空测试集、只检查端口或只匹配 HTML 字符串均算失败。
 
 ## 5. 验证并报告
 

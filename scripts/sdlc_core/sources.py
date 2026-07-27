@@ -165,6 +165,34 @@ def load_source(root: Path, source_id: str) -> dict[str, Any]:
     return source
 
 
+def query_source(
+    root: Path,
+    source_id: str,
+    anchor: str,
+    *,
+    max_chars: int = 12_000,
+) -> dict[str, Any]:
+    source = load_source(root, source_id)
+    segment = next(
+        (item for item in source["segments"] if item["anchor"] == anchor),
+        None,
+    )
+    if segment is None:
+        raise SdlcError(f"未知来源 anchor: {source_id}#{anchor}")
+    text = segment["text"]
+    return {
+        "ok": True,
+        "source_id": source_id,
+        "anchor": anchor,
+        "sha256": segment["sha256"],
+        "text": text[:max_chars],
+        "truncated": len(text) > max_chars,
+        "canonical_path": (
+            f".sdlc-pipeline/runs/sources/{source_id}.json"
+        ),
+    }
+
+
 def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

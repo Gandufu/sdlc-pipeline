@@ -150,9 +150,10 @@ requirements、design、test-plan 三份机器/Markdown 视图。校验规则：
 
 init 的成功标准是 install、compile、start、health、artifact 全部通过，并完成 stop（除非模板
 明确 keep running）。code 阶段只允许 coder 运行 Feature Contract 已登记测试键的
-`focused_check`；它是快速反馈，不构成交付证据。test 阶段由主会话只调用一次
-`verify_delivery`，Core 执行 compile → stop old → start new → health/artifact → mandatory
-tests/policy，因此文档落盘、focused check 或 coder 的 compiled 声明都不能过门。
+`focused_check`；它按 T-id 与文件执行快速反馈，不构成交付证据。code 阶段在 handoff 后执行
+compile/package 与 lint/typecheck policy 并绑定源码指纹。test 阶段由主会话只调用一次
+`verify_delivery`，Core 校验 code evidence 后执行 start → readiness → mandatory headless
+functional tests → cleanup。
 
 health 支持 process、HTTP、TCP、command、file 和 browser smoke。browser smoke 在 core 中
 以无 UI HTTP 页面探针实现；需要真实交互的模板把受控 integration 命令登记为 command。当前

@@ -5,7 +5,6 @@ import argparse
 import importlib.util
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -20,11 +19,11 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.11.1"
+VERSION = "0.12.0"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.7"
-TOOLING_IGNORE_PATTERNS = (".opencode/**", ".sdlc-pipeline/**")
+COPY_EXCLUDED_PARTS = {"node_modules", "__pycache__", ".cache"}
 MANAGED = (
     ("scripts", ".sdlc-pipeline/scripts"),
     ("templates", ".sdlc-pipeline/templates"),
@@ -67,9 +66,13 @@ def atomic_write(path: Path, text: str) -> None:
 def _copy(source: Path, destination: Path, force: bool) -> None:
     if source.is_dir():
         for item in source.rglob("*"):
-            if item.is_dir() or "__pycache__" in item.parts or item.suffix == ".pyc":
-                continue
             relative = item.relative_to(source)
+            if (
+                item.is_dir()
+                or any(part in COPY_EXCLUDED_PARTS for part in relative.parts)
+                or item.suffix == ".pyc"
+            ):
+                continue
             target = destination / relative
             if target.exists() and not force:
                 continue
@@ -104,47 +107,14 @@ def _ensure_opencode_dependencies(target: Path) -> None:
     )
 
 
-def _merge_ignore_array(path: Path, key: str) -> bool:
-    text = path.read_text(encoding="utf-8")
-    match = re.search(
-        rf"(?P<prefix>\b{re.escape(key)}\s*:\s*\[)(?P<body>.*?)(?P<suffix>\])",
-        text,
-        re.DOTALL,
-    )
-    if not match:
-        return False
-    body = match.group("body")
-    missing = [pattern for pattern in TOOLING_IGNORE_PATTERNS if pattern not in body]
-    if not missing:
-        return True
-    separator = "" if not body.strip() else ("" if body.rstrip().endswith(",") else ",")
-    addition = separator + "".join(f" {pattern!r}," for pattern in missing)
-    updated = text[:match.end("body")] + addition + text[match.end("body"):]
-    atomic_write(path, updated)
-    return True
-
-
 def _ensure_tooling_ignores(target: Path) -> dict[str, object]:
-    updated: list[str] = []
-    unresolved: list[str] = []
-    groups = (
-        ("exclude", ("vitest.config.ts", "vitest.config.js", "vitest.config.mts", "vitest.config.mjs")),
-        ("ignores", ("eslint.config.mjs", "eslint.config.js", "eslint.config.cjs", "eslint.config.ts")),
-    )
-    for key, names in groups:
-        for name in names:
-            path = target / name
-            if not path.is_file():
-                continue
-            if _merge_ignore_array(path, key):
-                updated.append(name)
-            else:
-                unresolved.append(name)
-    return {
-        "patterns": list(TOOLING_IGNORE_PATTERNS),
-        "updated": sorted(updated),
-        "unresolved": sorted(unresolved),
-    }
+    runtime_scripts = target / ".sdlc-pipeline" / "scripts"
+    runtime_text = str(runtime_scripts)
+    if runtime_text not in sys.path:
+        sys.path.insert(0, runtime_text)
+    from sdlc_core.tooling import ensure_tooling_ignores
+
+    return ensure_tooling_ignores(target)
 
 
 def _contract_self_check(target: Path) -> dict[str, object]:

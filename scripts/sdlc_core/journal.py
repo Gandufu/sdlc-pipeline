@@ -207,6 +207,24 @@ def running_attempt(
     return matches[-1] if matches else None
 
 
+def cancel_running_attempt(
+    root: Path,
+    *,
+    operation: str,
+    reason: str,
+) -> dict[str, Any]:
+    attempt = running_attempt(root, operation=operation)
+    if not attempt:
+        return {"ok": True, "cancelled": False, "reason": "no_running_attempt"}
+    finish_attempt(root, attempt, state="aborted", error=reason)
+    return {
+        "ok": True,
+        "cancelled": True,
+        "attempt_id": attempt["attempt_id"],
+        "reason": reason,
+    }
+
+
 def finish_attempt(
     root: Path,
     attempt: dict[str, Any],

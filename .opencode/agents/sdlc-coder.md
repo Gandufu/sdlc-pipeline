@@ -20,7 +20,9 @@ permission:
 
 你负责选择设计允许范围内的实现方式和受影响测试，不修改正式 SDLC 文档、protected path，
 不安装软件或操作 Git。需要快速反馈时可调用
-`sdlc_lifecycle(action=focused_check, options={"test_keys":[...]})`；只能选择 brief 已登记测试键。
+`sdlc_lifecycle(action=focused_check, options={"test_ids":[...]})`；只能选择 brief 已登记 T-id。
+functional T-id 必须实现对应 `tests/functional/*.functional.ts`，使用 Playwright 无头浏览器
+打开页面、操作用户可见菜单并断言业务字段；测试文件不自行编译、打包或启动项目。
 
 最终只返回：
 

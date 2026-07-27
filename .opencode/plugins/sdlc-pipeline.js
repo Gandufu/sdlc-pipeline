@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process"
+import { spawn } from "node:child_process"
 import { existsSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import path from "node:path"
@@ -7,6 +7,7 @@ const AGENTS = {
   "sdlc-coder": "coder",
 }
 const CODER_DEADLINE_SECONDS = 9 * 60
+const coderDeadlines = new Map()
 const PLUGIN_PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", ".."
 )
@@ -26,11 +27,36 @@ function coreScript(root) {
   throw new Error("sdlc-pipeline Python core is missing")
 }
 
-function invoke(root, operation, payload = {}) {
-  const result = spawnSync("python", [coreScript(root), operation, "--root", root], {
+function stopProcessTree(child) {
+  return new Promise((resolve) => {
+    if (!child?.pid) {
+      resolve()
+      return
+    }
+    if (process.platform === "win32") {
+      const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+        windowsHide: true,
+        shell: false,
+        stdio: "ignore",
+      })
+      killer.on("error", () => resolve())
+      killer.on("close", () => resolve())
+      return
+    }
+    try {
+      process.kill(-child.pid, "SIGKILL")
+    } catch {
+      child.kill("SIGKILL")
+    }
+    child.once("close", () => resolve())
+    setTimeout(resolve, 5000).unref()
+  })
+}
+
+function invoke(root, operation, payload = {}, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("python", [coreScript(root), operation, "--root", root], {
     cwd: root,
-    input: JSON.stringify(payload),
-    encoding: "utf8",
     env: {
       ...process.env,
       PYTHONUTF8: "1",
@@ -38,21 +64,62 @@ function invoke(root, operation, payload = {}) {
     },
     windowsHide: true,
     shell: false,
-    timeout: 30 * 60 * 1000,
-    maxBuffer: 10 * 1024 * 1024,
+    detached: process.platform !== "win32",
+    stdio: ["pipe", "pipe", "pipe"],
   })
-  if (result.error) throw result.error
-  const lines = (result.stdout || "").trim().split(/\r?\n/)
-  let data
-  try {
-    data = JSON.parse(lines.at(-1) || "{}")
-  } catch {
-    throw new Error(`sdlc core returned invalid JSON: ${result.stdout}`)
-  }
-  if ((result.status ?? 1) !== 0 || data.ok === false) {
-    throw new Error(data.error || result.stderr || `sdlc ${operation} failed`)
-  }
-  return data
+    let stdout = ""
+    let stderr = ""
+    let settled = false
+    let cancelling = false
+    const finish = (error, data) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      options.signal?.removeEventListener("abort", abort)
+      if (error) reject(error)
+      else resolve(data)
+    }
+    const abort = async () => {
+      if (cancelling || settled) return
+      cancelling = true
+      await stopProcessTree(child)
+      finish(new Error(`sdlc ${operation} cancelled`))
+    }
+    const timer = setTimeout(async () => {
+      if (cancelling || settled) return
+      cancelling = true
+      await stopProcessTree(child)
+      finish(new Error(`sdlc ${operation} deadline exceeded`))
+    }, options.timeoutMs || 30 * 60 * 1000)
+    options.signal?.addEventListener("abort", abort, { once: true })
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString("utf8")
+      if (stdout.length > 10 * 1024 * 1024) abort()
+    })
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString("utf8")
+    })
+    child.on("error", (error) => {
+      if (!cancelling) finish(error)
+    })
+    child.on("close", (status) => {
+      if (cancelling) return
+      const lines = stdout.trim().split(/\r?\n/)
+      let data
+      try {
+        data = JSON.parse(lines.at(-1) || "{}")
+      } catch {
+        finish(new Error(`sdlc core returned invalid JSON: ${stdout}`))
+        return
+      }
+      if ((status ?? 1) !== 0 || data.ok === false) {
+        finish(new Error(data.error || stderr || `sdlc ${operation} failed`))
+        return
+      }
+      finish(null, data)
+    })
+    child.stdin.end(JSON.stringify(payload))
+  })
 }
 
 export function resolveProjectRoot(context = {}, fallback = PLUGIN_PROJECT_ROOT) {
@@ -85,7 +152,7 @@ function requireAgent(context, allowed, toolName) {
   }
 }
 
-export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
+export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
   const { tool } = await import("@opencode-ai/plugin")
   const fallbackRoot = resolveProjectRoot({ directory, worktree })
   return {
@@ -94,7 +161,9 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         description: "读取当前阶段、恢复点、门禁、诊断和下一步。",
         args: {},
         async execute(_args, context) {
-          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "status"))
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "status", {}, {
+            signal: context.abort,
+          }))
         },
       }),
       sdlc_ingest_source: tool({
@@ -109,7 +178,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_ingest_source")
-          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "publish", {
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "publish", {
             kind: "source",
             payload: {
               kind: args.source_type,
@@ -119,7 +188,23 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
               media_type: args.media_type,
               allow_external_copy: args.allow_external_copy,
             },
-          }))
+          }, { signal: context.abort }))
+        },
+      }),
+      sdlc_query_source: tool({
+        description: "按 source_id 和 anchor 读取一段已摄取原文。只返回受限片段与 hash。",
+        args: {
+          source_id: tool.schema.string(),
+          anchor: tool.schema.string(),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_query_source")
+          return JSON.stringify(await invoke(
+            rootOf(context, fallbackRoot),
+            "source-query",
+            args,
+            { signal: context.abort },
+          ))
         },
       }),
       sdlc_save_checkpoint: tool({
@@ -129,10 +214,10 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_save_checkpoint")
-          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "publish", {
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "publish", {
             kind: "checkpoint",
             payload: JSON.parse(args.payload),
-          }))
+          }, { signal: context.abort }))
         },
       }),
       sdlc_publish_contract: tool({
@@ -142,10 +227,10 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_publish_contract")
-          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "publish", {
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "publish", {
             kind: "contract",
             payload: JSON.parse(args.payload),
-          }))
+          }, { signal: context.abort }))
         },
       }),
       sdlc_lifecycle: tool({
@@ -155,7 +240,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
             "init", "focused_check", "verify_delivery",
           ]),
           options: tool.schema.string().optional().describe(
-            "Optional JSON. init: {template}; focused_check: {test_keys}.",
+            "Optional JSON. init: {template}; focused_check: {test_ids}.",
           ),
         },
         async execute(args, context) {
@@ -170,15 +255,15 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
             throw new Error(`agent ${context?.agent || "unknown"} cannot run lifecycle ${args.action}`)
           }
           if (context?.agent === "sdlc-coder") {
-            invoke(rootOf(context, fallbackRoot), "task-heartbeat", {
+            await invoke(rootOf(context, fallbackRoot), "task-heartbeat", {
               role: "coder",
               owner_pid: process.pid,
             })
           }
-          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "lifecycle", {
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "lifecycle", {
             action: args.action,
             ...options,
-          }))
+          }, { signal: context.abort }))
         },
       }),
       sdlc_finalize: tool({
@@ -190,21 +275,21 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_finalize")
-          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "finalize", {
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "finalize", {
             ...args,
-          }))
+          }, { signal: context.abort }))
         },
       }),
     },
 
     "tool.execute.before": async (input, output) => {
       if (["edit", "write", "apply_patch"].includes(input.tool)) {
-        invoke(fallbackRoot, "task-heartbeat", {
+        await invoke(fallbackRoot, "task-heartbeat", {
           role: "coder",
           owner_pid: process.pid,
         })
         const target = output.args?.filePath || output.args?.path
-        if (target) invoke(fallbackRoot, "path-check", { path: target })
+        if (target) await invoke(fallbackRoot, "path-check", { path: target })
         return
       }
       if (input.tool !== "task") return
@@ -212,11 +297,25 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
       if (!role) {
         throw new Error("sdlc-main 只能派发 sdlc-coder")
       }
-      const result = invoke(fallbackRoot, "task-before", {
+      const result = await invoke(fallbackRoot, "task-before", {
         role,
         owner_pid: process.pid,
         deadline_seconds: CODER_DEADLINE_SECONDS,
       })
+      const deadline = setTimeout(async () => {
+        try {
+          await client.session.abort({
+            path: { id: input.sessionID },
+            query: { directory: fallbackRoot },
+          })
+        } finally {
+          await invoke(fallbackRoot, "task-cancel", {
+            reason: `coder deadline exceeded after ${CODER_DEADLINE_SECONDS}s`,
+          }).catch(() => undefined)
+        }
+      }, CODER_DEADLINE_SECONDS * 1000)
+      deadline.unref()
+      coderDeadlines.set(input.callID, deadline)
       const paths = result.context_pack.paths.join(", ")
       output.args.prompt = `${output.args.prompt || ""}\n\n`
         + `[SDLC context pack] ${paths}\n${result.instruction}`
@@ -228,9 +327,15 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
       if (input.tool !== "task") return
       const role = AGENTS[input.args?.subagent_type]
       if (!role) return
-      invoke(fallbackRoot, "task-after", {
+      const deadline = coderDeadlines.get(input.callID)
+      if (deadline) clearTimeout(deadline)
+      coderDeadlines.delete(input.callID)
+      await invoke(fallbackRoot, "task-after", {
         role,
         output: output.output || "",
+      })
+      await invoke(fallbackRoot, "lifecycle", {
+        action: "compile_restart_verify",
       })
     },
   }
