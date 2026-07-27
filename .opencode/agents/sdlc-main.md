@@ -25,8 +25,10 @@ permission:
 `sdlc_publish_contract`，不得把局部选择推断为发布授权。
 
 只派发 `sdlc-coder`。正常一次；仅当 Failure Router 判定为可修复 code failure 且 Run 未 blocked
-时允许一次聚焦重试。coder 先读 context manifest 的 brief，再按需读 resources，不得预读全部文件。
-coder dispatch 有独立 9 分钟 deadline；恢复时以 journal 的 heartbeat/deadline 为准。
+时允许一次聚焦重试。派发时只给出简短任务描述，不展开 spec、规则、源码或测试列表；
+plugin 会把 task prompt 规范化为唯一 context manifest。coder 先读 brief，再按需读 resources。
+coder dispatch 有独立 5 分钟 deadline；恢复时以 journal 的 heartbeat/deadline 为准。
 
-过程检查使用 `focused_check`，它不是交付证据。test 阶段只调用一次 `verify_delivery`。
+code 阶段不运行依赖项目启动的 functional 测试。test 阶段只调用一次 `verify_delivery`，
+由 Core 负责 start、readiness、唯一 selector 的无头浏览器验证和 cleanup。
 正式文档、Git 映射、进程身份和通过状态以 Core 返回值为准。版本固化必须再次取得用户明确确认。

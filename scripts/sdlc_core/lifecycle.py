@@ -634,25 +634,39 @@ def run_test_plan(root: Path) -> dict[str, Any]:
     commands = load_contract(root)["tests"]
     started_at = utc_now()
     results = []
+    executions: dict[tuple[str, str], dict[str, Any]] = {}
     for case in spec["test_plan"]["items"]:
         command_name = case["command"]
         if command_name not in commands:
             raise SdlcError(f"{case['id']} 引用未知 lifecycle test command: {command_name}")
-        result = execute_command(
-            root,
-            f"test-{case['id']}",
-            commands[command_name],
-            selector=case["selector"],
-        )
+        execution_key = (command_name, case["selector"])
+        reused_from = None
+        if execution_key in executions:
+            result = executions[execution_key]["result"]
+            reused_from = executions[execution_key]["test_id"]
+        else:
+            result = execute_command(
+                root,
+                f"test-{case['id']}",
+                commands[command_name],
+                selector=case["selector"],
+            )
+            executions[execution_key] = {
+                "test_id": case["id"],
+                "result": result,
+            }
         status = "pass" if result["ok"] else "fail"
-        results.append({
+        test_result = {
             "id": case["id"],
             "mandatory": case["mandatory"],
             "status": status,
             "duration_ms": result["duration_ms"],
             "log": result["log"],
             "tail": result["tail"] if not result["ok"] else "",
-        })
+        }
+        if reused_from:
+            test_result["reused_execution_from"] = reused_from
+        results.append(test_result)
     policy = {
         "schema_version": "1.0",
         "phase": "test",
@@ -704,6 +718,7 @@ def run_focused_checks(
         )
     commands = load_contract(root)["tests"]
     results = []
+    executions: dict[tuple[str, str], dict[str, Any]] = {}
     cache_dir = root / ".sdlc-pipeline" / "runs" / "focused"
     for test_id in selected_ids:
         case = cases[test_id]
@@ -721,12 +736,22 @@ def run_focused_checks(
         if cached and cached.get("binding") == binding:
             results.append({**cached["result"], "cached": True})
             continue
-        result = execute_command(
-            root,
-            f"focused-{test_id}",
-            commands[case["command"]],
-            selector=selector,
-        )
+        execution_key = (case["command"], selector)
+        reused_from = None
+        if execution_key in executions:
+            result = executions[execution_key]["result"]
+            reused_from = executions[execution_key]["test_id"]
+        else:
+            result = execute_command(
+                root,
+                f"focused-{test_id}",
+                commands[case["command"]],
+                selector=selector,
+            )
+            executions[execution_key] = {
+                "test_id": test_id,
+                "result": result,
+            }
         focused_result = {
             "test_id": test_id,
             "test_key": case["command"],
@@ -737,6 +762,8 @@ def run_focused_checks(
             "tail": "" if result["ok"] else result["tail"],
             "cached": False,
         }
+        if reused_from:
+            focused_result["reused_execution_from"] = reused_from
         write_json(cache_path, {
             "schema_version": "1.0",
             "binding": binding,

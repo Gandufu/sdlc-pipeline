@@ -6,8 +6,9 @@ import path from "node:path"
 const AGENTS = {
   "sdlc-coder": "coder",
 }
-const CODER_DEADLINE_SECONDS = 9 * 60
+const CODER_DEADLINE_SECONDS = 5 * 60
 const coderDeadlines = new Map()
+const coderWriteSessions = new Set()
 const PLUGIN_PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", ".."
 )
@@ -25,6 +26,21 @@ function coreScript(root) {
     if (script) return script
   }
   throw new Error("sdlc-pipeline Python core is missing")
+}
+
+async function logPluginEvent(client, message, extra = {}, level = "info") {
+  try {
+    await client?.app?.log?.({
+      body: {
+        service: "sdlc-pipeline",
+        level,
+        message,
+        extra,
+      },
+    })
+  } catch {
+    // Logging must never block or fail a delivery hook.
+  }
 }
 
 function stopProcessTree(child) {
@@ -237,28 +253,19 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         description: "执行一个交付意图；内部生命周期由 Core 管理。",
         args: {
           action: tool.schema.enum([
-            "init", "focused_check", "verify_delivery",
+            "init", "verify_delivery",
           ]),
           options: tool.schema.string().optional().describe(
-            "Optional JSON. init: {template}; focused_check: {test_ids}.",
+            "Optional JSON. init: {template}.",
           ),
         },
         async execute(args, context) {
           const options = args.options ? JSON.parse(args.options) : {}
           const allowed = {
-            "sdlc-main": [
-              "init", "focused_check", "verify_delivery",
-            ],
-            "sdlc-coder": ["focused_check"],
+            "sdlc-main": ["init", "verify_delivery"],
           }
           if (!allowed[context?.agent]?.includes(args.action)) {
             throw new Error(`agent ${context?.agent || "unknown"} cannot run lifecycle ${args.action}`)
-          }
-          if (context?.agent === "sdlc-coder") {
-            await invoke(rootOf(context, fallbackRoot), "task-heartbeat", {
-              role: "coder",
-              owner_pid: process.pid,
-            })
           }
           return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "lifecycle", {
             action: args.action,
@@ -284,12 +291,20 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
 
     "tool.execute.before": async (input, output) => {
       if (["edit", "write", "apply_patch"].includes(input.tool)) {
-        await invoke(fallbackRoot, "task-heartbeat", {
-          role: "coder",
-          owner_pid: process.pid,
-        })
         const target = output.args?.filePath || output.args?.path
-        if (target) await invoke(fallbackRoot, "path-check", { path: target })
+        if (target) {
+          await invoke(fallbackRoot, "write-check", {
+            path: target,
+            owner_pid: process.pid,
+          })
+        }
+        if (input.sessionID && !coderWriteSessions.has(input.sessionID)) {
+          coderWriteSessions.add(input.sessionID)
+          await logPluginEvent(client, "coder.first_write", {
+            session_id: input.sessionID,
+            tool: input.tool,
+          })
+        }
         return
       }
       if (input.tool !== "task") return
@@ -302,8 +317,18 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         owner_pid: process.pid,
         deadline_seconds: CODER_DEADLINE_SECONDS,
       })
+      await logPluginEvent(client, "coder.dispatched", {
+        session_id: input.sessionID,
+        deadline_seconds: CODER_DEADLINE_SECONDS,
+        context_characters: result.context_pack.characters,
+        context_resources: result.context_pack.resource_count,
+      })
       const deadline = setTimeout(async () => {
         try {
+          await logPluginEvent(client, "coder.deadline_exceeded", {
+            session_id: input.sessionID,
+            deadline_seconds: CODER_DEADLINE_SECONDS,
+          }, "warn")
           await client.session.abort({
             path: { id: input.sessionID },
             query: { directory: fallbackRoot },
@@ -316,11 +341,13 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       }, CODER_DEADLINE_SECONDS * 1000)
       deadline.unref()
       coderDeadlines.set(input.callID, deadline)
-      const paths = result.context_pack.paths.join(", ")
-      output.args.prompt = `${output.args.prompt || ""}\n\n`
-        + `[SDLC context pack] ${paths}\n${result.instruction}`
-        + `\nCoder deadline: ${CODER_DEADLINE_SECONDS}s; 每完成一个可验证增量即运行 focused check，`
-        + "无法在 deadline 内完成时返回已完成摘要与 open_issues，不要静默等待。"
+      const manifest = result.context_pack.paths[0]
+      output.args.command = "实现当前已发布的 Feature Contract"
+      output.args.prompt = `[SDLC context pack] ${manifest}\n`
+        + `${result.instruction}\n`
+        + `Coder deadline: ${CODER_DEADLINE_SECONDS}s。`
+        + "不要展开读取 Core 源码，不要在 code 阶段运行 functional；"
+        + "完成实现后立即返回约定 JSON handoff。"
     },
 
     "tool.execute.after": async (input, output) => {
@@ -336,6 +363,9 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       })
       await invoke(fallbackRoot, "lifecycle", {
         action: "compile_restart_verify",
+      })
+      await logPluginEvent(client, "coder.completed", {
+        session_id: input.sessionID,
       })
     },
   }

@@ -23,6 +23,10 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         try:
             init_project(fixture.root)
             publish_spec(fixture.root, spec_payload())
+            (fixture.root / "src/feature.py").write_text(
+                "def feature(): return 'existing'\n",
+                encoding="utf-8",
+            )
 
             result = before_task(fixture.root, "coder")
             pack = json.loads(
@@ -39,7 +43,16 @@ class LightweightDeliveryContractTests(unittest.TestCase):
                 {"path", "sha256", "tier", "reason"}.issubset(resource)
                 for resource in pack["resources"]
             ))
-            self.assertLess(result["context_pack"]["characters"], 15_000)
+            self.assertLessEqual(len(pack["resources"]), 10)
+            self.assertIn(
+                "src/feature.py",
+                {resource["path"] for resource in pack["resources"]},
+            )
+            self.assertFalse(any(
+                resource["path"].startswith(".sdlc-pipeline/scripts/")
+                for resource in pack["resources"]
+            ))
+            self.assertLess(result["context_pack"]["characters"], 8_000)
         finally:
             fixture.close()
 
@@ -70,6 +83,44 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(SdlcError, "Feature Contract"):
                 run_focused_checks(fixture.root, ["T-9999"])
+        finally:
+            fixture.close()
+
+    def test_focused_check_executes_shared_selector_once(self) -> None:
+        from copy import deepcopy
+
+        from sdlc_core.artifacts import publish_spec
+        from sdlc_core.lifecycle import init_project, run_focused_checks
+        from tests.test_pipeline import ProjectFixture, spec_payload
+
+        fixture = ProjectFixture()
+        try:
+            init_project(fixture.root)
+            payload = spec_payload()
+            second = deepcopy(payload["test_plan"]["items"][0])
+            second["id"] = "T-0002"
+            payload["test_plan"]["items"].append(second)
+            publish_spec(fixture.root, payload)
+            (fixture.root / "tests/test_feature.py").write_text(
+                "def test_feature(): assert True\n",
+                encoding="utf-8",
+            )
+
+            result = run_focused_checks(
+                fixture.root,
+                ["T-0001", "T-0002"],
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(len(result["results"]), 2)
+            self.assertEqual(
+                result["results"][0]["log"],
+                result["results"][1]["log"],
+            )
+            self.assertEqual(
+                result["results"][1]["reused_execution_from"],
+                "T-0001",
+            )
         finally:
             fixture.close()
 
@@ -260,9 +311,9 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         actions = set(re.findall(r'"([^"]+)"', match.group(1)))
         self.assertEqual(
             actions,
-            {"init", "focused_check", "verify_delivery"},
+            {"init", "verify_delivery"},
         )
-        self.assertIn('"sdlc-coder": ["focused_check"]', plugin)
+        self.assertNotIn('"sdlc-coder": ["focused_check"]', plugin)
 
     def test_coder_handoff_contains_only_agent_owned_information(self) -> None:
         schema = json.loads(

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.0 - 2026-07-28
+
+- coder 固定低温度与 8 个 agent steps，deadline 收紧为 5 分钟；task hook 覆盖为唯一最小
+  context prompt，不再叠加主 agent 展开的长上下文。
+- context manifest 限制为 10 个资源、最多 6 个业务实现候选，并排除 Core 源码。
+- code 阶段不再向 coder 暴露依赖项目启动的 functional focused check；浏览器验证只由
+  test 阶段的 start/readiness/functional/cleanup 链执行。
+- Hook 写入边界合并为单次 `write-check`，新增 dispatch/first-write/deadline/completed
+  结构化事件；状态机与证据仍由确定性 Core 管理。
+- 相同 test key 与 selector 只执行一次，再将结果映射回多个 T-id。
+
 ## 0.12.1 - 2026-07-28
 
 - 清理模板 registry 与活动设计文档中遗留的旧测试术语，统一为 headless functional。

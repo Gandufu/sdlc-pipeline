@@ -659,7 +659,7 @@ class ClosedLoopTests(unittest.TestCase):
         publish_spec(self.fixture.root, spec_payload())
         result = before_task(self.fixture.root, "coder")
         self.assertIn(
-            "禁止调用完整 compile/restart/health/test",
+            "code 阶段不运行依赖项目启动的 functional 测试",
             result["instruction"],
         )
 
@@ -733,6 +733,42 @@ class ClosedLoopTests(unittest.TestCase):
         publish_spec(self.fixture.root, payload)
         with self.assertRaisesRegex(SdlcError, "测试执行证据.*当前 test-plan"):
             execute_tests(self.fixture.root)
+
+    def test_delivery_executes_shared_selector_once(self) -> None:
+        from copy import deepcopy
+
+        init_project(self.fixture.root)
+        payload = spec_payload()
+        second = deepcopy(payload["test_plan"]["items"][0])
+        second["id"] = "T-0002"
+        payload["test_plan"]["items"].append(second)
+        publish_spec(self.fixture.root, payload)
+        before_task(self.fixture.root, "coder")
+        (self.fixture.root / "src" / "feature.py").write_text(
+            "def feature(): return 'ok'\n",
+            encoding="utf-8",
+        )
+        (self.fixture.root / "tests" / "test_feature.py").write_text(
+            "from src.feature import feature\nassert feature() == 'ok'\n",
+            encoding="utf-8",
+        )
+        validate_coder_handoff(
+            self.fixture.root,
+            json.dumps({"summary": "fixture", "open_issues": []}),
+        )
+        compile_restart_verify(self.fixture.root)
+
+        execution = run_test_plan(self.fixture.root)
+
+        self.assertEqual(len(execution["results"]), 2)
+        self.assertEqual(
+            execution["results"][0]["log"],
+            execution["results"][1]["log"],
+        )
+        self.assertEqual(
+            execution["results"][1]["reused_execution_from"],
+            "T-0001",
+        )
 
     def test_status_exposes_lifecycle_test_keys_and_invalidates_stale_candidate(
         self,
@@ -1040,18 +1076,19 @@ class ReliabilityTests(unittest.TestCase):
         started = execute(self.fixture.root, "task-before", {
             "role": "coder",
             "owner_pid": os.getpid(),
-            "deadline_seconds": 540,
+            "deadline_seconds": 300,
         })
         running = journal_status(self.fixture.root)
-        heartbeat = execute(self.fixture.root, "task-heartbeat", {
-            "role": "coder",
+        write_check = execute(self.fixture.root, "write-check", {
+            "path": str(self.fixture.root / "src/feature.py"),
             "owner_pid": os.getpid(),
         })
 
-        self.assertEqual(started["deadline_seconds"], 540)
+        self.assertEqual(started["deadline_seconds"], 300)
         self.assertEqual(len(running["running_attempts"]), 1)
         self.assertTrue(running["running_attempts"][0]["deadline_at"])
-        self.assertTrue(heartbeat["ok"])
+        self.assertTrue(write_check["heartbeat"]["ok"])
+        self.assertEqual(write_check["path"], "src/feature.py")
 
         (self.fixture.root / "src/feature.py").write_text(
             "value = 1\n", encoding="utf-8"

@@ -4,5 +4,6 @@ agent: sdlc-main
 subtask: false
 ---
 
-执行 skill 的 code 阶段。派发 coder，并只传 progressive context manifest。
-本阶段允许 focused check，不执行完整交付验证。
+执行 skill 的 code 阶段。只派发一次 coder，task 参数保持简短；plugin 会统一替换为唯一
+progressive context manifest，不得重复展开 spec、规则或资源列表。
+本阶段不运行依赖项目启动的 functional 测试；coder handoff 后只执行 Core code gate。

@@ -1,7 +1,12 @@
 ---
 description: 根据 Feature brief 实现代码和测试，按需读取资源
 mode: subagent
+temperature: 0.1
+steps: 8
 permission:
+  read:
+    "*": allow
+    ".sdlc-pipeline/scripts/**": deny
   edit: allow
   bash: deny
   task: deny
@@ -9,20 +14,22 @@ permission:
   sdlc_ingest_source: deny
   sdlc_save_checkpoint: deny
   sdlc_publish_contract: deny
-  sdlc_lifecycle: allow
+  sdlc_lifecycle: deny
   sdlc_finalize: deny
 ---
 
-先读取 task 指定的 context manifest。先使用 `brief`，只有实现需要时才读取 `resources` 中的具体文件：
+先读取 task 指定的唯一 context manifest。以 `brief` 为实现事实，只在确实需要修改时读取
+`resources` 中对应的业务源码或 active rule：
 
-- tier 1：功能契约视图；
-- tier 2：实现、脚手架或规则候选。
+- tier 1：权威 Feature Contract；
+- tier 2：设计允许的业务实现候选；
+- tier 3：仅在对应技术栈需要时读取的 active rule。
 
 你负责选择设计允许范围内的实现方式和受影响测试，不修改正式 SDLC 文档、protected path，
-不安装软件或操作 Git。需要快速反馈时可调用
-`sdlc_lifecycle(action=focused_check, options={"test_ids":[...]})`；只能选择 brief 已登记 T-id。
-functional T-id 必须实现对应 `tests/functional/*.functional.ts`，使用 Playwright 无头浏览器
-打开页面、操作用户可见菜单并断言业务字段；测试文件不自行编译、打包或启动项目。
+不安装软件、不操作 Git，也不读取 `.sdlc-pipeline/scripts/**` 来理解 Core。
+functional T-id 必须实现对应 `tests/functional/*.functional.ts`，但 code 阶段不执行依赖项目启动
+的 Playwright 测试；项目启动、浏览器功能验证和 cleanup 只属于后续 test 阶段。
+compile/package/lint/typecheck 由 coder handoff 后的 Core code gate 统一执行。
 
 最终只返回：
 

@@ -159,6 +159,14 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
             operation="task-before",
             owner_pid=payload.get("owner_pid"),
         )
+    if operation == "write-check":
+        checked = validate_write_path(root, payload["path"])
+        heartbeat = heartbeat_attempt(
+            root,
+            operation="task-before",
+            owner_pid=payload.get("owner_pid"),
+        )
+        return {"ok": True, "path": checked["path"], "heartbeat": heartbeat}
     if operation == "task-cancel":
         stop = stop_active(root)
         return {
@@ -242,7 +250,7 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             raise
         finish_attempt(root, attempt, state="succeeded", result=result)
         return result
-    if operation in {"status", "source-query", "path-check"} or (
+    if operation in {"status", "source-query", "path-check", "write-check"} or (
         operation == "publish" and payload.get("kind") in {"tokens", "checkpoint"}
     ):
         return _execute(root, operation, payload)
@@ -290,7 +298,7 @@ def main() -> int:
         "operation",
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
-            "task-heartbeat", "path-check", "finalize",
+            "task-heartbeat", "write-check", "path-check", "finalize",
         ),
     )
     parser.add_argument("--root", help="项目根目录")

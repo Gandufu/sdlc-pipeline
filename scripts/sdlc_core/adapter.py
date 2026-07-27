@@ -17,7 +17,8 @@ from .trace import (
 
 from .schema_validation import validate_schema_instance
 
-MAX_CONTEXT_RESOURCES = 1_000
+MAX_CONTEXT_RESOURCES = 10
+MAX_IMPLEMENTATION_RESOURCES = 6
 
 
 def validate_write_path(root: Path, path_value: str) -> dict[str, Any]:
@@ -97,18 +98,56 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 def _context_resources(root: Path) -> list[dict[str, Any]]:
     spec = load_current_spec(root)
-    candidates: dict[str, tuple[int, str]] = {
-        "docs/sdlc/current/requirements.json": (1, "requirement view"),
-        "docs/sdlc/current/design.json": (1, "design view"),
-        "docs/sdlc/current/test-plan.json": (1, "verification view"),
-        ".sdlc-pipeline/lifecycle.json": (2, "lifecycle contract"),
-        ".sdlc-pipeline/scaffold.json": (2, "scaffold contract"),
-    }
+    candidates: dict[str, tuple[int, str]] = {}
     feature_contract = root / "docs/sdlc/current/feature-contract.json"
     if feature_contract.is_file():
         candidates["docs/sdlc/current/feature-contract.json"] = (
             1, "authoritative Feature Contract"
         )
+    else:
+        candidates.update({
+            "docs/sdlc/current/requirements.json": (1, "requirement view"),
+            "docs/sdlc/current/design.json": (1, "design view"),
+            "docs/sdlc/current/test-plan.json": (1, "verification view"),
+        })
+    implementation_candidates: set[str] = set()
+    for item in spec["design"]["items"]:
+        for pattern in item["allowed_paths"]:
+            wildcard = min(
+                [index for token in ("*", "?", "[") if (index := pattern.find(token)) >= 0],
+                default=len(pattern),
+            )
+            prefix = pattern[:wildcard].rstrip("/")
+            path = root / prefix if prefix else root
+            if path.is_file():
+                implementation_candidates.add(path.relative_to(root).as_posix())
+                continue
+            directory = path if path.is_dir() else path.parent
+            if not directory.is_dir():
+                continue
+            for candidate in sorted(directory.rglob("*")):
+                if len(implementation_candidates) >= MAX_IMPLEMENTATION_RESOURCES:
+                    break
+                if (
+                    candidate.is_file()
+                    and candidate.stat().st_size <= 80_000
+                    and ".sdlc-pipeline/scripts" not in candidate.as_posix()
+                    and ".opencode" not in candidate.parts
+                    and ".sdlc-pipeline" not in candidate.parts
+                    and any(
+                        fnmatch.fnmatch(candidate.relative_to(root).as_posix(), allowed)
+                        or candidate.relative_to(root).as_posix() == allowed.rstrip("/")
+                        or candidate.relative_to(root).as_posix().startswith(
+                            allowed.rstrip("/") + "/"
+                        )
+                        for allowed in item["allowed_paths"]
+                    )
+                ):
+                    implementation_candidates.add(
+                        candidate.relative_to(root).as_posix()
+                    )
+    for name in sorted(implementation_candidates)[:MAX_IMPLEMENTATION_RESOURCES]:
+        candidates[name] = (2, "design-allowed business implementation candidate")
     active_rules = read_json(
         root / ".sdlc-pipeline" / "rules" / "active.json",
         required=False,
@@ -130,21 +169,7 @@ def _context_resources(root: Path) -> list[dict[str, Any]]:
             raise SdlcError(f"active rule 越出规则目录: {path}") from exc
         if not rule_path.is_file() or sha256_file(rule_path) != rule.get("sha256"):
             raise SdlcError(f"active rule 缺失或 hash 漂移: {path}")
-        candidates[path] = (2, "active guidance; read when touched file matches")
-    if (root / "docs" / "existing-framework.md").exists():
-        candidates["docs/existing-framework.md"] = (2, "existing framework index")
-    for item in spec["design"]["items"]:
-        for pattern in item["allowed_paths"]:
-            if "*" not in pattern:
-                path = root / pattern
-                if path.is_file():
-                    candidates[pattern] = (2, "design-allowed implementation candidate")
-                elif path.is_dir():
-                    for candidate in path.rglob("*"):
-                        if candidate.is_file() and candidate.stat().st_size <= 80_000:
-                            candidates[
-                                candidate.relative_to(root).as_posix()
-                            ] = (2, "design-allowed implementation candidate")
+        candidates[path] = (3, "active guidance; read only for the matching stack")
     resources = []
     for name, (tier, reason) in sorted(
         candidates.items(), key=lambda item: (item[1][0], item[0])
@@ -184,6 +209,15 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
         }),
         "tooling_paths": TOOLING_CONFIG_PATHS,
         "test_ids": [item["id"] for item in tests],
+        "verification": [
+            {
+                "id": item["id"],
+                "command": item["command"],
+                "selector": item["selector"],
+                "expected": item["expected"],
+            }
+            for item in tests
+        ],
         "acceptance": [
             criterion
             for item in requirements
@@ -203,8 +237,9 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
         "brief": brief,
         "resources": _context_resources(root),
         "instruction": (
-            "先使用 brief；只在实现需要时按 resources 路径读取对应文件。"
-            "tier=1 是功能契约视图，tier=2 是实现或规则候选。"
+            "以 brief 为实现事实；只在修改需要时读取 resources。"
+            "禁止读取 .sdlc-pipeline/scripts/** 来理解 Core。"
+            "tier=1 是权威契约，tier=2 是业务实现候选，tier=3 是 active rule。"
         ),
     }
     directory = root / ".sdlc-pipeline" / "runs" / "context"
@@ -264,8 +299,9 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         source="context-pack",
     )
     role_instruction = (
-        "coder 只实现当前 Feature Slice 并运行聚焦检查；"
-        "禁止调用完整 compile/restart/health/test，权威交付验证只由 Core 执行。"
+        "coder 只实现当前 Feature Slice 和登记的 functional 文件；"
+        "code 阶段不运行依赖项目启动的 functional 测试，"
+        "禁止调用 compile/restart/health/test；验证统一由 Core 执行。"
     )
     return {
         "ok": True,

@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.12.1`。
+OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.13.0`。
 
 它面向固定脚手架和给定需求完成一个可交付功能：需求澄清、设计、编码、确定性验证和版本固化。
 Python Core 保存机器真值与运行证据，OpenCode plugin 只负责薄适配和最小上下文编排。
@@ -42,9 +42,11 @@ spec
 
 code
   → 派发唯一 sdlc-coder
-  → 先读 Feature brief，再按需读取资源索引
-  → coder 自主选择受控 focused check
+  → plugin 覆盖为唯一、最小 context manifest，不重复展开主会话 prompt
+  → coder 最多 8 个 agent steps，先读 Feature brief，再按需读取最多 10 个资源索引
+  → 实现业务代码与 functional 文件，但不启动项目、不运行浏览器
   → Core 校验 Git diff 与允许路径
+  → Core 执行 compile/package/lint/typecheck code gate
   → Core 自动生成 design-to-code/test-to-files evidence
 
 test
@@ -56,12 +58,19 @@ test
 
 不设置测试 subagent、默认 reviewer 或隐式完整生命周期 hook。相同输入指纹的成功交付证据可以复用；
 相同失败连续出现两次时 Run Journal 将流程置为 blocked，避免 agent 无界反思和重试。
-coder dispatch 单独绑定 OpenCode PID、9 分钟 deadline 和工具活动 heartbeat；owner 退出或
+coder dispatch 单独绑定 OpenCode PID、5 分钟 deadline 和工具活动 heartbeat；owner 退出或
 deadline 到期后，下一次 status 会把 attempt/run 标为 aborted，不遗留伪 running 状态。
 
-Context manifest 不嵌入源码、长需求或完整规则，只提供 brief、资源路径、hash、tier 和读取理由。
+Context manifest 不嵌入源码、长需求或完整规则，只提供 brief、资源路径、hash、tier 和读取理由；
+资源总数硬限制为 10，业务实现候选最多 6 个，明确排除 `.sdlc-pipeline/scripts/**`。coder 不通过
+阅读 Core 源码理解流程。agent 固定 `temperature: 0.1` 和 `steps: 8`，避免预览模型无界读取。
 Delivery Memory 自动派生稳定项目事实、已确认决策以及“失败后成功”的指纹经验；它不保存聊天，
 并在 lifecycle、scaffold 或 spec hash 改变时失效。
+
+Hook 保持薄且事件化：task dispatch、首次写入、deadline 和完成状态使用 OpenCode 结构化日志；
+写入前只调用一次 Core `write-check` 完成路径校验和 heartbeat。Hook 不实现状态机，也不重复拼接
+主 agent 生成的长 prompt。Core 只负责 Schema、路径、journal、进程、命令结果和证据绑定等
+确定性事实。
 
 ## Feature Contract
 
@@ -111,19 +120,19 @@ JSON Schema validator；Git 工作树、lifecycle、scaffold、artifact 与 PID 
 
 ## 工具边界
 
-OpenCode 暴露六个窄工具：
+OpenCode 暴露七个窄工具：
 
 - `sdlc_status`
 - `sdlc_ingest_source`
 - `sdlc_query_source`
 - `sdlc_save_checkpoint`
 - `sdlc_publish_contract`
-- `sdlc_lifecycle`（仅 `init`、`focused_check`、`verify_delivery`）
+- `sdlc_lifecycle`（仅 `init`、`verify_delivery`）
 - `sdlc_finalize`
 
-模型不能提供 idempotency key，也不能直接编辑正式 SDLC 文档。`focused_check` 只运行当前
-Feature Contract 已登记的 T-id 与对应文件，不构成交付证据。内部仍保留可恢复的确定性操作，
-但幂等性由 Core 根据规范化输入计算和管理。
+模型不能提供 idempotency key，也不能直接编辑正式 SDLC 文档。code 阶段不暴露依赖项目启动的
+functional 检查；浏览器功能测试只能由 test 阶段的 `verify_delivery` 在 start/readiness 后执行。
+内部仍保留可恢复的确定性操作，但幂等性由 Core 根据规范化输入计算和管理。
 
 ## 生命周期契约
 
@@ -138,6 +147,8 @@ Feature Contract 已登记的 T-id 与对应文件，不构成交付证据。内
 functional、unit、integration、lint、static_analysis 逻辑键。功能测试命令只有显式
 `allow_selector=true` 才能追加 `tests/` 内的测试文件。`scaffold.json` 声明关键文件 fingerprint、
 protected paths、allowed paths 与 extension points。
+多个 AC/T-id 引用相同 `(test key, selector)` 时，Core 只执行一次测试文件，再把同一结果映射回
+各验收项，避免重复启动浏览器或重复运行相同功能流程。
 常见 `vitest.config.*`、`eslint.config.*` 作为预登记 tooling paths，可记录为非业务变更，
 但不会被错误计入 design-to-code 功能证据。
 

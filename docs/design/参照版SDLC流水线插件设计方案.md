@@ -72,7 +72,7 @@ Forge，不保留 electron-builder。
 - `sdlc_ingest_source`：摄取 inline、项目内文件或显式授权复制的项目外文本来源。
 - `sdlc_save_checkpoint`：保存可恢复的 spec 决策。
 - `sdlc_publish_contract`：只发布用户明确确认的 Feature Contract。
-- `sdlc_lifecycle`：只暴露 `init`、`focused_check`、`verify_delivery` 三个意图。
+- `sdlc_lifecycle`：只暴露 `init`、`verify_delivery` 两个意图。
 - `sdlc_finalize`：确认后的版本固化。
 
 plugin 是薄 adapter：转换 OpenCode 输入输出、注册正式 before/after hook、约束 task 目标。
@@ -83,10 +83,11 @@ plugin 是薄 adapter：转换 OpenCode 输入输出、注册正式 before/after
 
 `sdlc-main` 是 primary agent，负责用户交互和阶段编排，不创建额外会话。它只允许派发：
 
-- `sdlc-coder`：实现当前 Feature Slice 与受影响测试，按需执行 focused check。
+- `sdlc-coder`：实现当前 Feature Slice 与登记的 functional 文件，不启动项目或执行浏览器测试。
 - 确定性 Core：在 test 阶段按当前指纹一次执行 `verify_delivery`。
 
-只有一个 coder subagent，没有 executor 或固定 reviewer。需求符合性由 trace 校验，
+只有一个 coder subagent，没有 executor 或固定 reviewer。coder 固定低温度与最多 8 个
+agent steps；需求符合性由 trace 校验，
 规范由编译/lint/static analysis，行为由测试计划验证。未来高风险人工 review 是可选策略，
 不进入默认流水线。
 
@@ -149,9 +150,9 @@ requirements、design、test-plan 三份机器/Markdown 视图。校验规则：
 4. 模板 lifecycle 已声明且 runner 白名单允许的自动系统安装。
 
 init 的成功标准是 install、compile、start、health、artifact 全部通过，并完成 stop（除非模板
-明确 keep running）。code 阶段只允许 coder 运行 Feature Contract 已登记测试键的
-`focused_check`；它按 T-id 与文件执行快速反馈，不构成交付证据。code 阶段在 handoff 后执行
-compile/package 与 lint/typecheck policy 并绑定源码指纹。test 阶段由主会话只调用一次
+明确 keep running）。code 阶段不运行依赖项目启动的 functional 测试；coder 只实现业务代码和
+登记的 functional 文件。handoff 后执行 compile/package 与 lint/typecheck policy 并绑定源码
+指纹。test 阶段由主会话只调用一次
 `verify_delivery`，Core 校验 code evidence 后执行 start → readiness → mandatory headless
 functional tests → cleanup。
 
@@ -164,7 +165,7 @@ Electron 模板的 integration 检查应启动打包后的真实窗口，并验�
 ## Coder deadline 与可观测性
 
 coder task-before hook 建立一个跨进程 journal attempt，owner 绑定 OpenCode PID，并设置独立
-9 分钟 deadline。coder 的 edit/apply_patch 与 focused check 会追加 `attempt.heartbeat`；
+5 分钟 deadline。coder 的 edit/apply_patch 会通过单次 write-check 追加 `attempt.heartbeat`；
 event JSONL 每次写入都 flush/fsync。正常 task-after 校验 handoff 后才把 attempt 置为
 succeeded。owner 退出或 deadline 到期时，下一次 status 将 attempt 和 run 标为 aborted。
 
