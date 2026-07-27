@@ -155,7 +155,8 @@ compile/package 与 lint/typecheck policy 并绑定源码指纹。test 阶段由
 `verify_delivery`，Core 校验 code evidence 后执行 start → readiness → mandatory headless
 functional tests → cleanup。
 
-health 支持 process、HTTP、TCP、command、file 和 browser smoke。browser smoke 在 core 中
+health 支持 process、HTTP、TCP、command 和 file；页面功能验证只由 functional T-id
+通过真实无头浏览器执行，不把 HTTP 文本匹配伪装成浏览器测试。
 以无 UI HTTP 页面探针实现；需要真实交互的模板把受控 integration 命令登记为 command。当前
 Electron 模板的 integration 检查应启动打包后的真实窗口，并验证 preload bridge 与 typed IPC，
 不能用 renderer HTTP 可达代替。

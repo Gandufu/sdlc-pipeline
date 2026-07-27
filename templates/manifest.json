@@ -4,7 +4,7 @@
     {
       "id": "sdlc-electron-scaffold",
       "name": "SDLC Electron 脚手架",
-      "description": "Electron Forge + React + Vite + TypeScript 通用桌面应用模板，内置安全 IPC、sandbox preload、单元测试和真实 Electron 冒烟。",
+      "description": "Electron Forge + React + Vite + TypeScript 通用桌面应用模板，内置安全 IPC、sandbox preload、单元测试和无头浏览器功能验收。",
       "stacks": [
         "typescript",
         "electron",

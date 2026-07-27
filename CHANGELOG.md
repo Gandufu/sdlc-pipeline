@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1 - 2026-07-28
+
+- 清理模板 registry 与活动设计文档中遗留的旧测试术语，统一为 headless functional。
+
 ## 0.12.0 - 2026-07-28
 
 - 安装复制排除 `.opencode/node_modules`，并在模板导入后的 init 再次强制合并

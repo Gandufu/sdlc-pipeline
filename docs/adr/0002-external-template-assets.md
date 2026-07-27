@@ -21,7 +21,7 @@ Git 历史。用户界面不接受 template ID、GitHub 地址或 ref 参数。i
 - 本地目录：`D:\sdlc-electron-scaffold`
 - 内容：去除 Heli、设备和会议领域代码的纯通用 Electron 模板
 - 工具链：Electron Forge、React、Vite、TypeScript
-- 保留能力：安全 main/preload、typed IPC、React 示例、单元测试、真实 Electron 冒烟和完整生命周期
+- 保留能力：安全 main/preload、typed IPC、React 示例、单元测试、无头浏览器功能验收和完整生命周期
 
 ## 原因
 

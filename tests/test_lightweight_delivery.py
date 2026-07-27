@@ -227,7 +227,7 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         finally:
             fixture.close()
 
-    def test_plugin_has_one_coder_and_no_executor_or_e2e_contract(self) -> None:
+    def test_plugin_has_one_coder_and_no_obsolete_delivery_contract(self) -> None:
         plugin = (
             REPO / ".opencode/plugins/sdlc-pipeline.js"
         ).read_text(encoding="utf-8")
@@ -242,7 +242,7 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         self.assertFalse((REPO / ".opencode/agents/sdlc-executor.md").exists())
         self.assertNotIn("sdlc-executor", plugin + main)
         self.assertNotIn("idempotency_key", plugin)
-        self.assertNotIn('"e2e"', lifecycle_schema + spec_schema)
+        self.assertNotIn('"browser"', lifecycle_schema)
         self.assertIn("verify_delivery", plugin)
 
     def test_plugin_exposes_only_intent_level_lifecycle_actions(self) -> None:
