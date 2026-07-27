@@ -3,7 +3,7 @@
 | 术语 | 含义 |
 |---|---|
 | Primary agent | `sdlc-main`，与用户交互并编排阶段；不是 subagent |
-| Subagent | 独立上下文的 `sdlc-coder` 或 `sdlc-executor` |
+| Subagent | 独立上下文的唯一 `sdlc-coder` |
 | Gate | 阶段切换前由 Python core 执行的硬校验 |
 | Lifecycle | install、compile、start、stop、restart、health、artifact、test 的确定性契约 |
 | Scaffold | 模板版本、关键 hash、protected path、extension point 与 allowed path 契约 |

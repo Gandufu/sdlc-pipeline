@@ -11,8 +11,5 @@
       "max_bytes": 500000
     }
   ],
-  "required_test_keys": ["e2e"],
-  "executable_verifiers": [
-    {"id": "electron-e2e", "phase": "test", "test_key": "e2e"}
-  ]
+  "executable_verifiers": []
 }

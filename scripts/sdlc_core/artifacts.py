@@ -18,7 +18,6 @@ from .common import (
 )
 from .schema_validation import validate_schema_instance
 from .sources import source_index, validate_source_envelopes
-from .policies import validate_spec_policy
 
 
 CURRENT_FILES = {
@@ -447,11 +446,15 @@ def _render_test_plan(data: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def publish_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+def publish_spec(
+    root: Path,
+    payload: dict[str, Any],
+    *,
+    feature_contract: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     ids = validate_spec(payload, root)
     validate_lifecycle_test_references(root, payload)
     historical: dict[str, str] = {}
-    validate_spec_policy(root, payload)
     versions = root / "docs" / "sdlc" / "versions"
     if versions.exists():
         for manifest_path in sorted(versions.glob("V????/manifest.json")):
@@ -526,6 +529,10 @@ def publish_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             data, ensure_ascii=False, indent=2
         ) + "\n"
         staged[f"{base}.md"] = renderers[kind](data)
+    if feature_contract is not None:
+        staged["feature-contract.json"] = __import__("json").dumps(
+            feature_contract, ensure_ascii=False, indent=2
+        ) + "\n"
     bundle = publish_bundle(
         root,
         kind="spec",

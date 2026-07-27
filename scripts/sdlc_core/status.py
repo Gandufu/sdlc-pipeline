@@ -13,6 +13,7 @@ from .bootstrap import template_registry
 from .common import read_json
 from .common import sha256_file
 from .journal import journal_status, spec_checkpoint as load_spec_checkpoint
+from .memory import memory_summary
 from .runs import active_identity_matches, pid_alive, read_active
 from .trace import incremental_eligibility, verify_scaffold
 from .trace import worktree_fingerprint
@@ -182,5 +183,6 @@ def status(root: Path) -> dict[str, Any]:
         "can_enter_next": prerequisites[stage],
         "journal": journal_status(root),
         "spec_checkpoint": load_spec_checkpoint(root),
+        "memory": memory_summary(root),
         "diagnostics": diagnostics,
     }

@@ -4,7 +4,7 @@
   "type": "object",
   "required": [
     "schema_version", "rule_id", "classification", "hard_invariants",
-    "required_test_keys", "executable_verifiers"
+    "executable_verifiers"
   ],
   "properties": {
     "schema_version": {"const": "1.0"},
@@ -29,11 +29,6 @@
         },
         "additionalProperties": false
       }
-    },
-    "required_test_keys": {
-      "type": "array",
-      "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1}
     },
     "executable_verifiers": {
       "type": "array",

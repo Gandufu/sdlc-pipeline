@@ -126,7 +126,11 @@ def run_command(
 
 
 def git(root: Path, *args: str, check: bool = True) -> str:
-    return run_command(["git", *args], cwd=root, timeout=60, check=check).stdout.strip()
+    # Leading spaces are data in porcelain output (for example `` M path``).
+    # Only remove the process-terminating newline; callers may parse columns.
+    return run_command(
+        ["git", *args], cwd=root, timeout=60, check=check
+    ).stdout.rstrip("\r\n")
 
 
 def git_available(root: Path) -> bool:

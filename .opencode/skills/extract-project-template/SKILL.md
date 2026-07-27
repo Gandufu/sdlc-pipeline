@@ -49,7 +49,7 @@ Electron 项目必须检查：
 install -> compile/package -> start -> readiness -> functional smoke -> stop
 ```
 
-测试计划必须包含真实有内容的 unit、integration、e2e、lint 和 static analysis。空测试集、空 lint 或只检查端口均算失败。
+功能测试计划只描述 unit 和 integration；lint 与 static analysis 属于 profile policy verifier。空测试集或只检查端口均算失败。
 
 ## 5. 验证并报告
 

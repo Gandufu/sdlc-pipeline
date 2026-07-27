@@ -18,7 +18,7 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.9.0"
+VERSION = "0.11.0"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.7"
@@ -32,7 +32,6 @@ MANAGED = (
     (".opencode/plugins/sdlc-pipeline.js", ".opencode/plugins/sdlc-pipeline.js"),
     (".opencode/agents/sdlc-main.md", ".opencode/agents/sdlc-main.md"),
     (".opencode/agents/sdlc-coder.md", ".opencode/agents/sdlc-coder.md"),
-    (".opencode/agents/sdlc-executor.md", ".opencode/agents/sdlc-executor.md"),
     (".opencode/commands/sdlc-init.md", ".opencode/commands/sdlc-init.md"),
     (".opencode/commands/sdlc-spec.md", ".opencode/commands/sdlc-spec.md"),
     (".opencode/commands/sdlc-code.md", ".opencode/commands/sdlc-code.md"),
@@ -42,6 +41,9 @@ MANAGED = (
         ".opencode/skills/extract-project-template",
         ".opencode/skills/extract-project-template",
     ),
+)
+OBSOLETE_MANAGED = (
+    ".opencode/agents/sdlc-executor.md",
 )
 
 
@@ -192,6 +194,11 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
         raise ValueError("项目已安装；升级请使用 --force")
     for source_name, destination_name in MANAGED:
         _copy(_source(source_name), target / destination_name, force)
+    if force:
+        for obsolete_name in OBSOLETE_MANAGED:
+            obsolete = target / obsolete_name
+            if obsolete.is_file():
+                obsolete.unlink()
     _ensure_opencode_dependencies(target)
     config_path = target / "opencode.json"
     config = {}

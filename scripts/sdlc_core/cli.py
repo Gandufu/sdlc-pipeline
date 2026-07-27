@@ -8,6 +8,7 @@ from typing import Any
 
 from .adapter import after_task, before_task, validate_write_path
 from .artifacts import publish_spec
+from .feature_contracts import publish_feature_contract
 from .bootstrap import bootstrap
 from .common import SdlcError, project_root, read_json
 from .lifecycle import (
@@ -18,10 +19,12 @@ from .lifecycle import (
     install_system_tool,
     probe_tools,
     run_phase,
+    run_focused_checks,
     run_test_plan,
     start,
     stop_active,
     verify_health,
+    verify_delivery,
 )
 from .runs import record_tokens
 from .journal import (
@@ -52,6 +55,8 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
         kind = payload.get("kind")
         if kind == "spec":
             return publish_spec(root, payload["payload"])
+        if kind == "contract":
+            return publish_feature_contract(root, payload["payload"])
         if kind == "tokens":
             return record_tokens(root, **payload["payload"])
         if kind == "checkpoint":
@@ -115,6 +120,13 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
             return init_project(lifecycle_root, auto_install_missing=True)
         if action == "compile_restart_verify":
             return compile_restart_verify(lifecycle_root)
+        if action == "verify_delivery":
+            return verify_delivery(lifecycle_root)
+        if action == "focused_check":
+            return run_focused_checks(
+                lifecycle_root,
+                payload.get("test_keys"),
+            )
         if action == "start":
             return start(lifecycle_root)
         if action == "stop":
@@ -122,7 +134,7 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
         if action == "health":
             return verify_health(lifecycle_root)
         if action in {"record_test_results", "test"}:
-            return execute_tests(lifecycle_root, payload.get("executor_result"))
+            return execute_tests(lifecycle_root)
         if action in {"execute_test_plan", "run_tests"}:
             return run_test_plan(lifecycle_root)
         if action == "system_install":
@@ -155,12 +167,17 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
         action = str(payload.get("action", "unknown"))
         if action == "init" or action == "probe" or action == "system_install":
             return "init", action
-        if action in {"execute_test_plan", "run_tests", "record_test_results", "test"}:
+        if action in {
+            "execute_test_plan", "run_tests", "record_test_results", "test",
+            "verify_delivery",
+        }:
             return "test", action
+        if action == "focused_check":
+            return "code", action
         return "code", action
     if operation in {"task-before", "task-after"}:
         role = str(payload.get("role", "unknown"))
-        return ("test" if role == "executor" else "code"), f"{operation}:{role}"
+        return "code", f"{operation}:{role}"
     if operation == "finalize":
         return "version", "finalize"
     if operation == "path-check":
@@ -169,7 +186,7 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if operation == "status" or (
+    if operation in {"status", "path-check"} or (
         operation == "publish" and payload.get("kind") in {"tokens", "checkpoint"}
     ):
         return _execute(root, operation, payload)
@@ -196,7 +213,7 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         finish_attempt(root, attempt, state="failed", error=str(exc))
         raise
     finish_attempt(root, attempt, state="succeeded", result=result)
-    if operation == "publish" and effective_payload.get("kind") == "spec":
+    if operation == "publish" and effective_payload.get("kind") in {"spec", "contract"}:
         record_spec_checkpoint(root, {"state": "published"})
     if operation == "finalize":
         close_run(root, "succeeded")

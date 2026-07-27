@@ -1,37 +1,21 @@
-# Spec 拷问与文档风格契约
+# Feature Contract 澄清规则
 
-本契约明确派生自 `mattpocock/skills` 的
-[`grilling`](https://github.com/mattpocock/skills/blob/main/skills/productivity/grilling/SKILL.md)、
-[`grill-with-docs`](https://github.com/mattpocock/skills/blob/main/skills/engineering/grill-with-docs/SKILL.md)
-和 [`to-spec`](https://github.com/mattpocock/skills/blob/main/skills/engineering/to-spec/SKILL.md)。保留其核心：
-小而可组合、用户控制决策、先对齐再行动、建立共享语言、围绕测试 seam 形成快速反馈。
-本插件的适配是把“拷问”和“文档综合”编排在一个 `/sdlc-spec` 用户阶段内，但以用户确认作为
-硬分界；正式产物继续由确定性 Python core 发布，不复制外部项目的 issue-tracker 流程。
+先读取项目、scaffold、active policy、lifecycle 与已摄取来源；能从事实得到的答案不询问用户。
 
-## 交互规则
+只把以下情况视为阻塞决策：
 
-1. 先从项目文件、`sdlc_status`、scaffold、active rules 和 lifecycle tests 查明事实；能查到的事实不得反问用户。
-2. 只把产品目标、范围、取舍、验收口径等决策交给用户。一次只问一个问题，等待回答后再沿决策树继续。
-3. 每个问题使用 OpenCode `question` 工具，提供 2–3 个互斥候选答案并允许自定义答案。把首选答案的 label 标记为“（推荐）”，description 说明推荐依据和影响；不得替用户决定。
-4. 前一答案会改变后一问题时，先更新已确认事实、假设、风险和待决策分支，再提出下一问。不得一次提交问题清单。
-5. 覆盖目标、用户与场景、范围/非范围、业务规则、失败路径、安全与数据边界、兼容性、验收标准、设计取舍和测试层级。没有实际分歧的分支直接记录，不制造问题。
-6. 所有 blocking 问题解决后，展示共享理解摘要；只有用户明确确认“理解一致并生成 spec”后，才构造并发布正式产物。
-7. 每个回答和分析快照必须先写入 durable spec checkpoint，再进入下一问题；恢复时以 checkpoint 为准。
-8. checkpoint 只保存事实和决策，不提前生成或直接编辑正式 requirements/design/test-plan。
+1. 会改变功能范围或非范围；
+2. 会改变可观察验收结果；
+3. 会改变公开接口、数据来源或错误语义。
 
-## 候选答案格式
+一次只问一个问题，通常在三题内完成。若仍有会改变范围、验收或公开接口的阻塞决策，可以继续，
+但必须向用户说明影响。每次回答后保存 checkpoint。非阻塞未知项写入 assumptions 或 risks。
 
-- `label`：1–5 个词；推荐项以“（推荐）”结尾。
-- `description`：一句话说明适用条件、代价或后续影响。
-- `custom`：保持 `true`，允许用户输入不在候选中的答案。
-- `multiple`：默认 `false`；只有问题本身允许并列选择时才设为 `true`。
+候选 Feature Contract 以一个可交付功能为单位，必须简明包含：目标、角色、范围、非范围、
+领域数据、简洁主流程、必要异常流程、AC、模块、接口字段、data contract、extension point
+和 AC 到 unit/integration 逻辑测试键的验证映射。功能和验收 ID 使用 `F-xxxx`、`AC-xxxx`。
+正式文档使用项目配置语言（默认中文），代码标识、协议字段和原文保持原样。
 
-## 正式产物
-
-发布前读取 `.sdlc-pipeline/schemas/spec.schema.json`。把完整原始输入与访谈结论写入一个结构化 payload，设置 `spec_confirmed=true` 后仅调用一次 `sdlc_publish(kind=spec)`。Python core 负责校验并原子生成：
-
-- `docs/sdlc/current/requirements.json` 与 `requirements.md`：原始输入、分析与边界、规范化需求和验收标准；
-- `docs/sdlc/current/design.json` 与 `design.md`：R→D、模块、真实 extension point、允许路径、接口与数据模型；
-- `docs/sdlc/current/test-plan.json` 与 `test-plan.md`：R/D→T、层级、前置、输入、预期、mandatory 和 lifecycle test 逻辑键。
-
-Markdown 标题、章节顺序和表述风格由 Python renderer 固定，agent 不直接编辑正式 Markdown。正式说明使用中文；原始输入、代码标识、命令、协议字段和用户要求保留的英文保持原样。
+发布前读取 `.sdlc-pipeline/schemas/feature-contract.schema.json`，展示共享理解并取得用户明确
+确认，然后只调用一次 `sdlc_publish_contract`。Core 负责 Schema 校验、来源 anchor 校验和
+requirements/design/test-plan 三视图原子投影。

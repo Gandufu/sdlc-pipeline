@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.0 - 2026-07-27
+
+- Context pack 改为 progressive brief/resource manifest，不再嵌入源码和完整规则。
+- 增加受控 `focused_check`，让 coder 自主选择 Feature Contract 测试键。
+- 增加 hash 失效的 Delivery Memory，只派生项目事实、确认决策和已解决失败指纹。
+- OpenCode lifecycle Interface 收窄为 init/focused_check/verify_delivery 三个交付意图。
+- 提示词以 skill/reference 为单一真值，agent 和 command 只保留权限与阶段路由。
+- 将提问数和主流程长度从绝对硬规则下调为可解释 guidance。
+
+## 0.10.0 - 2026-07-27
+
+- 以单功能 Feature Contract 作为唯一模型规格输入，Core 原子投影三类文档。
+- 删除 executor 和插件内所谓 E2E，收敛为唯一 coder 与一次 `verify_delivery`。
+- 拆分 source/checkpoint/contract 窄工具，移除模型可控 idempotency key。
+- Git diff 自动生成代码与测试追溯映射；增加失败分类、重复失败熔断和交付证据缓存。
+- 升级安装时删除遗留 `sdlc-executor.md`。
+
 ## 0.9.0 - 2026-07-27
 
 - 修复 dirty worktree fingerprint baseline、真实路径映射与 Windows PID identity，避免重试误判和 PID 复用误杀。

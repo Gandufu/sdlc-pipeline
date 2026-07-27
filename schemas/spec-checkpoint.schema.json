@@ -18,9 +18,12 @@
       },
       "additionalProperties": false
     },
-    "source_envelopes": {
+    "source_refs": {
       "type": "array",
-      "items": {"type": "object"}
+      "items": {
+        "type": "string",
+        "pattern": "^SRC-[A-F0-9]{12}#[^#]+$"
+      }
     },
     "confirmed_facts": {
       "type": "array",

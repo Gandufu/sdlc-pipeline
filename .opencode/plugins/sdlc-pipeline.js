@@ -5,7 +5,6 @@ import path from "node:path"
 
 const AGENTS = {
   "sdlc-coder": "coder",
-  "sdlc-executor": "executor",
 }
 const PLUGIN_PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", ".."
@@ -91,53 +90,78 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
   return {
     tool: {
       sdlc_status: tool({
-        description: "只读返回 init 幂等状态、登记模板及 active rules 元数据、当前版本、阶段、门禁、PID 和下一步资格。",
+        description: "读取当前阶段、恢复点、门禁、诊断和下一步。",
         args: {},
         async execute(_args, context) {
           return JSON.stringify(invoke(rootOf(context, fallbackRoot), "status"))
         },
       }),
-      sdlc_publish: tool({
-        description: "校验并原子发布固定格式 SDLC 产物；AI 不能直接编辑正式文档。",
+      sdlc_ingest_source: tool({
+        description: "摄取一份原始需求来源并返回可引用的 SourceEnvelope。",
         args: {
-          kind: tool.schema.enum(["source", "spec", "checkpoint", "tokens"]),
-          payload: tool.schema.string().describe(
-            "JSON object encoded as a string. source requires {content, source?, kind?, uri?, media_type?}. checkpoint must follow spec-checkpoint.schema.json. For spec, read spec.schema.json and submit the full object with R-0001/D-0001/T-0001 IDs."
-          ),
-          idempotency_key: tool.schema.string().optional(),
+          source_type: tool.schema.enum(["inline", "file", "url", "document"]),
+          content: tool.schema.string().optional(),
+          source: tool.schema.string().optional(),
+          uri: tool.schema.string().optional(),
+          media_type: tool.schema.string().optional(),
         },
         async execute(args, context) {
-          requireAgent(context, ["sdlc-main"], "sdlc_publish")
+          requireAgent(context, ["sdlc-main"], "sdlc_ingest_source")
           return JSON.stringify(invoke(rootOf(context, fallbackRoot), "publish", {
-            kind: args.kind,
+            kind: "source",
+            payload: {
+              kind: args.source_type,
+              content: args.content,
+              source: args.source,
+              uri: args.uri,
+              media_type: args.media_type,
+            },
+          }))
+        },
+      }),
+      sdlc_save_checkpoint: tool({
+        description: "保存 spec 恢复点；结构见 spec-checkpoint.schema.json。",
+        args: {
+          payload: tool.schema.string().describe("Checkpoint JSON object encoded as a string."),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_save_checkpoint")
+          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "publish", {
+            kind: "checkpoint",
             payload: JSON.parse(args.payload),
-            idempotency_key: args.idempotency_key || context?.callID,
+          }))
+        },
+      }),
+      sdlc_publish_contract: tool({
+        description: "发布已确认的 Feature Contract；结构见 feature-contract.schema.json。",
+        args: {
+          payload: tool.schema.string().describe("Feature Contract JSON object encoded as a string."),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_publish_contract")
+          return JSON.stringify(invoke(rootOf(context, fallbackRoot), "publish", {
+            kind: "contract",
+            payload: JSON.parse(args.payload),
           }))
         },
       }),
       sdlc_lifecycle: tool({
-        description: "执行确定性的生命周期动作。角色范围：coder：仅 `compile`、`health`；executor：仅 `execute_test_plan`、`health`；主会话在 executor handoff 后仅用 `record_test_results` 记录结果。",
+        description: "执行一个交付意图；内部生命周期由 Core 管理。",
         args: {
           action: tool.schema.enum([
-            "probe", "init", "install", "compile", "start", "stop", "restart",
-            "health", "system_install", "compile_restart_verify",
-            "execute_test_plan", "record_test_results",
+            "init", "focused_check", "verify_delivery",
           ]),
           options: tool.schema.string().optional().describe(
-            "Optional JSON: init accepts only the template ID selected by the user from sdlc_status.templates; record_test_results accepts executor_result",
+            "Optional JSON. init: {template}; focused_check: {test_keys}.",
           ),
-          idempotency_key: tool.schema.string().optional(),
         },
         async execute(args, context) {
           const options = args.options ? JSON.parse(args.options) : {}
           const allowed = {
             "sdlc-main": [
-              "probe", "init", "install", "compile", "start", "stop", "restart",
-              "health", "system_install", "compile_restart_verify",
-              "record_test_results",
+              "init", "focused_check", "verify_delivery",
             ],
-            "sdlc-coder": ["compile", "health"],
-            "sdlc-executor": ["execute_test_plan", "health"],
+            "sdlc-coder": ["focused_check"],
           }
           if (!allowed[context?.agent]?.includes(args.action)) {
             throw new Error(`agent ${context?.agent || "unknown"} cannot run lifecycle ${args.action}`)
@@ -145,7 +169,6 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
           return JSON.stringify(invoke(rootOf(context, fallbackRoot), "lifecycle", {
             action: args.action,
             ...options,
-            idempotency_key: args.idempotency_key || context?.callID,
           }))
         },
       }),
@@ -155,13 +178,11 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
           version: tool.schema.string(),
           summary: tool.schema.string(),
           confirmed: tool.schema.boolean(),
-          idempotency_key: tool.schema.string().optional(),
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_finalize")
           return JSON.stringify(invoke(rootOf(context, fallbackRoot), "finalize", {
             ...args,
-            idempotency_key: args.idempotency_key || context?.callID,
           }))
         },
       }),
@@ -176,7 +197,7 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
       if (input.tool !== "task") return
       const role = AGENTS[output.args?.subagent_type]
       if (!role) {
-        throw new Error("sdlc-main 只能派发 sdlc-coder 或 sdlc-executor")
+        throw new Error("sdlc-main 只能派发 sdlc-coder")
       }
       const result = invoke(fallbackRoot, "task-before", { role })
       const paths = result.context_pack.paths.join(", ")
@@ -192,32 +213,6 @@ export const SdlcPipelinePlugin = async ({ directory, worktree }) => {
         role,
         output: output.output || "",
       })
-      if (role === "coder") {
-        invoke(fallbackRoot, "lifecycle", {
-          action: "compile_restart_verify",
-        })
-      }
-    },
-
-    event: async ({ event }) => {
-      const info = event?.properties?.info
-      const tokens = info?.tokens
-      if (!tokens) return
-      try {
-        invoke(fallbackRoot, "publish", {
-          kind: "tokens",
-          payload: {
-            phase: info.agent || "main",
-            input_tokens: tokens.input || 0,
-            output_tokens: tokens.output || 0,
-            cache_read_tokens: tokens.cache?.read || 0,
-            cache_write_tokens: tokens.cache?.write || 0,
-            source: "opencode-event",
-          },
-        })
-      } catch {
-        // Token telemetry must never block delivery gates.
-      }
     },
   }
 }

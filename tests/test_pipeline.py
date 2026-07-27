@@ -19,7 +19,6 @@ from sdlc_core.adapter import (  # noqa: E402
     before_task,
     build_context_pack,
     validate_coder_handoff,
-    validate_executor_handoff,
     validate_write_path,
 )
 from sdlc_core.artifacts import load_current_spec, publish_spec, validate_spec  # noqa: E402
@@ -39,6 +38,7 @@ from sdlc_core.lifecycle import (  # noqa: E402
     install_system_tool,
     load_contract,
     run_test_plan,
+    verify_delivery,
 )
 from sdlc_core.journal import begin_attempt, journal_status  # noqa: E402
 from sdlc_core.policies import evaluate_hard_policies  # noqa: E402
@@ -198,7 +198,6 @@ class ProjectFixture:
             "tests": {
                 "unit": command("print('unit pass')"),
                 "integration": command("print('integration pass')"),
-                "e2e": command("print('e2e pass')"),
                 "lint": command("print('lint pass')"),
                 "static_analysis": command("print('static pass')"),
             },
@@ -347,23 +346,18 @@ class SchemaAndTraceTests(unittest.TestCase):
             payload["requirements"]["source_inputs"][0]["content"] = raw
             publish_spec(fixture.root, payload)
             context = build_context_pack(fixture.root, "coder")
-            entries = [
-                entry
-                for path in context["paths"]
-                for entry in json.loads(
-                    (fixture.root / path).read_text(encoding="utf-8")
-                )["files"]
-            ]
+            pack = json.loads(
+                (fixture.root / context["paths"][0]).read_text(encoding="utf-8")
+            )
+            encoded = json.dumps(pack, ensure_ascii=False)
             requirements = next(
-                entry["content"]
-                for entry in entries
+                entry for entry in pack["resources"]
                 if entry["path"] == "docs/sdlc/current/requirements.json"
             )
-            self.assertNotIn(raw, requirements)
-            self.assertIn('"characters":', requirements)
-            self.assertIn('"sha256":', requirements)
-            self.assertIn('"id": "R-0001"', requirements)
-            self.assertLess(context["repeated_chars"], len(raw))
+            self.assertNotIn(raw, encoded)
+            self.assertEqual(len(requirements["sha256"]), 64)
+            self.assertEqual(pack["brief"]["requirement_ids"], ["R-0001"])
+            self.assertEqual(context["repeated_chars"], 0)
         finally:
             fixture.close()
 
@@ -555,7 +549,7 @@ class LifecycleTests(unittest.TestCase):
             for pack_path in context["paths"]
             for item in json.loads(
                 (self.fixture.root / pack_path).read_text(encoding="utf-8")
-            )["files"]
+            )["resources"]
         }
         self.assertIn(".sdlc-pipeline/rules/typescript.md", context_paths)
         self.assertIn(".sdlc-pipeline/rules/react.md", context_paths)
@@ -639,9 +633,7 @@ class LifecycleTests(unittest.TestCase):
         write_json(
             self.fixture.root / ".sdlc-pipeline/runs/coder-handoff.json",
             {
-                "design_to_code": {"D-0001": ["src/feature.py"]},
-                "test_to_files": {"T-0001": ["tests/test_feature.py"]},
-                "changed_files": [],
+                "summary": "fixture",
                 "open_issues": [],
             },
         )
@@ -663,11 +655,7 @@ class ClosedLoopTests(unittest.TestCase):
         publish_spec(self.fixture.root, spec_payload())
         result = before_task(self.fixture.root, "coder")
         self.assertIn(
-            "coder 仅可调用 sdlc_lifecycle(action=compile 或 health)",
-            result["instruction"],
-        )
-        self.assertIn(
-            "禁止调用 execute_test_plan 或 record_test_results",
+            "禁止调用完整 compile/restart/health/test",
             result["instruction"],
         )
 
@@ -680,9 +668,7 @@ class ClosedLoopTests(unittest.TestCase):
         feature.write_text("def feature(): return 'ok'\n", encoding="utf-8")
         test.write_text("from src.feature import feature\nassert feature() == 'ok'\n", encoding="utf-8")
         handoff = {
-            "design_to_code": {"D-0001": ["src/feature.py"]},
-            "test_to_files": {"T-0001": ["tests/test_feature.py"]},
-            "changed_files": ["src/feature.py", "tests/test_feature.py"],
+            "summary": "fixture implementation",
             "open_issues": [],
             "full_scan": False,
             "full_scan_reason": None,
@@ -690,19 +676,17 @@ class ClosedLoopTests(unittest.TestCase):
         validate_coder_handoff(self.fixture.root, json.dumps(handoff))
         compile_restart_verify(self.fixture.root)
 
-    def test_coder_handoff_must_match_git_diff(self) -> None:
+    def test_coder_handoff_mapping_is_derived_from_git_diff(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
         before_task(self.fixture.root, "coder")
         (self.fixture.root / "src" / "feature.py").write_text("x=1\n", encoding="utf-8")
         bad = {
-            "design_to_code": {"D-0001": ["src/feature.py"]},
-            "test_to_files": {"T-0001": ["tests/test_feature.py"]},
-            "changed_files": ["made-up.py"],
+            "summary": "fixture implementation",
             "open_issues": [],
         }
-        with self.assertRaises(SdlcError):
-            validate_coder_handoff(self.fixture.root, json.dumps(bad))
+        result = validate_coder_handoff(self.fixture.root, json.dumps(bad))
+        self.assertEqual(result["handoff"]["changed_files"], ["src/feature.py"])
 
     def test_coder_gate_rejects_unresolved_blocking_question(self) -> None:
         init_project(self.fixture.root)
@@ -719,9 +703,7 @@ class ClosedLoopTests(unittest.TestCase):
         write_json(
             self.fixture.root / ".sdlc-pipeline/runs/coder-handoff.json",
             {
-                "design_to_code": {"D-0001": ["src/feature.py"]},
-                "test_to_files": {"T-0001": ["tests/test_feature.py"]},
-                "changed_files": [],
+                "summary": "fixture",
                 "open_issues": [],
             },
         )
@@ -730,15 +712,6 @@ class ClosedLoopTests(unittest.TestCase):
         current = status(self.fixture.root)
         self.assertEqual(current["blocking_questions"][0]["id"], "Q-0001")
         self.assertFalse(current["can_enter_next"])
-
-    def test_executor_requires_every_tid(self) -> None:
-        init_project(self.fixture.root)
-        publish_spec(self.fixture.root, spec_payload())
-        with self.assertRaises(SdlcError):
-            validate_executor_handoff(
-                self.fixture.root,
-                json.dumps({"results": [], "open_issues": []}),
-            )
 
     def test_test_gate_rejects_code_changed_after_compile(self) -> None:
         self._through_code()
@@ -751,36 +724,22 @@ class ClosedLoopTests(unittest.TestCase):
     def test_test_execution_cannot_be_reused_after_test_plan_changes(self) -> None:
         self._through_code()
         execution = run_test_plan(self.fixture.root)
-        executor = {
-            "results": [
-                {"id": item["id"], "status": item["status"], "evidence": item["log"]}
-                for item in execution["results"]
-            ],
-            "open_issues": [],
-        }
         payload = spec_payload()
         payload["test_plan"]["items"][0]["command"] = "integration"
         publish_spec(self.fixture.root, payload)
         with self.assertRaisesRegex(SdlcError, "测试执行证据.*当前 test-plan"):
-            execute_tests(self.fixture.root, executor)
+            execute_tests(self.fixture.root)
 
     def test_status_exposes_lifecycle_test_keys_and_invalidates_stale_candidate(
         self,
     ) -> None:
         self._through_code()
         execution = run_test_plan(self.fixture.root)
-        executor = {
-            "results": [
-                {"id": item["id"], "status": item["status"], "evidence": item["log"]}
-                for item in execution["results"]
-            ],
-            "open_issues": [],
-        }
-        execute_tests(self.fixture.root, executor)
+        execute_tests(self.fixture.root)
         current = status(self.fixture.root)
         self.assertEqual(
             current["lifecycle_tests"]["available"],
-            ["e2e", "integration", "lint", "static_analysis", "unit"],
+            ["integration", "lint", "static_analysis", "unit"],
         )
         self.assertEqual(
             current["lifecycle_tests"]["commands"]["unit"]["argv"][-1],
@@ -797,17 +756,10 @@ class ClosedLoopTests(unittest.TestCase):
 
     def test_full_init_spec_code_test_version(self) -> None:
         self._through_code()
-        before_task(self.fixture.root, "executor")
-        execution = run_test_plan(self.fixture.root)
-        executor = {
-            "results": [
-                {"id": item["id"], "status": item["status"], "evidence": item["log"]}
-                for item in execution["results"]
-            ],
-            "open_issues": [],
-        }
-        validate_executor_handoff(self.fixture.root, json.dumps(executor))
-        results = execute_tests(self.fixture.root, executor)
+        delivery = verify_delivery(self.fixture.root)
+        results = json.loads(
+            (self.fixture.root / delivery["test_results"]).read_text(encoding="utf-8")
+        )
         self.assertEqual(results["status"], "pass")
         record_tokens(
             self.fixture.root,
@@ -845,6 +797,14 @@ class ClosedLoopTests(unittest.TestCase):
         final_status = status(self.fixture.root)
         self.assertEqual(final_status["current_version"], "V0001")
         self.assertEqual(final_status["stage"], "version")
+
+    def test_verify_delivery_reuses_success_for_same_fingerprint(self) -> None:
+        self._through_code()
+        first = verify_delivery(self.fixture.root)
+        second = verify_delivery(self.fixture.root)
+        self.assertFalse(first["cached"])
+        self.assertTrue(second["cached"])
+        self.assertEqual(first["version"], second["version"])
 
     def test_incremental_needs_parent_manifest(self) -> None:
         publish_spec(self.fixture.root, spec_payload())
@@ -886,9 +846,7 @@ class ReliabilityTests(unittest.TestCase):
         before_task(self.fixture.root, "coder")
         feature.write_text("value = 'after'\n", encoding="utf-8")
         handoff = {
-            "design_to_code": {"D-0001": ["src/feature.py"]},
-            "test_to_files": {"T-0001": ["tests/test_feature.py"]},
-            "changed_files": ["src/feature.py"],
+            "summary": "fixture implementation",
             "open_issues": [],
         }
 
@@ -912,9 +870,7 @@ class ReliabilityTests(unittest.TestCase):
 
         retry = before_task(self.fixture.root, "coder")
         handoff = {
-            "design_to_code": {"D-0001": ["src/feature.py"]},
-            "test_to_files": {"T-0001": ["tests/test_feature.py"]},
-            "changed_files": ["src/feature.py", "tests/test_feature.py"],
+            "summary": "fixture implementation",
             "open_issues": [],
         }
         result = validate_coder_handoff(
@@ -965,7 +921,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(recovered["state"], "aborted")
         self.assertEqual(next_attempt["attempt_id"], "A000002")
 
-    def test_handoff_rejects_nonexistent_mapping_path(self) -> None:
+    def test_handoff_ignores_agent_authored_mapping_fields(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
         before_task(self.fixture.root, "coder")
@@ -974,12 +930,13 @@ class ReliabilityTests(unittest.TestCase):
         feature.write_text("value = 1\n", encoding="utf-8")
         test_file.write_text("def test_feature(): assert True\n", encoding="utf-8")
         handoff = {
+            "summary": "fixture implementation",
             "design_to_code": {"D-0001": ["src/fake.py"]},
             "test_to_files": {"T-0001": ["tests/test_feature.py"]},
             "changed_files": ["src/feature.py", "tests/test_feature.py"],
             "open_issues": [],
         }
-        with self.assertRaisesRegex(SdlcError, "文件不存在"):
+        with self.assertRaisesRegex(SdlcError, "不允许的字段"):
             validate_coder_handoff(self.fixture.root, json.dumps(handoff))
 
     def test_spec_bundle_is_authoritative_and_repairs_current_mirror(self) -> None:

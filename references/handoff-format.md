@@ -1,31 +1,15 @@
-# Handoff JSON
+# Coder Handoff
 
-这是唯一的 subagent handoff 格式。JSON Schema 位于
-`.sdlc-pipeline/schemas/handoff.schema.json`。
-
-Coder：
+Coder 只返回自己知道的信息：
 
 ```json
 {
-  "design_to_code": {"D-0001": ["src/example.ts"]},
-  "test_to_files": {"T-0001": ["tests/example.test.ts"]},
-  "changed_files": ["src/example.ts", "tests/example.test.ts"],
+  "summary": "完成了功能实现与自动化测试",
   "open_issues": [],
   "full_scan": false,
   "full_scan_reason": null
 }
 ```
 
-Executor：
-
-```json
-{
-  "results": [
-    {"id": "T-0001", "status": "pass", "evidence": ".sdlc-pipeline/runs/logs/..."}
-  ],
-  "open_issues": []
-}
-```
-
-Coder 的 changed_files 必须与任务期间实际 Git diff 完全一致；D/T 映射必须覆盖当前 spec。
-Executor 必须恰好返回全部 T-id，且状态必须与 runner 保存的结果一致。
+`changed_files`、design-to-code、test-to-files、文件 SHA-256 和范围合规性不由模型声明，
+而由 Core 根据任务前 baseline 与任务后 Git diff 自动生成和校验。

@@ -1,56 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://sdlc-pipeline.local/schemas/handoff.schema.json",
-  "oneOf": [
-    {
-      "title": "coder",
-      "type": "object",
-      "required": ["design_to_code", "test_to_files", "changed_files", "open_issues"],
-      "properties": {
-        "design_to_code": {
-          "type": "object",
-          "propertyNames": {"pattern": "^D-[0-9]{4}$"},
-          "additionalProperties": {
-            "type": "array", "minItems": 1,
-            "items": {"type": "string", "minLength": 1}
-          }
-        },
-        "test_to_files": {
-          "type": "object",
-          "propertyNames": {"pattern": "^T-[0-9]{4}$"},
-          "additionalProperties": {
-            "type": "array", "minItems": 1,
-            "items": {"type": "string", "minLength": 1}
-          }
-        },
-        "changed_files": {"type": "array", "items": {"type": "string"}},
-        "open_issues": {"type": "array", "items": {"type": "string"}},
-        "full_scan": {"type": "boolean"},
-        "full_scan_reason": {"type": ["string", "null"]}
-      },
-      "additionalProperties": false
-    },
-    {
-      "title": "executor",
-      "type": "object",
-      "required": ["results", "open_issues"],
-      "properties": {
-        "results": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "required": ["id", "status", "evidence"],
-            "properties": {
-              "id": {"type": "string", "pattern": "^T-[0-9]{4}$"},
-              "status": {"enum": ["pass", "fail", "skip"]},
-              "evidence": {"type": "string"}
-            },
-            "additionalProperties": false
-          }
-        },
-        "open_issues": {"type": "array", "items": {"type": "string"}}
-      },
-      "additionalProperties": false
-    }
-  ]
+  "type": "object",
+  "required": ["summary", "open_issues"],
+  "properties": {
+    "summary": {"type": "string", "minLength": 1},
+    "open_issues": {"type": "array", "items": {"type": "string"}},
+    "full_scan": {"type": "boolean"},
+    "full_scan_reason": {"type": ["string", "null"]}
+  },
+  "additionalProperties": false
 }

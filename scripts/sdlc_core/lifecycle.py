@@ -95,7 +95,7 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
         "",
         "- 正式需求、设计、测试计划使用中文；原始输入、代码标识、命令和协议字段保持原样。",
         "- 通过 `/sdlc-spec`、`/sdlc-code`、`/sdlc-test` 依次推进，不直接编辑 `docs/sdlc` 正式产物。",
-        "- coder 完成后由 runner 自动执行 compile/restart/health/artifact 门禁；测试由独立 executor 执行。",
+        "- coder 完成后由主会话只触发一次 verify_delivery；Core 负责完整生命周期与测试证据。",
         "",
     ]
     atomic_write(path, "\n".join(lines))
@@ -671,7 +671,61 @@ def run_test_plan(root: Path) -> dict[str, Any]:
     return {"ok": policy["ok"] and all(item["status"] == "pass" for item in results), **execution}
 
 
-def execute_tests(root: Path, executor_result: dict[str, Any] | None = None) -> dict[str, Any]:
+def run_focused_checks(
+    root: Path,
+    selected: list[str] | None = None,
+) -> dict[str, Any]:
+    """Run coder-selected feature checks without executing the delivery lifecycle."""
+    spec = load_current_spec(root)
+    feature_keys = sorted({
+        item["command"] for item in spec["test_plan"]["items"]
+    })
+    requested = feature_keys if selected is None else selected
+    if (
+        not isinstance(requested, list)
+        or not requested
+        or any(not isinstance(item, str) or not item for item in requested)
+    ):
+        raise SdlcError("focused_check test_keys 必须是非空字符串数组")
+    selected_keys = list(dict.fromkeys(requested))
+    unknown = sorted(set(selected_keys) - set(feature_keys))
+    if unknown:
+        raise SdlcError(
+            f"focused_check 只能选择当前 Feature Contract 的测试逻辑键；"
+            f"未知={unknown}，允许={feature_keys}"
+        )
+    commands = load_contract(root)["tests"]
+    results = []
+    for key in selected_keys:
+        result = execute_command(root, f"focused-{key}", commands[key])
+        results.append({
+            "test_key": key,
+            "status": "pass" if result["ok"] else "fail",
+            "duration_ms": result["duration_ms"],
+            "log": result["log"],
+            "tail": "" if result["ok"] else result["tail"],
+        })
+    evidence = {
+        "schema_version": "1.0",
+        "ok": all(item["status"] == "pass" for item in results),
+        "selected": selected_keys,
+        "available": feature_keys,
+        "results": results,
+        "binding": {
+            "spec_hashes": current_spec_hashes(root),
+            "source_fingerprint": worktree_fingerprint(root),
+        },
+        "created_at": utc_now(),
+        "authoritative_delivery_evidence": False,
+    }
+    write_json(
+        root / ".sdlc-pipeline" / "runs" / "focused-check-evidence.json",
+        evidence,
+    )
+    return evidence
+
+
+def execute_tests(root: Path) -> dict[str, Any]:
     execution = read_json(
         root / ".sdlc-pipeline" / "runs" / "test-execution.json",
         required=False,
@@ -687,18 +741,13 @@ def execute_tests(root: Path, executor_result: dict[str, Any] | None = None) -> 
     if execution.get("binding") != expected_binding:
         raise SdlcError(
             "测试执行证据与当前 test-plan、lifecycle 或源码不匹配，"
-            "必须重新派发 executor"
+            "必须重新执行交付验证"
         )
     spec = load_current_spec(root)
     expected = {item["id"] for item in spec["test_plan"]["items"]}
     actual = {item["id"] for item in execution["results"]}
     if expected != actual:
         raise SdlcError("保存的测试执行与当前 test-plan 不匹配")
-    if executor_result:
-        reported = {item["id"]: item["status"] for item in executor_result.get("results", [])}
-        measured = {item["id"]: item["status"] for item in execution["results"]}
-        if reported != measured:
-            raise SdlcError("executor handoff 与 runner 测试结果不一致")
     results = execution["results"]
     mandatory_failed = [
         item["id"] for item in results
@@ -712,10 +761,9 @@ def execute_tests(root: Path, executor_result: dict[str, Any] | None = None) -> 
         "started_at": execution["started_at"],
         "finished_at": utc_now(),
         "results": results,
-        "executor": executor_result or {},
         "policy": execution.get("policy", {}),
         "mandatory_failed": mandatory_failed,
-        "open_issues": (executor_result or {}).get("open_issues", []),
+        "open_issues": [],
     }
     directory = root / "docs" / "sdlc" / "test-results"
     validate_schema_instance(root, "test-results.schema.json", output)
@@ -731,3 +779,39 @@ def execute_tests(root: Path, executor_result: dict[str, Any] | None = None) -> 
     }
     write_json(root / ".sdlc-pipeline" / "runs" / "version-candidate.json", candidate)
     return output
+
+
+def verify_delivery(root: Path) -> dict[str, Any]:
+    """Run the single authoritative delivery verification for a fingerprint."""
+    binding = {
+        "source_fingerprint": worktree_fingerprint(root),
+        "spec_hashes": current_spec_hashes(root),
+        "lifecycle_sha256": sha256_file(contract_path(root)),
+    }
+    evidence_path = root / ".sdlc-pipeline" / "runs" / "delivery-evidence.json"
+    cached = read_json(evidence_path, required=False)
+    if cached and cached.get("ok") and cached.get("binding") == binding:
+        result_path = root / cached.get("test_results", "")
+        if result_path.is_file():
+            return {**cached, "cached": True}
+
+    cleanup: dict[str, Any] = {"stopped": False}
+    try:
+        code = compile_restart_verify(root)
+        execution = run_test_plan(root)
+        results = execute_tests(root)
+    finally:
+        cleanup = stop_active(root)
+    evidence = {
+        "ok": results["status"] == "pass",
+        "cached": False,
+        "binding": binding,
+        "code": code,
+        "execution": execution,
+        "test_results": f"docs/sdlc/test-results/{results['version']}.json",
+        "version": results["version"],
+        "cleanup": cleanup,
+        "verified_at": utc_now(),
+    }
+    write_json(evidence_path, evidence)
+    return evidence

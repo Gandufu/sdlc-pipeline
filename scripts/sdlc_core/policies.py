@@ -86,14 +86,6 @@ def evaluate_hard_policies(root: Path) -> dict[str, Any]:
     return report
 
 
-def required_test_keys(root: Path) -> list[str]:
-    return sorted({
-        key
-        for pack in active_policy_packs(root)
-        for key in pack.get("required_test_keys", [])
-    })
-
-
 def executable_verifiers(root: Path, phase: str) -> list[dict[str, Any]]:
     return [
         {"rule_id": pack["rule_id"], **verifier}
@@ -101,19 +93,6 @@ def executable_verifiers(root: Path, phase: str) -> list[dict[str, Any]]:
         for verifier in pack.get("executable_verifiers", [])
         if verifier["phase"] == phase
     ]
-
-
-def validate_spec_policy(root: Path, payload: dict[str, Any]) -> None:
-    required = set(required_test_keys(root))
-    declared = {
-        item["command"] for item in payload["test_plan"]["items"]
-        if item.get("mandatory") is True
-    }
-    missing = sorted(required - declared)
-    if missing:
-        raise SdlcError(f"active policy 要求 test-plan 覆盖 lifecycle tests: {missing}")
-
-
 def _matches_any(path: str, patterns: list[str]) -> bool:
     return any(
         fnmatch.fnmatch(path, pattern)

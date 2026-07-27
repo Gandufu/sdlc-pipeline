@@ -76,9 +76,29 @@ def changed_paths(root: Path, base: str | None = None) -> list[str]:
         output = git(root, "diff", "--name-only", f"{base}...HEAD", check=False)
     else:
         output = git(
-            root, "status", "--short", "--untracked-files=all", check=False
+            root,
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            check=False,
         )
-        return sorted({line[3:].replace("\\", "/") for line in output.splitlines() if len(line) > 3})
+        entries = output.split("\0")
+        paths: set[str] = set()
+        index = 0
+        while index < len(entries):
+            entry = entries[index]
+            index += 1
+            if len(entry) < 4:
+                continue
+            status = entry[:2]
+            paths.add(entry[3:].replace("\\", "/"))
+            if "R" in status or "C" in status:
+                # In ``-z`` mode rename/copy records carry the second path as
+                # the following NUL-delimited field. The destination in the
+                # status record is the path whose current contents matter.
+                index += 1
+        return sorted(paths)
     return sorted({line.replace("\\", "/") for line in output.splitlines() if line})
 
 

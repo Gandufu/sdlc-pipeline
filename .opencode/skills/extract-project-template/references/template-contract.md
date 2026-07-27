@@ -41,7 +41,7 @@ docs/existing-framework.md
 ```
 
 init 展示元数据并由用户明确选择 `id`，再解析 `repository/ref`，clone 后记录实际 commit SHA。
-init 根据 `rules` 生成 active manifest；只有 active rules 进入 coder/executor context。发布稳定模板时
+init 根据 `rules` 生成 active manifest；只有 active rules 进入 coder context。发布稳定模板时
 优先把 `ref` 固定到 release tag 或 commit；开发期可使用 `main`。
 
 ## 验收

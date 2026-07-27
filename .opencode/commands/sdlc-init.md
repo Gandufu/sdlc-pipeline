@@ -22,7 +22,7 @@ subtask: false
 `sdlc_lifecycle` 会继续执行既有的 template import、工具探测与受控安装、
 按模板 `rules` 生成 `.sdlc-pipeline/rules/active.json`，再执行
 install/compile/start/health/artifact/stop，并生成或保留 `AGENTS.md` 和 `init-report`。
-后续 coder/executor 只加载 active rules；发行包中的其他规则文件只是目录，不进入上下文。
+后续 coder 只加载 active rules；发行包中的其他规则文件只是目录，不进入上下文。
 
 最终只展示 init 是否为复用、模板、工具、compile、health、artifact、stop、Git 基线与失败日志；
 mandatory 检查通过后进入 `/sdlc-spec`。

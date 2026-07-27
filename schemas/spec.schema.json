@@ -190,7 +190,7 @@
               "title": {"type": "string"},
               "requirement_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^R-[0-9]{4}$"}},
               "design_ids": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^D-[0-9]{4}$"}},
-              "level": {"enum": ["unit", "integration", "e2e", "lint", "static_analysis"]},
+              "level": {"enum": ["unit", "integration"]},
               "preconditions": {"type": "string"},
               "input": {"type": "string"},
               "expected": {"type": "string"},

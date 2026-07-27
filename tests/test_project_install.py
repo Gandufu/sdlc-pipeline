@@ -73,16 +73,14 @@ def create_remote_template(root: Path, template_id: str = "electron-scaffold") -
 
 
 class InstallerTests(unittest.TestCase):
-    def test_installs_only_opencode_surface_and_two_subagents(self) -> None:
+    def test_installs_only_opencode_surface_and_one_subagent(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
             result = installer.install(target)
             self.assertTrue(result["ok"])
             self.assertEqual(result["host"], "opencode")
             agents = sorted(path.name for path in (target / ".opencode/agents").glob("*.md"))
-            self.assertEqual(
-                agents, ["sdlc-coder.md", "sdlc-executor.md", "sdlc-main.md"]
-            )
+            self.assertEqual(agents, ["sdlc-coder.md", "sdlc-main.md"])
             commands = sorted(path.name for path in (target / ".opencode/commands").glob("*.md"))
             self.assertEqual(
                 commands,
@@ -148,6 +146,17 @@ class InstallerTests(unittest.TestCase):
             installer.install(target)
             with self.assertRaises(ValueError):
                 installer.install(target)
+
+    def test_force_upgrade_removes_obsolete_executor_agent(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            installer.install(target)
+            obsolete = target / ".opencode/agents/sdlc-executor.md"
+            obsolete.write_text("legacy", encoding="utf-8")
+
+            installer.install(target, force=True)
+
+            self.assertFalse(obsolete.exists())
             self.assertTrue(installer.install(target, force=True)["ok"])
 
     def test_installed_runtime_can_install_another_project(self) -> None:
@@ -433,10 +442,14 @@ class InstallerTests(unittest.TestCase):
             (REPO / "README.md").read_text(encoding="utf-8"),
         )
 
-    def test_plugin_has_four_tools_without_experimental_injection(self) -> None:
+    def test_plugin_has_narrow_tools_without_experimental_injection(self) -> None:
         text = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
-        for name in ("sdlc_status", "sdlc_publish", "sdlc_lifecycle", "sdlc_finalize"):
+        for name in (
+            "sdlc_status", "sdlc_ingest_source", "sdlc_save_checkpoint",
+            "sdlc_publish_contract", "sdlc_lifecycle", "sdlc_finalize",
+        ):
             self.assertIn(name, text)
+        self.assertNotIn("idempotency_key", text)
         self.assertNotIn("experimental.chat.messages.transform", text)
         self.assertNotIn("config.skills.paths", text)
         self.assertNotIn("sdlc-tester", text)
@@ -444,46 +457,30 @@ class InstallerTests(unittest.TestCase):
     def test_agent_permission_matrix(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
         coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
-        executor = (REPO / ".opencode/agents/sdlc-executor.md").read_text(encoding="utf-8")
         self.assertIn('"sdlc-coder": allow', main)
-        self.assertIn('"sdlc-executor": allow', main)
         self.assertIn("edit: allow", coder)
         self.assertIn("bash: deny", coder)
-        self.assertIn("edit: deny", executor)
-        self.assertIn("task: deny", executor)
+        self.assertFalse((REPO / ".opencode/agents/sdlc-executor.md").exists())
 
-    def test_spec_command_and_agent_require_schema_before_publish(self) -> None:
+    def test_spec_details_have_one_reference_source_of_truth(self) -> None:
         command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(encoding="utf-8")
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
-        for text in (command, main):
-            self.assertIn(".sdlc-pipeline/schemas/spec.schema.json", text)
-            self.assertIn("R-0001", text)
+        reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
+        self.assertIn("references/spec-interview.md", command)
+        self.assertNotIn("feature-contract.schema.json", command + main)
+        self.assertIn(".sdlc-pipeline/schemas/feature-contract.schema.json", reference)
+        self.assertIn("F-xxxx", reference)
 
     def test_spec_generation_requires_chinese_formal_documents(self) -> None:
-        command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(encoding="utf-8")
-        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
-        for text in (command, main):
-            self.assertIn("正式文档使用中文", text)
+        reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
+        self.assertIn("默认中文", reference)
 
     def test_spec_grilling_is_single_question_recommended_choice_workflow(self) -> None:
-        command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(encoding="utf-8")
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
-        skill = (
-            REPO / ".opencode/skills/sdlc-pipeline/SKILL.md"
-        ).read_text(encoding="utf-8")
-        for text in (command, main, skill):
-            self.assertIn("一次只问一个", text)
-            self.assertIn("推荐", text)
-            self.assertIn("2–3", text)
-            self.assertIn("自定义答案", text)
-            self.assertIn(
-                ".sdlc-pipeline/references/spec-interview.md",
-                text,
-            )
+        reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
+        self.assertIn("通常在三题内", reference)
+        self.assertIn("可以继续", reference)
         self.assertIn("question: allow", main)
-        self.assertIn("requirements.md", command)
-        self.assertIn("design.md", command)
-        self.assertIn("test-plan.md", command)
 
     def test_template_registry_declares_framework_specific_rules(self) -> None:
         manifest = json.loads(
@@ -517,27 +514,17 @@ class InstallerTests(unittest.TestCase):
 
     def test_coder_is_explicitly_routed_away_from_test_lifecycle_actions(self) -> None:
         coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
-        executor = (REPO / ".opencode/agents/sdlc-executor.md").read_text(encoding="utf-8")
         plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         adapter = (REPO / "scripts/sdlc_core/adapter.py").read_text(encoding="utf-8")
-        self.assertIn("禁止调用 `execute_test_plan`", coder)
-        self.assertIn("coder：仅 `compile`、`health`", plugin)
-        self.assertIn("coder 仅可调用 sdlc_lifecycle(action=compile 或 health)", adapter)
-        self.assertIn("action=execute_test_plan", executor)
-        self.assertIn("record_test_results", plugin)
-        self.assertNotIn('"run_tests", "test"', plugin)
+        self.assertIn("focused_check", coder)
+        self.assertIn('"sdlc-coder": ["focused_check"]', plugin)
+        self.assertIn("禁止调用完整 compile/restart/health/test", adapter)
 
     def test_spec_guidance_distinguishes_test_key_from_shell_command(self) -> None:
-        paths = (
-            REPO / "README.md",
-            REPO / ".opencode/commands/sdlc-spec.md",
-            REPO / ".opencode/agents/sdlc-main.md",
-        )
-        for path in paths:
-            text = path.read_text(encoding="utf-8")
-            self.assertIn("command", text)
-            self.assertIn("逻辑键", text)
-            self.assertIn("pnpm test", text)
+        text = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
+        self.assertIn("逻辑测试键", text)
+        self.assertIn("unit", text)
+        self.assertIn("integration", text)
 
     def test_desktop_project_assets_are_discoverable(self) -> None:
         self.assertTrue((REPO / ".opencode/plugins/sdlc-pipeline.js").exists())
@@ -549,7 +536,7 @@ class InstallerTests(unittest.TestCase):
             package["dependencies"]["@opencode-ai/plugin"],
             installer.OPENCODE_PLUGIN_VERSION,
         )
-        for name in ("sdlc-main", "sdlc-coder", "sdlc-executor"):
+        for name in ("sdlc-main", "sdlc-coder"):
             self.assertTrue((REPO / f".opencode/agents/{name}.md").exists())
 
     def test_init_is_parameterless_idempotent_and_user_selects_registry_template(
@@ -628,14 +615,11 @@ class InstallerTests(unittest.TestCase):
                 json.loads(line)
                 for line in (target / "operations.jsonl").read_text(encoding="utf-8").splitlines()
             ]
-            self.assertEqual([item["operation"] for item in operations], ["task-after", "lifecycle"])
+            self.assertEqual([item["operation"] for item in operations], ["task-after"])
             self.assertEqual(operations[0]["payload"]["role"], "coder")
-            self.assertEqual(
-                operations[1]["payload"]["action"], "compile_restart_verify"
-            )
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
-    def test_executor_can_execute_plan_but_cannot_record_results(self) -> None:
+    def test_removed_executor_cannot_execute_lifecycle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary).resolve()
             plugin_path = target / ".opencode" / "plugins" / "sdlc-pipeline.js"
@@ -669,12 +653,11 @@ class InstallerTests(unittest.TestCase):
                 "import(process.argv[1]).then(async m => {"
                 "const plugin = await m.SdlcPipelinePlugin({directory: process.argv[2], worktree: '/'});"
                 "const lifecycle = plugin.tool.sdlc_lifecycle;"
-                "await lifecycle.execute({action: 'execute_test_plan'}, {agent: 'sdlc-executor'});"
                 "try {"
-                "await lifecycle.execute({action: 'record_test_results'}, {agent: 'sdlc-executor'});"
+                "await lifecycle.execute({action: 'execute_test_plan'}, {agent: 'sdlc-executor'});"
                 "process.exit(2);"
                 "} catch (error) {"
-                "if (!String(error).includes('cannot run lifecycle record_test_results')) throw error;"
+                "if (!String(error).includes('cannot run lifecycle execute_test_plan')) throw error;"
                 "}"
                 "}).catch(e => { console.error(e); process.exit(1) })"
             )

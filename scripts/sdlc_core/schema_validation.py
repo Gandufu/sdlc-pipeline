@@ -25,6 +25,7 @@ _SUPPORTED = _ANNOTATIONS | {
     "propertyNames",
     "items",
     "minItems",
+    "maxItems",
     "uniqueItems",
     "minLength",
     "enum",
@@ -138,6 +139,8 @@ def _validate(instance: Any, schema: Any, root: dict[str, Any], location: str) -
     if isinstance(instance, list):
         if len(instance) < int(schema.get("minItems", 0)):
             raise SdlcError(f"{location} 至少需要 {schema['minItems']} 项")
+        if "maxItems" in schema and len(instance) > int(schema["maxItems"]):
+            raise SdlcError(f"{location} 最多允许 {schema['maxItems']} 项")
         if schema.get("uniqueItems"):
             normalized = [repr(value) for value in instance]
             if len(set(normalized)) != len(normalized):

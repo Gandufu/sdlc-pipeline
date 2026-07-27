@@ -3,7 +3,8 @@
 - 状态：Accepted
 - 日期：2026-07-25
 
-决定只正式支持 OpenCode，并固定 `sdlc-main`、`sdlc-coder`、`sdlc-executor` 三个角色。
+决定只正式支持 OpenCode，并固定 `sdlc-main` 与唯一 `sdlc-coder`。确定性 Core 负责交付验证，
+不再使用独立测试 subagent。
 用户阶段命令为 init/spec/code/test；status/finalize 是内部工具。
 
 需求、设计、测试计划合并为同一 spec 交互，但保持独立 JSON/Markdown 产物。生命周期、

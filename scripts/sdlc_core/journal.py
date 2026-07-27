@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from .common import SdlcError, read_json, sha256_json, utc_now, write_json
+from .failures import failure_fingerprint
 from .schema_validation import validate_schema_instance
-from .sources import validate_source_envelopes
+from .sources import load_source
 
 
 TERMINAL_STATES = {"succeeded", "failed", "blocked", "aborted"}
@@ -71,6 +72,10 @@ def begin_attempt(
     idempotency_key: str | None = None,
 ) -> dict[str, Any]:
     run = ensure_run(root, phase)
+    if run.get("state") == "blocked":
+        raise SdlcError(
+            "Run 已进入 BLOCKED；请先处理最近失败或显式开始新 Run"
+        )
     _reconcile_abandoned_attempts(root, run)
     run_id = run["run_id"]
     binding = sha256_json({
@@ -156,11 +161,27 @@ def finish_attempt(
     })
     write_json(attempt_path, stored)
     run = read_json(_run_dir(root, run_id) / "run.json")
+    final_state = "running" if state == "succeeded" else state
+    last_failure = run.get("last_failure")
+    if state == "failed" and error:
+        failure = failure_fingerprint(error)
+        repeat_count = (
+            int(last_failure.get("repeat_count", 0)) + 1
+            if isinstance(last_failure, dict)
+            and last_failure.get("fingerprint") == failure["fingerprint"]
+            else 1
+        )
+        last_failure = {**failure, "repeat_count": repeat_count}
+        if repeat_count >= 2:
+            final_state = "blocked"
+    elif state == "succeeded":
+        last_failure = None
     run.update({
-        "state": "running" if state == "succeeded" else state,
+        "state": final_state,
         "phase": attempt["phase"],
         "updated_at": utc_now(),
         "last_error": error,
+        "last_failure": last_failure,
     })
     write_json(_run_dir(root, run_id) / "run.json", run)
     if attempt.get("idempotency_key"):
@@ -198,14 +219,18 @@ def close_run(root: Path, state: str = "succeeded") -> None:
 
 def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     validate_schema_instance(root, "spec-checkpoint.schema.json", payload)
-    validate_source_envelopes(root, payload.get("source_envelopes", []))
+    for reference in payload.get("source_refs", []):
+        source_id, anchor = reference.split("#", 1)
+        source = load_source(root, source_id)
+        if anchor not in {item["anchor"] for item in source["segments"]}:
+            raise SdlcError(f"未知来源 anchor: {reference}")
     run = ensure_run(root, "spec")
     path = _run_dir(root, run["run_id"]) / "checkpoints" / "spec.json"
     checkpoint = read_json(path, required=False) or {
         "schema_version": "1.0",
         "run_id": run["run_id"],
         "state": "interviewing",
-        "source_envelopes": [],
+        "source_refs": [],
         "decisions": [],
         "confirmed_facts": [],
         "assumptions": [],
@@ -222,7 +247,7 @@ def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any
         ]
         decisions.append({**question, "recorded_at": utc_now()})
         checkpoint["decisions"] = sorted(decisions, key=lambda item: item["id"])
-    for name in ("source_envelopes", "confirmed_facts", "assumptions", "risks"):
+    for name in ("source_refs", "confirmed_facts", "assumptions", "risks"):
         if name in payload:
             if not isinstance(payload[name], list):
                 raise SdlcError(f"spec checkpoint {name} 必须是数组")
@@ -270,6 +295,7 @@ def journal_status(root: Path) -> dict[str, Any]:
         "phase": run["phase"],
         "attempt_count": run["attempt_count"],
         "last_error": run.get("last_error"),
+        "last_failure": run.get("last_failure"),
         "updated_at": run["updated_at"],
         "running_attempts": [
             {

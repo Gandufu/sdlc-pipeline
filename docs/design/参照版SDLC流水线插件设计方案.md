@@ -43,7 +43,7 @@ clone/checkout 后连同 Git 历史导入当前目录。后续直接执行
 - 即使 registry 只有一个候选也不得静默选择；
 - 导入报告记录 template ID、repository、请求 ref 和解析后的 commit SHA。
 - init 把所选模板声明的规则写入 `.sdlc-pipeline/rules/active.json` 并记录 hash；规则目录只是
-  catalogue，coder/executor 只加载 active manifest，非 Java 模板不得加载 `java.md`。
+  catalogue，coder 只加载 active manifest，非 Java 模板不得加载 `java.md`。
 
 当前参考模板为
 [`sdlc-electron-scaffold`](https://github.com/Gandufu/sdlc-electron-scaffold)，本地维护目录是
@@ -64,7 +64,7 @@ Forge，不保留 electron-builder。
 项目级 plugin 的外部 interface 只有四个工具：
 
 - `sdlc_status`：只读状态。
-- `sdlc_publish`：发布 spec 或 Token telemetry。
+- `sdlc_ingest_source`、`sdlc_save_checkpoint`、`sdlc_publish_contract`：窄化规格接口。
 - `sdlc_lifecycle`：环境、依赖、进程、验证和测试。
 - `sdlc_finalize`：确认后的版本固化。
 
@@ -77,7 +77,7 @@ plugin 是薄 adapter：转换 OpenCode 输入输出、注册正式 before/after
 `sdlc-main` 是 primary agent，负责用户交互和阶段编排，不创建额外会话。它只允许派发：
 
 - `sdlc-coder`：实现 D→C 与 T→测试文件。
-- `sdlc-executor`：独立按 T-id 运行测试。
+- 确定性 Core：按当前指纹一次执行 `verify_delivery`。
 
 没有固定 reviewer。需求符合性由 trace 校验，规范由编译/lint/static analysis，行为由
 测试计划验证。未来高风险人工 review 是可选策略，不进入默认流水线。
@@ -132,8 +132,8 @@ init 的成功标准是 install、compile、start、health、artifact 全部通�
 因此文档落盘或 coder 的 compiled 声明不能过门。
 
 health 支持 process、HTTP、TCP、command、file 和 browser smoke。browser smoke 在 core 中
-以无 UI HTTP 页面探针实现；需要真实交互的模板必须把受控 E2E 命令登记为 command。当前
-Electron 模板的 `test:e2e` 会启动打包后的真实窗口，并验证 preload bridge 与 typed IPC，
+以无 UI HTTP 页面探针实现；需要真实交互的模板把受控 integration 命令登记为 command。当前
+Electron 模板的 integration 检查应启动打包后的真实窗口，并验证 preload bridge 与 typed IPC，
 不能用 renderer HTTP 可达代替。
 
 ## 标准与增量
@@ -145,7 +145,7 @@ Electron 模板的 `test:e2e` 会启动打包后的真实窗口，并验证 prel
 - 不改变公共接口、依赖、数据模型、安全、lifecycle、protected path；
 - 用户确认使用增量。
 
-增量复用未变化 R/D/T，只把影响集送给 coder/executor；mandatory 回归仍运行。任一条件失败
+增量复用未变化 R/D/T，只把影响集送给 coder；mandatory 回归仍由 Core 运行。任一条件失败
 自动回到 standard。
 
 ## Token 与上下文

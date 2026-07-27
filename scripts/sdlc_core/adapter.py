@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import hashlib
+import fnmatch
 import json
 import re
 from pathlib import Path
@@ -12,7 +12,7 @@ from .trace import changed_path_fingerprints, validate_diff, verify_extension_po
 
 from .schema_validation import validate_schema_instance
 
-MAX_CONTEXT_CHARS = 30_000
+MAX_CONTEXT_RESOURCES = 1_000
 
 
 def validate_write_path(root: Path, path_value: str) -> dict[str, Any]:
@@ -90,15 +90,20 @@ def _extract_json(text: str) -> dict[str, Any]:
     raise SdlcError("subagent 输出中没有可解析的 JSON handoff")
 
 
-def _context_files(root: Path) -> list[str]:
+def _context_resources(root: Path) -> list[dict[str, Any]]:
     spec = load_current_spec(root)
-    paths = {
-        "docs/sdlc/current/requirements.json",
-        "docs/sdlc/current/design.json",
-        "docs/sdlc/current/test-plan.json",
-        ".sdlc-pipeline/lifecycle.json",
-        ".sdlc-pipeline/scaffold.json",
+    candidates: dict[str, tuple[int, str]] = {
+        "docs/sdlc/current/requirements.json": (1, "requirement view"),
+        "docs/sdlc/current/design.json": (1, "design view"),
+        "docs/sdlc/current/test-plan.json": (1, "verification view"),
+        ".sdlc-pipeline/lifecycle.json": (2, "lifecycle contract"),
+        ".sdlc-pipeline/scaffold.json": (2, "scaffold contract"),
     }
+    feature_contract = root / "docs/sdlc/current/feature-contract.json"
+    if feature_contract.is_file():
+        candidates["docs/sdlc/current/feature-contract.json"] = (
+            1, "authoritative Feature Contract"
+        )
     active_rules = read_json(
         root / ".sdlc-pipeline" / "rules" / "active.json",
         required=False,
@@ -120,74 +125,93 @@ def _context_files(root: Path) -> list[str]:
             raise SdlcError(f"active rule 越出规则目录: {path}") from exc
         if not rule_path.is_file() or sha256_file(rule_path) != rule.get("sha256"):
             raise SdlcError(f"active rule 缺失或 hash 漂移: {path}")
-        paths.add(path)
+        candidates[path] = (2, "active guidance; read when touched file matches")
     if (root / "docs" / "existing-framework.md").exists():
-        paths.add("docs/existing-framework.md")
+        candidates["docs/existing-framework.md"] = (2, "existing framework index")
     for item in spec["design"]["items"]:
         for pattern in item["allowed_paths"]:
             if "*" not in pattern:
                 path = root / pattern
                 if path.is_file():
-                    paths.add(pattern)
+                    candidates[pattern] = (2, "design-allowed implementation candidate")
                 elif path.is_dir():
                     for candidate in path.rglob("*"):
                         if candidate.is_file() and candidate.stat().st_size <= 80_000:
-                            paths.add(candidate.relative_to(root).as_posix())
-    return sorted(paths)
+                            candidates[
+                                candidate.relative_to(root).as_posix()
+                            ] = (2, "design-allowed implementation candidate")
+    resources = []
+    for name, (tier, reason) in sorted(
+        candidates.items(), key=lambda item: (item[1][0], item[0])
+    )[:MAX_CONTEXT_RESOURCES]:
+        path = root / name
+        if not path.is_file():
+            continue
+        resources.append({
+            "path": name,
+            "sha256": sha256_file(path),
+            "size": path.stat().st_size,
+            "tier": tier,
+            "reason": reason,
+        })
+    return resources
 
 
 def build_context_pack(root: Path, role: str) -> dict[str, Any]:
-    files = _context_files(root)
-    packs: list[list[dict[str, str]]] = [[]]
-    size = 0
-    repeated = 0
-    for name in files:
-        path = root / name
-        if not path.exists() or (
-            path.stat().st_size > 80_000
-            and name != "docs/sdlc/current/requirements.json"
-        ):
-            continue
-        content = path.read_text(encoding="utf-8", errors="replace")
-        if name == "docs/sdlc/current/requirements.json":
-            requirements = json.loads(content)
-            requirements["source_inputs"] = [
-                {
-                    "source": item["source"],
-                    "sha256": hashlib.sha256(
-                        item["content"].encode("utf-8")
-                    ).hexdigest(),
-                    "characters": len(item["content"]),
-                }
-                for item in requirements.get("source_inputs", [])
-            ]
-            content = json.dumps(requirements, ensure_ascii=False, indent=2) + "\n"
-        entry_size = len(name) + len(content)
-        if size and size + entry_size > MAX_CONTEXT_CHARS:
-            packs.append([])
-            size = 0
-        packs[-1].append({"path": name, "content": content})
-        size += entry_size
-        if name.startswith("docs/sdlc/current/"):
-            repeated += len(content)
-    directory = root / ".sdlc-pipeline" / "runs" / "context"
-    paths = []
-    for index, pack in enumerate(packs, 1):
-        path = directory / f"{role}-{index:02d}.json"
-        write_json(path, {"role": role, "part": index, "files": pack})
-        paths.append(path.relative_to(root).as_posix())
-    return {
-        "paths": paths,
-        "parts": len(paths),
-        "characters": sum(
-            len(item["content"]) for pack in packs for item in pack
+    from .memory import delivery_memory
+
+    spec = load_current_spec(root)
+    requirements = spec["requirements"]["items"]
+    designs = spec["design"]["items"]
+    tests = spec["test_plan"]["items"]
+    brief = {
+        "requirement_ids": [item["id"] for item in requirements],
+        "goals": [
+            {"id": item["id"], "title": item["title"], "description": item["description"]}
+            for item in requirements
+        ],
+        "design_ids": [item["id"] for item in designs],
+        "extension_points": sorted({
+            item["extension_point"] for item in designs
+        }),
+        "allowed_paths": sorted({
+            path for item in designs for path in item["allowed_paths"]
+        }),
+        "test_ids": [item["id"] for item in tests],
+        "acceptance": [
+            criterion
+            for item in requirements
+            for criterion in item["acceptance_criteria"]
+        ],
+        "confirmed_decisions": delivery_memory(root)["decisions"],
+    }
+    pack = {
+        "schema_version": "1.0",
+        "mode": "progressive",
+        "role": role,
+        "brief": brief,
+        "resources": _context_resources(root),
+        "instruction": (
+            "先使用 brief；只在实现需要时按 resources 路径读取对应文件。"
+            "tier=1 是功能契约视图，tier=2 是实现或规则候选。"
         ),
-        "repeated_chars": repeated,
+    }
+    directory = root / ".sdlc-pipeline" / "runs" / "context"
+    path = directory / f"{role}-manifest.json"
+    write_json(path, pack)
+    characters = len(json.dumps(pack, ensure_ascii=False))
+    return {
+        "paths": [path.relative_to(root).as_posix()],
+        "parts": 1,
+        "characters": characters,
+        "repeated_chars": 0,
+        "resource_count": len(pack["resources"]),
+        "mode": "progressive",
     }
 
 
 def before_task(root: Path, role: str) -> dict[str, Any]:
-    if role not in {"coder", "executor"}:
+    if role != "coder":
         raise SdlcError(f"不允许的 subagent: {role}")
     from .status import status
 
@@ -196,8 +220,6 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         current["gates"]["init"] and current["gates"]["spec"]
     ):
         raise SdlcError("coder 门禁要求 init 与 spec 均通过")
-    if role == "executor" and not current["gates"]["code"]:
-        raise SdlcError("executor 门禁要求真实 compile/restart/verify 证据")
     if role == "coder":
         require_code_ready(load_current_spec(root))
     verify_extension_points(root)
@@ -231,12 +253,8 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         source="context-pack",
     )
     role_instruction = (
-        "coder 仅可调用 sdlc_lifecycle(action=compile 或 health)；"
-        "禁止调用 execute_test_plan 或 record_test_results，"
-        "测试执行由 executor 和主会话负责。"
-        if role == "coder"
-        else "executor 仅可调用 sdlc_lifecycle(action=execute_test_plan 或 health)；"
-        "禁止调用 record_test_results；测试结果记录由主会话负责。"
+        "coder 只实现当前 Feature Slice 并运行聚焦检查；"
+        "禁止调用完整 compile/restart/health/test，权威交付验证只由 Core 执行。"
     )
     return {
         "ok": True,
@@ -244,7 +262,7 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         "baseline": "reused" if reuse_baseline else "created",
         "context_pack": context,
         "instruction": (
-            "只读取列出的 context pack；超过一包时按模块逐包处理。"
+            "先读取 context manifest 的 brief，再按需读取 resources，禁止预读全部文件。"
             + role_instruction
             + "最终只返回约定 JSON handoff。"
         ),
@@ -254,45 +272,63 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
 def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     value = _extract_json(text)
     validate_schema_instance(root, "handoff.schema.json", value)
-    required = {"design_to_code", "test_to_files", "changed_files", "open_issues"}
-    missing = sorted(required - set(value))
-    if missing:
-        raise SdlcError(f"coder handoff 缺少字段: {missing}")
     before = read_json(root / ".sdlc-pipeline" / "runs" / "coder-before.json")
     diff = validate_diff(root, before.get("worktree", before.get("changed_paths", [])))
-    declared = sorted(set(value["changed_files"]))
     actual = sorted(set(diff["changed_paths"]))
-    missing_actual = sorted(set(actual) - set(declared))
-    invented = sorted(set(declared) - set(actual))
-    if missing_actual or invented:
-        raise SdlcError(
-            f"coder handoff 与 Git diff 不一致；遗漏={missing_actual}，虚构={invented}"
-        )
     spec = load_current_spec(root)
-    d_ids = {item["id"] for item in spec["design"]["items"]}
-    t_ids = {item["id"] for item in spec["test_plan"]["items"]}
-    if set(value["design_to_code"]) != d_ids:
-        raise SdlcError("design_to_code 必须完整覆盖当前 D-id")
-    if set(value["test_to_files"]) != t_ids:
-        raise SdlcError("test_to_files 必须完整覆盖当前 T-id")
-    design_mapping, design_evidence = _validate_mapping_paths(
-        root, value["design_to_code"], "design_to_code"
-    )
-    test_mapping, test_evidence = _validate_mapping_paths(
-        root, value["test_to_files"], "test_to_files"
-    )
-    value["design_to_code"] = design_mapping
-    value["test_to_files"] = test_mapping
-    mapped = set(design_evidence) | set(test_evidence)
-    unmapped = sorted(
+    code_paths = [
         path for path in actual
         if (root / path).is_file()
+        and not path.startswith("tests/")
+        and not path.startswith("test/")
         and not path.startswith("docs/sdlc/")
-        and not path.startswith(".sdlc-pipeline/runs/")
-        and path not in mapped
+        and not path.startswith(".sdlc-pipeline/")
+    ]
+    test_paths = [
+        path for path in actual
+        if (root / path).is_file()
+        and (path.startswith("tests/") or path.startswith("test/"))
+    ]
+    if not test_paths:
+        test_paths = sorted(
+            path.relative_to(root).as_posix()
+            for directory in (root / "tests", root / "test")
+            if directory.is_dir()
+            for path in directory.rglob("*")
+            if path.is_file()
+        )
+    design_mapping = {
+        item["id"]: [
+            path for path in code_paths
+            if any(
+                path == allowed.rstrip("/")
+                or path.startswith(allowed.rstrip("/") + "/")
+                or fnmatch.fnmatch(path, allowed)
+                for allowed in item["allowed_paths"]
+            )
+        ]
+        for item in spec["design"]["items"]
+    }
+    missing_design = sorted(
+        identifier for identifier, paths in design_mapping.items() if not paths
     )
-    if unmapped:
-        raise SdlcError(f"coder 变更没有对应 D/T evidence edge: {unmapped}")
+    if missing_design:
+        raise SdlcError(f"Feature 设计没有代码证据: {missing_design}")
+    test_mapping = {
+        item["id"]: list(test_paths)
+        for item in spec["test_plan"]["items"]
+    }
+    design_mapping, design_evidence = _validate_mapping_paths(
+        root, design_mapping, "design_to_code"
+    )
+    test_evidence: dict[str, Any] = {}
+    if test_paths:
+        test_mapping, test_evidence = _validate_mapping_paths(
+            root, test_mapping, "test_to_files"
+        )
+    value["design_to_code"] = design_mapping
+    value["test_to_files"] = test_mapping
+    value["changed_files"] = actual
     value["mapping_evidence"] = {
         "design": design_evidence,
         "tests": test_evidence,
@@ -303,31 +339,7 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     return {"ok": True, "handoff": value, "diff": diff}
 
 
-def validate_executor_handoff(root: Path, text: str) -> dict[str, Any]:
-    value = _extract_json(text)
-    required = {"results", "open_issues"}
-    validate_schema_instance(root, "handoff.schema.json", value)
-    missing = sorted(required - set(value))
-    if missing:
-        raise SdlcError(f"executor handoff 缺少字段: {missing}")
-    spec = load_current_spec(root)
-    expected = {item["id"] for item in spec["test_plan"]["items"]}
-    actual = {item.get("id") for item in value["results"]}
-    if actual != expected:
-        raise SdlcError(
-            f"executor 结果未完整覆盖 T-id；缺少={sorted(expected-actual)}，"
-            f"未知={sorted(actual-expected)}"
-        )
-    if any(item.get("status") not in {"pass", "fail", "skip"} for item in value["results"]):
-        raise SdlcError("executor status 只能是 pass/fail/skip")
-    value["validated_at"] = utc_now()
-    write_json(root / ".sdlc-pipeline" / "runs" / "executor-handoff.json", value)
-    return {"ok": True, "handoff": value}
-
-
 def after_task(root: Path, role: str, output: str) -> dict[str, Any]:
     if role == "coder":
         return validate_coder_handoff(root, output)
-    if role == "executor":
-        return validate_executor_handoff(root, output)
     raise SdlcError(f"不允许的 subagent: {role}")

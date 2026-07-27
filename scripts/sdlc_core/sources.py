@@ -108,5 +108,14 @@ def source_index(sources: list[dict[str, Any]]) -> dict[str, set[str]]:
     }
 
 
+def load_source(root: Path, source_id: str) -> dict[str, Any]:
+    path = root / ".sdlc-pipeline" / "runs" / "sources" / f"{source_id}.json"
+    source = read_json(path, required=False)
+    if source is None:
+        raise SdlcError(f"未知 SourceEnvelope: {source_id}")
+    validate_source_envelopes(root, [source])
+    return source
+
+
 def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
