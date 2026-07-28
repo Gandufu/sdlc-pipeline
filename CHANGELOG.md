@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.11 - 2026-07-28
+
+- 真实 0.14.10 release smoke 保留并拦截 coder 首次在测试中写入 `as any`、随后重试才通过 code
+  policy 的过程错误。将 TypeScript hard invariant（`: any`、`as any`、`<any>`）提升到 coder 的
+  常驻指令与 context pack，并明确只实现确认的 R/D/T/AC、不得为臆造的无效输入测试使用类型逃逸。
+
 ## 0.14.10 - 2026-07-28
 
 - 真实 0.14.9 release smoke 保留并拦截两项此前最终 code gate 会掩盖的 OpenCode tool error：Spec 将

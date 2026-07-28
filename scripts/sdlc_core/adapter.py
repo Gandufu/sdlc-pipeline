@@ -279,6 +279,8 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         "coder 只实现当前 Feature Slice 和登记的 functional 文件；"
         "code 阶段不运行依赖项目启动的 functional 测试，"
         "禁止调用 compile/restart/health/test；验证统一由 Core 执行。"
+        "TypeScript hard policy 会拒绝 : any、as any、<any>（测试也一样）；"
+        "只写已确认 R/D/T/AC 的类型正确 fixture，不为臆造的无效输入使用类型逃逸。"
     )
     return {
         "ok": True,

@@ -39,6 +39,10 @@ functional T-id 必须实现对应 `tests/functional/*.functional.ts`，但 code
 的 Playwright 测试；项目启动、浏览器功能验证和 cleanup 只属于后续 test 阶段。
 compile/package/lint/typecheck 由 coder handoff 后的 Core code gate 统一执行。
 
+TypeScript hard policy 在 handoff 后立即检查全部改动：严禁写入 `: any`、`as any` 或 `<any>`，测试也不
+例外。只为已确认的 R/D/T/AC 编写类型正确的 fixture 与断言；不要臆造需要把无效运行时输入强转为业务
+类型的测试。确需边界测试时，先在实现中提供明确的 `unknown` 输入边界并完成收窄，不能用类型逃逸绕过。
+
 最终只返回：
 
 ```json

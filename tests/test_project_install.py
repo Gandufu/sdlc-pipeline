@@ -679,6 +679,8 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("output.args.prompt =", plugin)
         self.assertNotIn("output.args.prompt = `${output.args.prompt", plugin)
         self.assertIn("第 4 次工具调用前", coder)
+        self.assertIn("as any", coder)
+        self.assertIn("as any", adapter)
         self.assertNotIn('output.args.command = "实现当前已发布', plugin)
         self.assertIn('"write-check"', plugin)
         cancel_index = plugin.index('await invoke(fallbackRoot, "task-cancel"')
