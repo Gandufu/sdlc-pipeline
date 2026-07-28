@@ -128,6 +128,35 @@ class SchemaV2CandidateTests(unittest.TestCase):
 
         self.assertEqual(document["feature_id"], "F-0001")
 
+    def test_core_allocates_noncanonical_r_d_t_ids(self) -> None:
+        candidate_id = self._candidate_with_requirement(
+            requirement_id="system-information"
+        )
+        design = put_design(
+            self.fixture.root,
+            candidate_id,
+            {**self._design_payload(), "id": "device-adapter"},
+        )
+        verification = put_verification(
+            self.fixture.root,
+            candidate_id,
+            {
+                "id": "browser-device-management",
+                "requirement_ids": ["R-0001"],
+                "design_ids": [design["artifact_id"]],
+                "acceptance_criteria_ids": ["AC-R-0001-01"],
+                "level": "functional",
+                "test_key": "functional",
+                "selector": "tests/functional/device-system-info.functional.ts",
+                "preconditions": "候选应用已启动",
+                "expected": "展示设备系统信息",
+                "mandatory": True,
+            },
+        )
+
+        self.assertEqual(design["artifact_id"], "D-0001")
+        self.assertEqual(verification["artifact_id"], "T-0001")
+
     def test_verification_clears_selector_for_non_selector_test_key(self) -> None:
         lifecycle_path = self.fixture.root / ".sdlc-pipeline/lifecycle.json"
         lifecycle = json.loads(lifecycle_path.read_text(encoding="utf-8"))
@@ -357,6 +386,7 @@ class SchemaV2CandidateTests(unittest.TestCase):
         *,
         acceptance_criterion_id: str | None = None,
         feature_id: str = "F-0001",
+        requirement_id: str | None = None,
     ) -> str:
         created = begin_candidate(
             self.fixture.root,
@@ -370,6 +400,7 @@ class SchemaV2CandidateTests(unittest.TestCase):
             self.fixture.root,
             created["candidate_id"],
             {
+                **({"id": requirement_id} if requirement_id is not None else {}),
                 "feature_id": feature_id,
                 "title": "查看系统信息",
                 "goal": "管理员能够查看设备系统信息",

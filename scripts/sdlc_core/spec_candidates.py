@@ -69,7 +69,7 @@ def put_requirement(
     if not isinstance(requirement, dict):
         raise SdlcError("requirement 必须是对象")
     identifier = str(requirement.get("id", "")).strip()
-    if not identifier:
+    if _REQUIREMENT_PATTERN.fullmatch(identifier) is None:
         identifier = _next_identifier(previous / "requirements", _REQUIREMENT_PATTERN, "R")
     previous_feature_map = read_json(previous / "feature-map.json")
     requested_feature_id = str(requirement.get("feature_id", "")).strip()
@@ -323,7 +323,7 @@ def _normalize_artifact(
     if not isinstance(value, dict):
         raise SdlcError(f"{prefix} artifact 必须是对象")
     identifier = str(value.get("id", "")).strip()
-    if not identifier:
+    if pattern.fullmatch(identifier) is None:
         identifier = _next_identifier(previous / folder, pattern, prefix)
     return {**value, "schema_version": "2.0", "id": identifier}, identifier
 

@@ -39,6 +39,8 @@ checkpoint 的 `source_refs` 使用 `SRC-XXXXXXXXXXXX#anchor` 字符串；若已
 不得以泛称或模块名替代 extension point。
 写 Requirement 时不手填 AC id（Core 固定派生 `AC-R-xxxx-yy`）；写 Verification 时只有 lifecycle
 test key 明示 `allow_selector: true` 才填写 `tests/` 下的相对 selector，否则传 `selector: null`。
+R/D/T 的 `id` 同样由 Core 分配：优先省略它；如历史调用带来非规范语义名，Core 会分配规范 ID，
+不得因格式猜测重试或绕过 Candidate。
 
 只派发 `sdlc-coder`。正常一次；仅当 Failure Router 判定为可修复 code failure 且 Run 未 blocked
 时允许一次聚焦重试。派发时只给出简短任务描述，必须点名先实现的 `R-xxxx`，不展开 spec、规则、源码或测试列表；

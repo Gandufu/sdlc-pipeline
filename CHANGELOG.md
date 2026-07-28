@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.16 - 2026-07-28
+
+- 修复 Schema v2 分片的可选 `R/D/T id` 仍会把 Agent 的语义名直接送入正则校验的问题。
+  非规范或遗漏的 ID 现在统一由 Core 分配规范序号，保留用户/模型无需为 ID 格式重试的契约。
+
 ## 0.14.15 - 2026-07-28
 
 - 修复 CLI `source-query` 已在 Core dispatch 支持、却遗漏 argparse operation 白名单的问题；
