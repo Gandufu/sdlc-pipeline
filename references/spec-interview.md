@@ -1,4 +1,4 @@
-# Feature Contract 澄清规则
+# Schema v2 Spec Candidate 澄清规则
 
 先读取项目、scaffold、active policy、lifecycle 与已摄取来源；能从事实得到的答案不询问用户。
 
@@ -11,18 +11,25 @@
 一次只问一个问题，通常在三题内完成。若仍有会改变范围、验收或公开接口的阻塞决策，可以继续，
 但必须向用户说明影响。每次回答后保存 checkpoint。非阻塞未知项写入 assumptions 或 risks。
 
-候选 Feature Contract 以一个可交付功能为单位，必须简明包含：目标、角色、范围、非范围、
-领域数据、简洁主流程、必要异常流程、AC、模块、接口字段、data contract、extension point
-和 AC 到 unit/integration 逻辑测试键的验证映射。功能和验收 ID 使用 `F-xxxx`、`AC-xxxx`。
+大需求先建立 Feature Map，再拆成可独立验收的 Requirement。每个 R/D/T 作为独立 artifact
+立即保存，不在消息中组装单体 JSON。Requirement 包含目标、角色、范围、非范围、主流程、
+异常流程和带 source refs 的 AC；Design 只描述 module/seam/interface/data contract 与
+extension point，不预测实际代码文件；Verification 建立 AC 到 lifecycle 逻辑测试键 `test_key`
+（如 `unit`、`integration`、`functional`）的映射，不能填写 `pnpm test` 等 shell command。
+`R/D/T/AC` ID 由 Core 分配或校验。
 正式文档使用项目配置语言（默认中文），代码标识、协议字段和原文保持原样。
 
 推荐方案与正式发布是两个独立动作：
 
 1. 用户说“采用推荐”时，只把选项和理由保存到 checkpoint，继续生成候选；
-2. 展示完整候选及其 source refs、范围、AC、接口与验证映射；
-3. 只有用户明确说“确认发布”时，才把 checkpoint 标为 confirmed 并调用 publish。
+2. 调用 `sdlc_validate_candidate`，展示 preview 路径、revision、content hash、source refs、
+   范围、AC、接口与验证映射；
+3. 只有用户明确说“确认发布”时，才调用
+   `sdlc_approve_candidate(candidate_id, content_hash, true)`。
 
-不得把“采用推荐”“继续”“没问题”等局部答复推断为发布授权。发布前读取
-`.sdlc-pipeline/schemas/feature-contract.schema.json`，然后只调用一次
-`sdlc_publish_contract`。Core 负责 Schema 校验、来源 anchor 校验和
-requirements/design/test-plan 三视图原子投影。
+不得把“采用推荐”“继续”“没问题”等局部答复推断为发布授权。不得让用户或模型在批准时
+重发 candidate 正文。Core 负责分片 Schema、跨引用、来源 anchor、revision/hash 校验，
+并在批准后原子发布只包含分片 artifact 的 v2 bundle。
+
+中断恢复时读取 `sdlc_status.spec_candidate`：draft 从当前 revision 继续 put；ready 直接展示
+原 preview/hash 等待确认；published 不重复生成。

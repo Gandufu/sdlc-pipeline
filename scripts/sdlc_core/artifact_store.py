@@ -54,7 +54,7 @@ def publish_bundle(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(content)
             manifest = {
-                "schema_version": "1.0",
+                "schema_version": "2.0",
                 "bundle_id": bundle_id,
                 "kind": kind,
                 "created_at": utc_now(),
@@ -74,7 +74,7 @@ def publish_bundle(
                 shutil.rmtree(temporary, ignore_errors=True)
     manifest = _verify_bundle(final, expected_kind=kind)
     pointer = {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "kind": kind,
         "bundle_id": bundle_id,
         "path": f"docs/sdlc/bundles/{bundle_id}",

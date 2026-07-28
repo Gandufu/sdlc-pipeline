@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import load_current_spec
+from .artifacts import current_spec_hashes, load_current_spec
 from .common import (
     SdlcError,
     atomic_write,
@@ -17,7 +17,8 @@ from .common import (
 )
 from .lifecycle import load_contract
 from .runs import token_summary
-from .trace import trace_matrix, verify_scaffold
+from .trace import verify_scaffold
+from .delivery_trace import build_delivery_trace
 
 from .schema_validation import validate_schema_instance
 
@@ -102,16 +103,18 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
         root / ".sdlc-pipeline" / "runs" / "coder-handoff.json",
         required=False,
     ) or {}
-    trace = trace_matrix(root, {
-        **handoff.get("design_to_code", {}),
-        "tests": handoff.get("test_to_files", {}),
-    })
+    trace = build_delivery_trace(
+        root,
+        changed_files=handoff.get("changed_files", []),
+        test_results_path=candidate["test_results"],
+    )
     if not trace["ok"]:
-        raise SdlcError("R→D→C→T 追溯不完整，拒绝固化版本")
+        raise SdlcError(
+            f"R→D→C→T 追溯不完整，拒绝固化版本: {trace.get('incomplete', [])}"
+        )
     scaffold = verify_scaffold(root)
     if not scaffold["ok"]:
         raise SdlcError(f"scaffold 漂移: {scaffold['drift']}")
-    current = root / "docs" / "sdlc" / "current"
     parent = parent_manifest(root)
     initial_sha = parent.get("final_git_sha") if parent else git(root, "rev-parse", "HEAD")
     contract = load_contract(root)
@@ -120,7 +123,7 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
         item["name"]: item for item in init_report.get("tools", {}).get("tools", [])
     }
     return {
-        "schema_version": "1.0",
+        "schema_version": "2.0",
         "version": version,
         "status": "candidate",
         "summary": summary,
@@ -141,9 +144,7 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
             for item in contract["tools"]
         },
         "artifact_hashes": {
-            "requirements": sha256_file(current / "requirements.json"),
-            "design": sha256_file(current / "design.json"),
-            "test_plan": sha256_file(current / "test-plan.json"),
+            **current_spec_hashes(root),
             "test_results": sha256_file(results_path),
         },
         "ids": {

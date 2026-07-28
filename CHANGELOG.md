@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.14.0 - 2026-07-28
+
+- 将单体 Feature Contract 主流程升级为 Schema v2 Candidate：Feature Map、Requirement、
+  Design、Verification 分片保存，每次修改生成不可变 revision。
+- 增加受控项目内相对 `$ref`、跨 artifact R/D/T/AC 校验、preview 与稳定 content hash；
+  网络、绝对路径和越出 schema root 的引用全部拒绝。
+- OpenCode 改用结构化 begin/put/validate/approve 工具；审批只提交 candidate ID、hash 和
+  `confirmed`，不再重新传输完整 JSON。
+- 批准后原子发布只包含分片 artifact 的 v2 bundle 和派生导航 index；status 支持从磁盘
+  恢复 draft/ready/published Candidate。
+- 实际代码映射后移到 code/test 之后，由 Core 根据 Git diff、extension point 和测试结果
+  生成带 `direct/scoped/shared` 精度的 Delivery Trace。
+- spec bundle pointer/manifest 与 version manifest 升级为 `schema_version: 2.0`。
+- 安装器递归校验全部 Schema 和本地引用；补充 v2 回归、ADR 与社区调研文档。
+- 删除 Feature Contract schema/module、`sdlc_publish_contract` 和聚合
+  requirements/design/test-plan 产物；本版本不提供 Spec v1 兼容路径。
+
 ## 0.13.0 - 2026-07-28
 
 - coder 固定低温度与 8 个 agent steps，deadline 收紧为 5 分钟；task hook 覆盖为唯一最小

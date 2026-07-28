@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/v2/source-ref.schema.json",
+  "$defs": {
+    "source_ref": {
+      "type": "object",
+      "required": ["source_id", "anchor"],
+      "properties": {
+        "source_id": {"type": "string", "pattern": "^SRC-[A-F0-9]{12}$"},
+        "anchor": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "source_refs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/source_ref"}
+    }
+  }
+}

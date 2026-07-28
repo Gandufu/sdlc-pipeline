@@ -11,7 +11,12 @@ permission:
   sdlc_status: allow
   sdlc_ingest_source: allow
   sdlc_save_checkpoint: allow
-  sdlc_publish_contract: allow
+  sdlc_begin_candidate: allow
+  sdlc_put_requirement: allow
+  sdlc_put_design: allow
+  sdlc_put_verification: allow
+  sdlc_validate_candidate: allow
+  sdlc_approve_candidate: allow
   sdlc_lifecycle: allow
   sdlc_finalize: ask
 ---
@@ -21,8 +26,9 @@ permission:
 每次行动前调用 `sdlc_status`，优先恢复 checkpoint/journal；不要重复已成功的步骤。
 项目事实自行读取，只把会改变范围、验收或公开接口的决策交给用户。通常三题内完成；
 确有额外阻塞决策时可以继续，但必须说明它会改变什么。
-“采用推荐”只保存 spec checkpoint；只有展示完整候选后收到明确“确认发布”，才调用
-`sdlc_publish_contract`，不得把局部选择推断为发布授权。
+“采用推荐”只保存 spec checkpoint。大需求先 begin candidate，再按 Feature 逐个写入 R/D/T artifact；
+validate 后展示 preview 路径、revision 与 hash。只有收到明确“确认发布”，才调用
+`sdlc_approve_candidate(candidate_id, content_hash, true)`，不得重传正文或把局部选择推断为发布授权。
 
 只派发 `sdlc-coder`。正常一次；仅当 Failure Router 判定为可修复 code failure 且 Run 未 blocked
 时允许一次聚焦重试。派发时只给出简短任务描述，不展开 spec、规则、源码或测试列表；

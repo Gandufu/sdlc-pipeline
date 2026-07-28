@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import re
 from pathlib import Path
 from typing import Any
@@ -65,7 +66,132 @@ def validate_schema_instance(
     schema = read_json(path)
     if not isinstance(schema, dict):
         raise SdlcError(f"JSON Schema 必须是对象: {path}")
-    _validate(instance, schema, schema, "$")
+    expanded = _expand_local_refs(
+        schema,
+        document_path=path.resolve(),
+        schemas_root=schema_root(project_root).resolve(),
+        documents={path.resolve(): schema},
+        stack=(),
+    )
+    _validate(instance, expanded, expanded, "$")
+
+
+def check_schema_documents(project_root: Path) -> list[str]:
+    """Parse every installed schema and resolve all local references without I/O outside it."""
+    root = schema_root(project_root).resolve()
+    checked: list[str] = []
+    documents: dict[Path, dict[str, Any]] = {}
+    for path in sorted(root.rglob("*.schema.json")):
+        schema = read_json(path)
+        if not isinstance(schema, dict):
+            raise SdlcError(f"JSON Schema 必须是对象: {path}")
+        documents[path.resolve()] = schema
+    for path, schema in documents.items():
+        _expand_local_refs(
+            schema,
+            document_path=path,
+            schemas_root=root,
+            documents=documents,
+            stack=(),
+        )
+        checked.append(path.relative_to(root).as_posix())
+    return checked
+
+
+def _expand_local_refs(
+    node: Any,
+    *,
+    document_path: Path,
+    schemas_root: Path,
+    documents: dict[Path, dict[str, Any]],
+    stack: tuple[tuple[Path, str], ...],
+) -> Any:
+    if isinstance(node, list):
+        return [
+            _expand_local_refs(
+                item,
+                document_path=document_path,
+                schemas_root=schemas_root,
+                documents=documents,
+                stack=stack,
+            )
+            for item in node
+        ]
+    if not isinstance(node, dict):
+        return node
+    reference = node.get("$ref")
+    if reference is not None:
+        if not isinstance(reference, str):
+            raise SdlcError(f"JSON Schema $ref 必须是字符串: {reference!r}")
+        file_part, marker, fragment = reference.partition("#")
+        if file_part:
+            if "://" in file_part or Path(file_part).is_absolute():
+                raise SdlcError(f"禁止网络或绝对路径 JSON Schema $ref: {reference!r}")
+            target_path = (document_path.parent / file_part).resolve()
+            try:
+                target_path.relative_to(schemas_root)
+            except ValueError as exc:
+                raise SdlcError(f"JSON Schema $ref 越出 schemas 根目录: {reference!r}") from exc
+            target_document = documents.get(target_path)
+            if target_document is None:
+                target_document = read_json(target_path)
+                if not isinstance(target_document, dict):
+                    raise SdlcError(f"JSON Schema 必须是对象: {target_path}")
+                documents[target_path] = target_document
+        else:
+            target_path = document_path
+            target_document = documents[document_path]
+        pointer = f"#{fragment}" if marker else "#"
+        key = (target_path, pointer)
+        if key in stack:
+            raise SdlcError(f"JSON Schema $ref 存在循环: {reference!r}")
+        target = _resolve_pointer(target_document, pointer)
+        expanded = _expand_local_refs(
+            copy.deepcopy(target),
+            document_path=target_path,
+            schemas_root=schemas_root,
+            documents=documents,
+            stack=(*stack, key),
+        )
+        siblings = {name: value for name, value in node.items() if name != "$ref"}
+        if siblings:
+            return {
+                "allOf": [
+                    expanded,
+                    _expand_local_refs(
+                        siblings,
+                        document_path=document_path,
+                        schemas_root=schemas_root,
+                        documents=documents,
+                        stack=stack,
+                    ),
+                ]
+            }
+        return expanded
+    return {
+        name: _expand_local_refs(
+            value,
+            document_path=document_path,
+            schemas_root=schemas_root,
+            documents=documents,
+            stack=stack,
+        )
+        for name, value in node.items()
+    }
+
+
+def _resolve_pointer(document: dict[str, Any], pointer: str) -> Any:
+    if pointer == "#":
+        return document
+    if not pointer.startswith("#/"):
+        raise SdlcError(f"只允许 JSON Pointer fragment: {pointer!r}")
+    value: Any = document
+    for raw in pointer[2:].split("/"):
+        key = raw.replace("~1", "/").replace("~0", "~")
+        if not isinstance(value, dict) or key not in value:
+            raise SdlcError(f"JSON Schema $ref 不存在: {pointer}")
+        value = value[key]
+    return value
 
 
 def _validate(instance: Any, schema: Any, root: dict[str, Any], location: str) -> None:

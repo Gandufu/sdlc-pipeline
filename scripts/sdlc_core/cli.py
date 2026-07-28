@@ -7,8 +7,6 @@ from pathlib import Path
 from typing import Any
 
 from .adapter import after_task, before_task, validate_write_path
-from .artifacts import publish_spec
-from .feature_contracts import publish_feature_contract
 from .bootstrap import bootstrap
 from .common import SdlcError, project_root, read_json
 from .lifecycle import (
@@ -39,6 +37,14 @@ from .journal import (
 from .status import status
 from .versions import finalize
 from .sources import ingest_source, query_source
+from .spec_candidates import (
+    begin_candidate,
+    put_design,
+    put_requirement,
+    put_verification,
+    validate_candidate,
+)
+from .spec_publisher import approve_and_promote
 
 
 def _input() -> dict[str, Any]:
@@ -56,12 +62,36 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
         return status(root)
     if operation == "source-query":
         return query_source(root, payload["source_id"], payload["anchor"])
+    if operation == "spec-candidate":
+        action = payload.get("action")
+        if action == "begin":
+            return begin_candidate(
+                root,
+                title=payload["title"],
+                source_refs=payload["source_refs"],
+            )
+        if action == "put-requirement":
+            return put_requirement(
+                root, payload["candidate_id"], payload["requirement"]
+            )
+        if action == "put-design":
+            return put_design(root, payload["candidate_id"], payload["design"])
+        if action == "put-verification":
+            return put_verification(
+                root, payload["candidate_id"], payload["verification"]
+            )
+        if action == "validate":
+            return validate_candidate(root, payload["candidate_id"])
+        if action == "approve":
+            return approve_and_promote(
+                root,
+                candidate_id=payload["candidate_id"],
+                content_hash=payload["content_hash"],
+                confirmed=bool(payload.get("confirmed")),
+            )
+        raise SdlcError(f"不支持的 spec-candidate action: {action}")
     if operation == "publish":
         kind = payload.get("kind")
-        if kind == "spec":
-            return publish_spec(root, payload["payload"])
-        if kind == "contract":
-            return publish_feature_contract(root, payload["payload"])
         if kind == "tokens":
             return record_tokens(root, **payload["payload"])
         if kind == "checkpoint":
@@ -190,6 +220,8 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
 
 
 def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
+    if operation == "spec-candidate":
+        return "spec", str(payload.get("action", "candidate"))
     if operation == "publish":
         return "spec", str(payload.get("kind", "publish"))
     if operation == "lifecycle":
@@ -281,7 +313,10 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         finish_attempt(root, attempt, state="failed", result=result, error=error)
         return result
     finish_attempt(root, attempt, state="succeeded", result=result)
-    if operation == "publish" and effective_payload.get("kind") in {"spec", "contract"}:
+    if (
+        operation == "spec-candidate"
+        and effective_payload.get("action") == "approve"
+    ):
         record_spec_checkpoint(root, {"state": "published"})
     if operation == "finalize":
         close_run(root, "succeeded")
@@ -299,6 +334,7 @@ def main() -> int:
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
             "task-heartbeat", "write-check", "path-check", "finalize",
+            "spec-candidate",
         ),
     )
     parser.add_argument("--root", help="项目根目录")

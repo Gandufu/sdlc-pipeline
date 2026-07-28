@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.13.0`。
+OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.14.0`。
 
 它面向固定脚手架和给定需求完成一个可交付功能：需求澄清、设计、编码、确定性验证和版本固化。
 Python Core 保存机器真值与运行证据，OpenCode plugin 只负责薄适配和最小上下文编排。
@@ -37,8 +37,10 @@ spec
   → 摄取 SourceEnvelope
   → 最多三个阻塞问题
   → “采用推荐”只保存 checkpoint
-  → 用户明确“确认发布”单功能 Feature Contract
-  → Core 原子生成 requirement/design/test-plan 三个视图
+  → begin Candidate，按 Feature 逐个写入 Requirement/Design/Verification
+  → validate 生成不可变 revision、preview 与 content hash
+  → 用户明确“确认发布”后只提交 candidate ID/hash
+  → Core 原子发布只包含分片 artifact 的 v2 bundle
 
 code
   → 派发唯一 sdlc-coder
@@ -47,12 +49,13 @@ code
   → 实现业务代码与 functional 文件，但不启动项目、不运行浏览器
   → Core 校验 Git diff 与允许路径
   → Core 执行 compile/package/lint/typecheck code gate
-  → Core 自动生成 design-to-code/test-to-files evidence
+  → 不在 spec 中预测代码文件
 
 test
   → 主会话只调用一次 verify_delivery
   → 校验 code 阶段 compile/package/lint/typecheck evidence
   → start/readiness/headless functional/cleanup
+  → Core 根据实际 Git diff、extension point 和测试结果生成 Delivery Trace
   → 用户确认后 finalize
 ```
 
@@ -72,25 +75,26 @@ Hook 保持薄且事件化：task dispatch、首次写入、deadline 和完成�
 主 agent 生成的长 prompt。Core 只负责 Schema、路径、journal、进程、命令结果和证据绑定等
 确定性事实。
 
-## Feature Contract
+## Schema v2 Candidate
 
-模型只生成 `schemas/feature-contract.schema.json` 约束的单功能对象，内容包括：
+正式契约不再是一个容易拼错的超大 JSON。Candidate 位于
+`.sdlc-pipeline/runs/spec-candidates/SC-xxxxxx/`，每次 put 只新增 immutable revision：
 
-- `F-xxxx` 功能目标、角色、范围和非范围；
-- 来源 `source_id + anchor`；
-- 领域数据模型和字段；
-- 简洁主流程及必要异常流程；
-- `AC-xxxx` 验收条件；
-- 模块、接口、data contract、真实 scaffold extension point；
-- 每个 AC 对应一个 functional T-id、受控测试逻辑键和功能文件 selector。
+- Feature Map 只保存导航、依赖和 R-id；
+- Requirement 保存范围、流程、AC 及精确 `source_id + anchor`；
+- Design 保存 module/seam/interface/data contract 和 extension point，不保存实际 code path；
+- Verification 保存 R/D/AC 到 lifecycle test key/selector 的映射。
 
-`lint` 和 `static_analysis` 属于 code policy，不伪装成功能需求测试。Core 将 Feature Contract
-投影为兼容的 requirements、design、test-plan JSON/Markdown；这些文件不是模型重复编写的三份输入。
+ID 由 Core 分配。ready 状态由跨引用和来源校验推导；审批只接受用户看到的
+`candidate_id + content_hash + confirmed`。`lint` 和 `static_analysis` 仍属于 code policy，
+不伪装成功能需求测试。
 
 ## 状态、恢复与追溯
 
 `.sdlc-pipeline/runs/journal/` 记录 run/phase/step/attempt/event，包含进程身份、失败分类和输入指纹。
 Spec 问答检查点保存 source refs、已确认事实、假设和风险；中断后从最后检查点继续。
+checkpoint 不复制 Candidate 正文；`sdlc_status.spec_candidate` 从 revision store 重建
+draft/ready/published 状态、计数、preview 路径和 hash。
 项目外文本来源只有显式 `allow_external_copy=true` 才会复制到
 `.sdlc-pipeline/runs/source-assets/`；副本与 SourceEnvelope 同时绑定 SHA-256。默认单文件上限
 10 MiB，目录和未经 extractor 处理的二进制来源仍拒绝。
@@ -107,10 +111,14 @@ opencode run --format json "/sdlc-code"
 正式机器产物包括：
 
 ```text
-docs/sdlc/bundles/<bundle>/feature-contract.json
-docs/sdlc/current/requirements.json
-docs/sdlc/current/design.json
-docs/sdlc/current/test-plan.json
+docs/sdlc/bundles/<bundle>/feature-map.json
+docs/sdlc/bundles/<bundle>/requirements/R-xxxx.json
+docs/sdlc/bundles/<bundle>/designs/D-xxxx.json
+docs/sdlc/bundles/<bundle>/verification/T-xxxx.json
+docs/sdlc/current/feature-map.json
+docs/sdlc/current/requirements/R-xxxx.json
+docs/sdlc/current/designs/D-xxxx.json
+docs/sdlc/current/verification/T-xxxx.json
 docs/sdlc/test-results/Vxxxx.json
 docs/sdlc/versions/Vxxxx/manifest.json
 ```
@@ -120,13 +128,18 @@ JSON Schema validator；Git 工作树、lifecycle、scaffold、artifact 与 PID 
 
 ## 工具边界
 
-OpenCode 暴露七个窄工具：
+OpenCode 暴露意图级窄工具：
 
 - `sdlc_status`
 - `sdlc_ingest_source`
 - `sdlc_query_source`
 - `sdlc_save_checkpoint`
-- `sdlc_publish_contract`
+- `sdlc_begin_candidate`
+- `sdlc_put_requirement`
+- `sdlc_put_design`
+- `sdlc_put_verification`
+- `sdlc_validate_candidate`
+- `sdlc_approve_candidate`
 - `sdlc_lifecycle`（仅 `init`、`verify_delivery`）
 - `sdlc_finalize`
 
@@ -150,7 +163,7 @@ protected paths、allowed paths 与 extension points。
 多个 AC/T-id 引用相同 `(test key, selector)` 时，Core 只执行一次测试文件，再把同一结果映射回
 各验收项，避免重复启动浏览器或重复运行相同功能流程。
 常见 `vitest.config.*`、`eslint.config.*` 作为预登记 tooling paths，可记录为非业务变更，
-但不会被错误计入 design-to-code 功能证据。
+但不会被错误计入 v2 Delivery Trace 的业务代码证据。
 
 Electron profile 是当前参考实现；状态机和证据契约稳定后再增加 Spring、Node Web、Python API
 profile，避免模板数量先于 Core 稳定性扩张。
@@ -164,8 +177,9 @@ node --check .opencode/plugins/sdlc-pipeline.js
 git diff --check
 ```
 
-测试覆盖 Schema、Feature Contract 投影、原子 bundle、Git 路径映射、PID identity、Run Journal
-恢复和熔断、权限矩阵、安装升级清理以及完整 init → spec → code → verify → finalize Core 闭环。
+测试覆盖 Schema v2 Candidate revision、按 hash 审批、原子 bundle、post-code
+Delivery Trace、PID identity、Run Journal 恢复和熔断、权限矩阵、安装升级清理以及完整
+init → spec → code → verify → finalize Core 闭环。
 
 ## License
 

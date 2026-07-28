@@ -171,6 +171,31 @@ function requireAgent(context, allowed, toolName) {
 export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
   const { tool } = await import("@opencode-ai/plugin")
   const fallbackRoot = resolveProjectRoot({ directory, worktree })
+  const sourceRef = tool.schema.object({
+    source_id: tool.schema.string(),
+    anchor: tool.schema.string(),
+  })
+  const moduleSpec = tool.schema.object({
+    name: tool.schema.string(),
+    responsibility: tool.schema.string(),
+    seam: tool.schema.string(),
+  })
+  const interfaceSpec = tool.schema.object({
+    name: tool.schema.string(),
+    input: tool.schema.string(),
+    output: tool.schema.string(),
+    errors: tool.schema.array(tool.schema.string()),
+  })
+  const dataField = tool.schema.object({
+    name: tool.schema.string(),
+    type: tool.schema.string(),
+    required: tool.schema.boolean(),
+    source_ref: tool.schema.string().optional(),
+  })
+  const dataContract = tool.schema.object({
+    name: tool.schema.string(),
+    fields: tool.schema.array(dataField),
+  })
   return {
     tool: {
       sdlc_status: tool({
@@ -223,6 +248,132 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           ))
         },
       }),
+      sdlc_begin_candidate: tool({
+        description: "开始一个 Schema v2 Spec Candidate；正文后续按小 artifact 分片写入。",
+        args: {
+          title: tool.schema.string(),
+          source_refs: tool.schema.array(sourceRef),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_begin_candidate")
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-candidate", {
+            action: "begin",
+            ...args,
+          }, { signal: context.abort }))
+        },
+      }),
+      sdlc_put_requirement: tool({
+        description: "写入一个独立 Requirement artifact；ID 缺省时由 Core 分配。",
+        args: {
+          candidate_id: tool.schema.string(),
+          requirement: tool.schema.object({
+            id: tool.schema.string().optional(),
+            feature_id: tool.schema.string(),
+            title: tool.schema.string(),
+            goal: tool.schema.string(),
+            actor: tool.schema.string(),
+            scope: tool.schema.array(tool.schema.string()),
+            non_goals: tool.schema.array(tool.schema.string()),
+            source_refs: tool.schema.array(sourceRef),
+            main_flow: tool.schema.array(tool.schema.string()),
+            alternate_flows: tool.schema.array(tool.schema.object({
+              name: tool.schema.string(),
+              steps: tool.schema.array(tool.schema.string()),
+            })),
+            acceptance_criteria: tool.schema.array(tool.schema.object({
+              id: tool.schema.string().optional(),
+              given: tool.schema.string(),
+              when: tool.schema.string(),
+              then: tool.schema.string(),
+              source_refs: tool.schema.array(sourceRef),
+            })),
+            supersedes: tool.schema.string().optional(),
+          }),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_put_requirement")
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-candidate", {
+            action: "put-requirement",
+            ...args,
+          }, { signal: context.abort }))
+        },
+      }),
+      sdlc_put_design: tool({
+        description: "写入一个 Design artifact；只声明 module seam 和 extension point，不预测代码文件。",
+        args: {
+          candidate_id: tool.schema.string(),
+          design: tool.schema.object({
+            id: tool.schema.string().optional(),
+            title: tool.schema.string(),
+            requirement_ids: tool.schema.array(tool.schema.string()),
+            modules: tool.schema.array(moduleSpec),
+            interfaces: tool.schema.array(interfaceSpec),
+            data_contracts: tool.schema.array(dataContract),
+            extension_points: tool.schema.array(tool.schema.string()),
+            decisions: tool.schema.array(tool.schema.string()),
+          }),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_put_design")
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-candidate", {
+            action: "put-design",
+            ...args,
+          }, { signal: context.abort }))
+        },
+      }),
+      sdlc_put_verification: tool({
+        description: "写入一个 Verification artifact，并用 R/D/AC ID 建立验收关系。",
+        args: {
+          candidate_id: tool.schema.string(),
+          verification: tool.schema.object({
+            id: tool.schema.string().optional(),
+            requirement_ids: tool.schema.array(tool.schema.string()),
+            design_ids: tool.schema.array(tool.schema.string()),
+            acceptance_criteria_ids: tool.schema.array(tool.schema.string()),
+            level: tool.schema.enum(["unit", "integration", "functional"]),
+            test_key: tool.schema.string(),
+            selector: tool.schema.string(),
+            preconditions: tool.schema.string(),
+            expected: tool.schema.string(),
+            mandatory: tool.schema.boolean(),
+          }),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_put_verification")
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-candidate", {
+            action: "put-verification",
+            ...args,
+          }, { signal: context.abort }))
+        },
+      }),
+      sdlc_validate_candidate: tool({
+        description: "确定性校验当前 Candidate，生成 preview；通过后返回冻结 revision/hash。",
+        args: {
+          candidate_id: tool.schema.string(),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_validate_candidate")
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-candidate", {
+            action: "validate",
+            ...args,
+          }, { signal: context.abort }))
+        },
+      }),
+      sdlc_approve_candidate: tool({
+        description: "批准用户看到的精确 Candidate；只传 ID/hash/confirmed，不重传契约正文。",
+        args: {
+          candidate_id: tool.schema.string(),
+          content_hash: tool.schema.string(),
+          confirmed: tool.schema.boolean(),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_approve_candidate")
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-candidate", {
+            action: "approve",
+            ...args,
+          }, { signal: context.abort }))
+        },
+      }),
       sdlc_save_checkpoint: tool({
         description: "保存 spec 恢复点；结构见 spec-checkpoint.schema.json。",
         args: {
@@ -232,19 +383,6 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           requireAgent(context, ["sdlc-main"], "sdlc_save_checkpoint")
           return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "publish", {
             kind: "checkpoint",
-            payload: JSON.parse(args.payload),
-          }, { signal: context.abort }))
-        },
-      }),
-      sdlc_publish_contract: tool({
-        description: "发布已确认的 Feature Contract；结构见 feature-contract.schema.json。",
-        args: {
-          payload: tool.schema.string().describe("Feature Contract JSON object encoded as a string."),
-        },
-        async execute(args, context) {
-          requireAgent(context, ["sdlc-main"], "sdlc_publish_contract")
-          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "publish", {
-            kind: "contract",
             payload: JSON.parse(args.payload),
           }, { signal: context.abort }))
         },
@@ -342,7 +480,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       deadline.unref()
       coderDeadlines.set(input.callID, deadline)
       const manifest = result.context_pack.paths[0]
-      output.args.command = "实现当前已发布的 Feature Contract"
+      output.args.command = "实现当前已发布的 Schema v2 Spec bundle"
       output.args.prompt = `[SDLC context pack] ${manifest}\n`
         + `${result.instruction}\n`
         + `Coder deadline: ${CODER_DEADLINE_SECONDS}s。`

@@ -15,9 +15,8 @@ sys.path.insert(0, str(REPO / "scripts"))
 class LightweightDeliveryContractTests(unittest.TestCase):
     def test_context_pack_is_a_progressive_resource_manifest(self) -> None:
         from sdlc_core.adapter import before_task
-        from sdlc_core.artifacts import publish_spec
         from sdlc_core.lifecycle import init_project
-        from tests.test_pipeline import ProjectFixture, spec_payload
+        from tests.test_pipeline import ProjectFixture, publish_spec, spec_payload
 
         fixture = ProjectFixture()
         try:
@@ -57,10 +56,9 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             fixture.close()
 
     def test_focused_check_runs_only_feature_test_keys(self) -> None:
-        from sdlc_core.artifacts import publish_spec
         from sdlc_core.common import SdlcError
         from sdlc_core.lifecycle import init_project, run_focused_checks
-        from tests.test_pipeline import ProjectFixture, spec_payload
+        from tests.test_pipeline import ProjectFixture, publish_spec, spec_payload
 
         fixture = ProjectFixture()
         try:
@@ -81,7 +79,7 @@ class LightweightDeliveryContractTests(unittest.TestCase):
                 repeated["results"][0]["log"],
                 result["results"][0]["log"],
             )
-            with self.assertRaisesRegex(SdlcError, "Feature Contract"):
+            with self.assertRaisesRegex(SdlcError, "当前已发布 Spec"):
                 run_focused_checks(fixture.root, ["T-9999"])
         finally:
             fixture.close()
@@ -89,9 +87,8 @@ class LightweightDeliveryContractTests(unittest.TestCase):
     def test_focused_check_executes_shared_selector_once(self) -> None:
         from copy import deepcopy
 
-        from sdlc_core.artifacts import publish_spec
         from sdlc_core.lifecycle import init_project, run_focused_checks
-        from tests.test_pipeline import ProjectFixture, spec_payload
+        from tests.test_pipeline import ProjectFixture, publish_spec, spec_payload
 
         fixture = ProjectFixture()
         try:
@@ -125,9 +122,8 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             fixture.close()
 
     def test_delivery_memory_is_derived_and_hash_invalidated(self) -> None:
-        from sdlc_core.artifacts import publish_spec
         from sdlc_core.memory import delivery_memory
-        from tests.test_pipeline import ProjectFixture, spec_payload
+        from tests.test_pipeline import ProjectFixture, publish_spec, spec_payload
 
         fixture = ProjectFixture()
         try:
@@ -178,103 +174,38 @@ class LightweightDeliveryContractTests(unittest.TestCase):
 
             self.assertEqual(changed_paths(root), ["src/main/ipc.ts"])
 
-    def test_feature_contract_is_the_single_model_authored_spec(self) -> None:
-        schema = json.loads(
-            (REPO / "schemas/feature-contract.schema.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        required = set(schema["required"])
-        self.assertTrue({
-            "feature", "design", "verification", "spec_confirmed"
-        }.issubset(required))
-        feature_required = set(schema["properties"]["feature"]["required"])
-        self.assertTrue({
-            "id", "goal", "actor", "scope", "non_goals", "domain_data",
-            "main_flow", "alternate_flows", "acceptance_criteria",
-        }.issubset(feature_required))
+    def test_schema_v2_is_the_only_spec_schema(self) -> None:
+        names = {
+            path.relative_to(REPO / "schemas").as_posix()
+            for path in (REPO / "schemas").rglob("*.schema.json")
+        }
+        self.assertIn("v2/requirement.schema.json", names)
+        self.assertIn("v2/design.schema.json", names)
+        self.assertIn("v2/verification.schema.json", names)
+        self.assertNotIn("feature-contract.schema.json", names)
+        self.assertNotIn("spec.schema.json", names)
 
-    def test_feature_contract_publishes_one_atomic_three_view_bundle(self) -> None:
-        from sdlc_core.feature_contracts import publish_feature_contract
-        from sdlc_core.sources import ingest_source
-        from tests.test_pipeline import ProjectFixture
+    def test_v2_candidate_publishes_one_atomic_fragment_bundle(self) -> None:
+        from tests.test_pipeline import ProjectFixture, publish_spec, spec_payload
 
         fixture = ProjectFixture()
         try:
-            source = ingest_source(
-                fixture.root,
-                {"kind": "inline", "content": "设备管理展示系统信息"},
-            )["envelope"]
-            contract = {
-                "schema_version": "1.0",
-                "spec_confirmed": True,
-                "feature": {
-                    "id": "F-0001",
-                    "title": "设备系统信息",
-                    "goal": "展示设备的系统信息",
-                    "actor": "设备管理员",
-                    "source_refs": [{
-                        "source_id": source["source_id"],
-                        "anchor": "text:1",
-                    }],
-                    "scope": ["读取并展示系统信息"],
-                    "non_goals": ["修改设备配置"],
-                    "domain_data": [{
-                        "name": "SystemInfo",
-                        "description": "设备系统信息快照",
-                    }],
-                    "main_flow": ["打开设备管理", "读取系统信息", "展示结果"],
-                    "alternate_flows": [{
-                        "name": "读取失败",
-                        "steps": ["显示可定位错误"],
-                    }],
-                    "acceptance_criteria": [{
-                        "id": "AC-0001",
-                        "given": "设备可访问",
-                        "when": "打开系统信息",
-                        "then": "展示系统信息字段",
-                    }],
-                },
-                "design": {
-                    "modules": [{
-                        "name": "SystemInfoView",
-                        "responsibility": "读取并展示系统信息",
-                        "seam": "feature extension",
-                    }],
-                    "interfaces": [{
-                        "name": "getSystemInfo",
-                        "input": "deviceId:string",
-                        "output": "SystemInfo",
-                        "errors": ["UNREACHABLE"],
-                    }],
-                    "data_contracts": [{
-                        "name": "SystemInfo",
-                        "fields": [{
-                            "name": "version",
-                            "type": "string",
-                            "required": True,
-                            "source": "device API",
-                        }],
-                    }],
-                    "extension_points": ["feature"],
-                    "decisions": ["复用 scaffold feature seam"],
-                },
-                "verification": [{
-                    "ac_id": "AC-0001",
-                    "test_key": "functional",
-                    "level": "functional",
-                    "selector": "tests/functional/device-system-info.functional.ts",
-                    "expected": "系统信息字段可见",
-                }],
-            }
-
-            published = publish_feature_contract(fixture.root, contract)
+            published = publish_spec(fixture.root, spec_payload())
             bundle = fixture.root / "docs/sdlc/bundles" / published["bundle_id"]
-            for name in (
-                "feature-contract.json", "requirements.json",
-                "design.json", "test-plan.json",
-            ):
-                self.assertTrue((bundle / name).is_file(), name)
+            expected = {
+                "feature-map.json",
+                "requirements/R-0001.json",
+                "designs/D-0001.json",
+                "verification/T-0001.json",
+                "spec.md",
+                "index.md",
+            }
+            actual = {
+                path.relative_to(bundle).as_posix()
+                for path in bundle.rglob("*")
+                if path.is_file() and path.name != "bundle.json"
+            }
+            self.assertEqual(actual, expected)
         finally:
             fixture.close()
 
@@ -286,12 +217,9 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         lifecycle_schema = (
             REPO / "schemas/lifecycle.schema.json"
         ).read_text(encoding="utf-8")
-        spec_schema = (
-            REPO / "schemas/spec.schema.json"
-        ).read_text(encoding="utf-8")
-
         self.assertFalse((REPO / ".opencode/agents/sdlc-executor.md").exists())
         self.assertNotIn("sdlc-executor", plugin + main)
+        self.assertNotIn("sdlc_publish_contract", plugin + main)
         self.assertNotIn("idempotency_key", plugin)
         self.assertNotIn('"browser"', lifecycle_schema)
         self.assertIn("verify_delivery", plugin)

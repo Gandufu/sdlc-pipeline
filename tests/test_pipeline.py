@@ -22,9 +22,10 @@ from sdlc_core.adapter import (  # noqa: E402
     validate_coder_handoff,
     validate_write_path,
 )
-from sdlc_core.artifacts import load_current_spec, publish_spec, validate_spec  # noqa: E402
+from sdlc_core.artifacts import load_current_spec  # noqa: E402
 from sdlc_core.common import (  # noqa: E402
     SdlcError,
+    read_json,
     run_command,
     sha256_contract_file,
     sha256_file,
@@ -46,10 +47,16 @@ from sdlc_core.journal import begin_attempt, journal_status  # noqa: E402
 from sdlc_core.policies import evaluate_hard_policies  # noqa: E402
 from sdlc_core.runs import clear_active, pid_alive, record_active, record_tokens, stop_active  # noqa: E402
 from sdlc_core.sources import ingest_source, query_source  # noqa: E402
+from sdlc_core.spec_candidates import (  # noqa: E402
+    begin_candidate,
+    put_design,
+    put_requirement,
+    put_verification,
+    validate_candidate,
+)
+from sdlc_core.spec_publisher import approve_and_promote  # noqa: E402
 from sdlc_core.status import status  # noqa: E402
 from sdlc_core.trace import (  # noqa: E402
-    incremental_eligibility,
-    trace_matrix,
     verify_scaffold,
 )
 from sdlc_core.versions import finalize  # noqa: E402
@@ -71,9 +78,6 @@ def free_port() -> int:
 
 def spec_payload() -> dict:
     return {
-        "schema_version": "1.0",
-        "flow": "standard",
-        "spec_confirmed": True,
         "requirements": {
             "source_inputs": [{
                 "source": "user",
@@ -120,6 +124,122 @@ def spec_payload() -> dict:
             "selector": "tests/test_feature.py",
         }]},
     }
+
+
+def publish_spec(root: Path, blueprint: dict) -> dict:
+    """Test helper that publishes the compact fixture through the v2 public seams."""
+    source_input = blueprint["requirements"]["source_inputs"][0]
+    if source_input.get("source_id"):
+        source = source_input
+    else:
+        source = ingest_source(root, {
+            "kind": "inline",
+            "source": source_input.get("source", "test fixture"),
+            "content": source_input["content"],
+        })["envelope"]
+    source_ref = {
+        "source_id": source["source_id"],
+        "anchor": source["segments"][0]["anchor"],
+    }
+    created = begin_candidate(
+        root,
+        title=blueprint["requirements"]["items"][0]["title"],
+        source_refs=[source_ref],
+    )
+    acceptance_by_requirement: dict[str, list[str]] = {}
+    for requirement in blueprint["requirements"]["items"]:
+        criteria = []
+        for index, criterion in enumerate(requirement["acceptance_criteria"], 1):
+            if isinstance(criterion, dict):
+                description = criterion.get("description", "")
+                identifier = criterion.get("id")
+            else:
+                description = str(criterion)
+                identifier = None
+            criteria.append({
+                **({"id": identifier} if identifier else {}),
+                "given": "前置条件满足",
+                "when": "执行功能",
+                "then": description,
+                "source_refs": [source_ref],
+            })
+        result = put_requirement(
+            root,
+            created["candidate_id"],
+            {
+                "id": requirement["id"],
+                "feature_id": "F-0001",
+                "title": requirement["title"],
+                "goal": requirement["description"],
+                "actor": "用户",
+                "scope": blueprint["requirements"]["analysis"]["impact_scope"],
+                "non_goals": [],
+                "source_refs": [source_ref],
+                "main_flow": ["执行功能", "观察结果"],
+                "alternate_flows": [],
+                "acceptance_criteria": criteria,
+                "supersedes": requirement.get("supersedes"),
+            },
+        )
+        document = read_json(
+            root
+            / ".sdlc-pipeline/runs/spec-candidates"
+            / created["candidate_id"]
+            / "revisions"
+            / f"{result['revision']:04d}"
+            / "requirements"
+            / f"{requirement['id']}.json"
+        )
+        acceptance_by_requirement[requirement["id"]] = [
+            item["id"] for item in document["acceptance_criteria"]
+        ]
+    for design in blueprint["design"]["items"]:
+        put_design(
+            root,
+            created["candidate_id"],
+            {
+                "id": design["id"],
+                "title": design["title"],
+                "requirement_ids": design["requirement_ids"],
+                "modules": [{
+                    "name": design["module"],
+                    "responsibility": design["description"],
+                    "seam": design["extension_point"],
+                }],
+                "interfaces": [],
+                "data_contracts": [],
+                "extension_points": [design["extension_point"]],
+                "decisions": blueprint["requirements"]["analysis"]["decisions"],
+            },
+        )
+    for test in blueprint["test_plan"]["items"]:
+        put_verification(
+            root,
+            created["candidate_id"],
+            {
+                "id": test["id"],
+                "requirement_ids": test["requirement_ids"],
+                "design_ids": test["design_ids"],
+                "acceptance_criteria_ids": sorted({
+                    identifier
+                    for requirement_id in test["requirement_ids"]
+                    for identifier in acceptance_by_requirement[requirement_id]
+                }),
+                "level": test["level"],
+                "test_key": test["command"],
+                "selector": test["selector"],
+                "preconditions": test["preconditions"],
+                "expected": test["expected"],
+                "mandatory": test["mandatory"],
+            },
+        )
+    ready = validate_candidate(root, created["candidate_id"])
+    return approve_and_promote(
+        root,
+        candidate_id=created["candidate_id"],
+        content_hash=ready["content_hash"],
+        confirmed=True,
+    )
 
 
 class ProjectFixture:
@@ -242,49 +362,6 @@ class ProjectFixture:
 
 
 class SchemaAndTraceTests(unittest.TestCase):
-    def test_spec_schema_requires_confirmation_sources_and_analysis(self) -> None:
-        schema = json.loads(
-            (REPO / "schemas/spec.schema.json").read_text(encoding="utf-8")
-        )
-        self.assertIn("spec_confirmed", schema["required"])
-        required = schema["properties"]["requirements"]["required"]
-        self.assertIn("source_inputs", required)
-        self.assertIn("analysis", required)
-
-    def test_valid_spec_has_complete_rdt(self) -> None:
-        ids = validate_spec(spec_payload())
-        self.assertEqual(ids["R"], {"R-0001"})
-        self.assertEqual(ids["D"], {"D-0001"})
-        self.assertEqual(ids["T"], {"T-0001"})
-
-    def test_spec_rejects_requirement_without_test(self) -> None:
-        payload = spec_payload()
-        payload["test_plan"]["items"][0]["requirement_ids"] = []
-        with self.assertRaises(SdlcError):
-            validate_spec(payload)
-
-    def test_spec_rejects_non_object_requirements_without_traceback(self) -> None:
-        payload = spec_payload()
-        payload["requirements"] = [{}]
-        with self.assertRaisesRegex(SdlcError, "requirements 必须是对象"):
-            validate_spec(payload)
-
-    def test_spec_rejects_three_digit_requirement_id(self) -> None:
-        payload = spec_payload()
-        payload["requirements"]["items"][0]["id"] = "R-001"
-        with self.assertRaisesRegex(SdlcError, "非法 requirement ID: 'R-001'"):
-            validate_spec(payload)
-
-    def test_publish_requires_explicit_spec_confirmation(self) -> None:
-        fixture = ProjectFixture()
-        try:
-            payload = spec_payload()
-            payload["spec_confirmed"] = False
-            with self.assertRaisesRegex(SdlcError, "明确确认"):
-                publish_spec(fixture.root, payload)
-        finally:
-            fixture.close()
-
     def test_publish_rejects_shell_command_instead_of_lifecycle_test_key(self) -> None:
         fixture = ProjectFixture()
         try:
@@ -292,49 +369,30 @@ class SchemaAndTraceTests(unittest.TestCase):
             payload["test_plan"]["items"][0]["command"] = "pnpm test"
             with self.assertRaisesRegex(
                 SdlcError,
-                r"T-0001.*pnpm test.*unit",
+                r"未知 lifecycle test_key",
             ):
                 publish_spec(fixture.root, payload)
             self.assertFalse(
-                (fixture.root / "docs/sdlc/current/test-plan.json").exists()
+                (fixture.root / "docs/sdlc/spec-current.json").exists()
             )
         finally:
             fixture.close()
 
-    def test_resolved_question_requires_resolution(self) -> None:
-        payload = spec_payload()
-        payload["requirements"]["analysis"]["open_questions"] = [{
-            "id": "Q-0001",
-            "question": "是否修改公共接口？",
-            "blocking": True,
-            "status": "resolved",
-        }]
-        with self.assertRaisesRegex(SdlcError, "resolution"):
-            validate_spec(payload)
-
-    def test_publish_is_fixed_json_and_markdown(self) -> None:
+    def test_publish_contains_only_v2_artifacts(self) -> None:
         fixture = ProjectFixture()
         try:
             result = publish_spec(fixture.root, spec_payload())
             self.assertTrue(result["ok"])
-            markdown = (
-                fixture.root / "docs/sdlc/current/requirements.md"
-            ).read_text(encoding="utf-8")
-            self.assertIn("# 需求规格", markdown)
-            self.assertIn("## 原始输入", markdown)
-            self.assertIn("## 分析与边界", markdown)
-            self.assertIn("## 规范化需求", markdown)
-            self.assertIn("用户确认：`true`", markdown)
-            design_markdown = (
-                fixture.root / "docs/sdlc/current/design.md"
-            ).read_text(encoding="utf-8")
-            test_markdown = (
-                fixture.root / "docs/sdlc/current/test-plan.md"
-            ).read_text(encoding="utf-8")
-            self.assertIn("## 设计概述", design_markdown)
-            self.assertIn("## 模块、接口与取舍", design_markdown)
-            self.assertIn("## 测试策略与门禁", test_markdown)
-            self.assertIn("## 测试用例", test_markdown)
+            bundle = fixture.root / "docs/sdlc/bundles" / result["bundle_id"]
+            self.assertTrue((bundle / "feature-map.json").is_file())
+            self.assertTrue((bundle / "requirements/R-0001.json").is_file())
+            self.assertTrue((bundle / "designs/D-0001.json").is_file())
+            self.assertTrue((bundle / "verification/T-0001.json").is_file())
+            for obsolete in (
+                "feature-contract.json", "requirements.json",
+                "design.json", "test-plan.json",
+            ):
+                self.assertFalse((bundle / obsolete).exists())
             self.assertEqual(
                 load_current_spec(fixture.root)["design"]["items"][0]["id"],
                 "D-0001",
@@ -356,46 +414,12 @@ class SchemaAndTraceTests(unittest.TestCase):
             encoded = json.dumps(pack, ensure_ascii=False)
             requirements = next(
                 entry for entry in pack["resources"]
-                if entry["path"] == "docs/sdlc/current/requirements.json"
+                if entry["path"] == "docs/sdlc/current/requirements/R-0001.json"
             )
             self.assertNotIn(raw, encoded)
             self.assertEqual(len(requirements["sha256"]), 64)
             self.assertEqual(pack["brief"]["requirement_ids"], ["R-0001"])
             self.assertEqual(context["repeated_chars"], 0)
-        finally:
-            fixture.close()
-
-    def test_incremental_publish_requires_confirmation_and_parent(self) -> None:
-        fixture = ProjectFixture()
-        try:
-            payload = spec_payload()
-            payload["flow"] = "incremental"
-            with self.assertRaises(SdlcError):
-                publish_spec(fixture.root, payload)
-            payload["incremental_confirmed"] = True
-            with self.assertRaises(SdlcError):
-                publish_spec(fixture.root, payload)
-        finally:
-            fixture.close()
-
-    def test_historical_requirement_id_cannot_change(self) -> None:
-        fixture = ProjectFixture()
-        try:
-            original = spec_payload()["requirements"]["items"][0]
-            write_json(
-                fixture.root / "docs/sdlc/versions/V0001/manifest.json",
-                {
-                    "status": "closed",
-                    "version": "V0001",
-                    "requirement_records": {
-                        "R-0001": {"sha256": sha256_json(original), "supersedes": None}
-                    },
-                },
-            )
-            payload = spec_payload()
-            payload["requirements"]["items"][0]["description"] = "changed"
-            with self.assertRaises(SdlcError):
-                publish_spec(fixture.root, payload)
         finally:
             fixture.close()
 
@@ -680,7 +704,7 @@ class ClosedLoopTests(unittest.TestCase):
         validate_coder_handoff(self.fixture.root, json.dumps(handoff))
         compile_restart_verify(self.fixture.root)
 
-    def test_coder_handoff_mapping_is_derived_from_git_diff(self) -> None:
+    def test_coder_handoff_changed_files_are_derived_from_git_diff(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
         before_task(self.fixture.root, "coder")
@@ -691,31 +715,6 @@ class ClosedLoopTests(unittest.TestCase):
         }
         result = validate_coder_handoff(self.fixture.root, json.dumps(bad))
         self.assertEqual(result["handoff"]["changed_files"], ["src/feature.py"])
-
-    def test_coder_gate_rejects_unresolved_blocking_question(self) -> None:
-        init_project(self.fixture.root)
-        payload = spec_payload()
-        payload["requirements"]["analysis"]["open_questions"] = [{
-            "id": "Q-0001",
-            "question": "是否允许修改公共接口？",
-            "blocking": True,
-            "status": "open",
-        }]
-        publish_spec(self.fixture.root, payload)
-        with self.assertRaisesRegex(SdlcError, "Q-0001"):
-            before_task(self.fixture.root, "coder")
-        write_json(
-            self.fixture.root / ".sdlc-pipeline/runs/coder-handoff.json",
-            {
-                "summary": "fixture",
-                "open_issues": [],
-            },
-        )
-        with self.assertRaisesRegex(SdlcError, "Q-0001"):
-            compile_restart_verify(self.fixture.root)
-        current = status(self.fixture.root)
-        self.assertEqual(current["blocking_questions"][0]["id"], "Q-0001")
-        self.assertFalse(current["can_enter_next"])
 
     def test_test_gate_rejects_code_changed_after_compile(self) -> None:
         self._through_code()
@@ -729,7 +728,7 @@ class ClosedLoopTests(unittest.TestCase):
         self._through_code()
         execution = run_test_plan(self.fixture.root)
         payload = spec_payload()
-        payload["test_plan"]["items"][0]["command"] = "integration"
+        payload["test_plan"]["items"][0]["expected"] = "更新后的退出码为 0"
         publish_spec(self.fixture.root, payload)
         with self.assertRaisesRegex(SdlcError, "测试执行证据.*当前 test-plan"):
             execute_tests(self.fixture.root)
@@ -788,7 +787,7 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertTrue(current["gates"]["test"])
 
         payload = spec_payload()
-        payload["test_plan"]["items"][0]["command"] = "integration"
+        payload["test_plan"]["items"][0]["expected"] = "更新后的退出码为 0"
         publish_spec(self.fixture.root, payload)
         stale = status(self.fixture.root)
         self.assertFalse(stale["gates"]["code"])
@@ -845,28 +844,6 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertFalse(first["cached"])
         self.assertTrue(second["cached"])
         self.assertEqual(first["version"], second["version"])
-
-    def test_incremental_needs_parent_manifest(self) -> None:
-        publish_spec(self.fixture.root, spec_payload())
-        eligibility = incremental_eligibility(self.fixture.root)
-        self.assertFalse(eligibility["eligible"])
-        self.assertIn("missing_parent_manifest", eligibility["reasons"])
-
-    def test_trace_requires_code_and_test_mappings(self) -> None:
-        publish_spec(self.fixture.root, spec_payload())
-        incomplete = trace_matrix(self.fixture.root)
-        self.assertFalse(incomplete["ok"])
-        (self.fixture.root / "src/feature.py").write_text(
-            "def feature(): return 'ok'\n", encoding="utf-8"
-        )
-        (self.fixture.root / "tests/test_feature.py").write_text(
-            "def test_feature(): assert True\n", encoding="utf-8"
-        )
-        complete = trace_matrix(self.fixture.root, {
-            "D-0001": ["src/feature.py"],
-            "tests": {"T-0001": ["tests/test_feature.py"]},
-        })
-        self.assertTrue(complete["ok"])
 
 
 class ReliabilityTests(unittest.TestCase):
@@ -1129,48 +1106,16 @@ class ReliabilityTests(unittest.TestCase):
             )
         )
         self.assertEqual(pointer["bundle_id"], published["bundle_id"])
-        mirror = self.fixture.root / "docs/sdlc/current/requirements.json"
+        mirror = self.fixture.root / "docs/sdlc/current/requirements/R-0001.json"
         mirror.write_text("corrupt", encoding="utf-8")
 
         loaded = load_current_spec(self.fixture.root)
 
         self.assertEqual(loaded["requirements"]["items"][0]["id"], "R-0001")
-        self.assertEqual(json.loads(mirror.read_text(encoding="utf-8"))["items"][0]["id"], "R-0001")
-
-    def test_schema_rejects_unknown_top_level_property(self) -> None:
-        payload = spec_payload()
-        payload["unexpected"] = True
-        with self.assertRaisesRegex(SdlcError, "不允许的字段"):
-            validate_spec(payload, self.fixture.root)
-
-    def test_source_envelope_and_spec_11_anchor_trace(self) -> None:
-        ingested = ingest_source(self.fixture.root, {
-            "kind": "inline",
-            "source": "用户需求.md",
-            "media_type": "text/markdown",
-            "content": "用户必须能够保存设置。",
-            "segments": [{"anchor": "p:1", "text": "用户必须能够保存设置。"}],
-        })["envelope"]
-        ref = f"{ingested['source_id']}#p:1"
-        payload = spec_payload()
-        payload["schema_version"] = "1.1"
-        payload["requirements"]["source_inputs"] = [ingested]
-        requirement = payload["requirements"]["items"][0]
-        requirement["source_refs"] = [ref]
-        requirement["acceptance_criteria"] = [{
-            "id": "AC-R-0001-01",
-            "description": "设置可以持久化保存",
-            "source_refs": [ref],
-        }]
-
-        result = publish_spec(self.fixture.root, payload)
-
-        self.assertTrue(result["ok"])
-        markdown = (
-            self.fixture.root / "docs/sdlc/current/requirements.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("AC-R-0001-01", markdown)
-        self.assertIn(ingested["source_id"], markdown)
+        self.assertEqual(
+            json.loads(mirror.read_text(encoding="utf-8"))["id"],
+            "R-0001",
+        )
 
     def test_external_file_source_is_copied_and_hash_bound(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1233,13 +1178,12 @@ class ReliabilityTests(unittest.TestCase):
 
     def test_journal_idempotency_and_spec_checkpoint_resume(self) -> None:
         payload = {
-            "kind": "spec",
-            "payload": spec_payload(),
-            "idempotency_key": "publish-spec-0001",
+            "action": "probe",
+            "idempotency_key": "probe-tools-0001",
         }
-        first = execute(self.fixture.root, "publish", payload)
-        second = execute(self.fixture.root, "publish", payload)
-        self.assertEqual(first["bundle_id"], second["bundle_id"])
+        first = execute(self.fixture.root, "lifecycle", payload)
+        second = execute(self.fixture.root, "lifecycle", payload)
+        self.assertEqual(first, second)
         self.assertEqual(journal_status(self.fixture.root)["attempt_count"], 1)
 
         execute(self.fixture.root, "publish", {

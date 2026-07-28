@@ -15,9 +15,10 @@ from .common import sha256_file
 from .journal import journal_status, spec_checkpoint as load_spec_checkpoint
 from .memory import memory_summary
 from .runs import active_identity_matches, pid_alive, read_active
-from .trace import incremental_eligibility, verify_scaffold
+from .trace import verify_scaffold
 from .trace import worktree_fingerprint
 from .versions import current_version, parent_manifest
+from .spec_candidates import candidate_status
 
 
 def status(root: Path) -> dict[str, Any]:
@@ -120,12 +121,6 @@ def status(root: Path) -> dict[str, Any]:
     except Exception as exc:
         drift = {"ok": False, "drift": [str(exc)]}
     try:
-        incremental = incremental_eligibility(root) if spec else {
-            "eligible": False, "reasons": ["missing_spec"]
-        }
-    except Exception as exc:
-        incremental = {"eligible": False, "reasons": [str(exc)]}
-    try:
         test_commands = lifecycle_test_commands(root)
         lifecycle_tests = {
             "available": sorted(test_commands),
@@ -174,7 +169,6 @@ def status(root: Path) -> dict[str, Any]:
             for item in blocking_questions
         ],
         "scaffold": {"ok": drift["ok"], "drift": drift["drift"]},
-        "incremental": incremental,
         "lifecycle_tests": lifecycle_tests,
         "init_state": init_state,
         "templates": templates,
@@ -183,6 +177,7 @@ def status(root: Path) -> dict[str, Any]:
         "can_enter_next": prerequisites[stage],
         "journal": journal_status(root),
         "spec_checkpoint": load_spec_checkpoint(root),
+        "spec_candidate": candidate_status(root),
         "memory": memory_summary(root),
         "diagnostics": diagnostics,
     }

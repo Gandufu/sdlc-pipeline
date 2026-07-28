@@ -713,7 +713,7 @@ def run_focused_checks(
     unknown = sorted(set(selected_ids) - set(feature_ids))
     if unknown:
         raise SdlcError(
-            f"focused_check 只能选择当前 Feature Contract 的 T-id；"
+            f"focused_check 只能选择当前已发布 Spec 的 T-id；"
             f"未知={unknown}，允许={feature_ids}"
         )
     commands = load_contract(root)["tests"]

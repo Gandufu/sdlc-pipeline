@@ -177,16 +177,23 @@ class InstallerTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 installer.install(target)
 
-    def test_force_upgrade_removes_obsolete_executor_agent(self) -> None:
+    def test_force_upgrade_removes_all_obsolete_managed_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
             installer.install(target)
-            obsolete = target / ".opencode/agents/sdlc-executor.md"
-            obsolete.write_text("legacy", encoding="utf-8")
+            obsolete = [
+                target / ".opencode/agents/sdlc-executor.md",
+                target / ".sdlc-pipeline/schemas/feature-contract.schema.json",
+                target / ".sdlc-pipeline/schemas/spec.schema.json",
+                target / ".sdlc-pipeline/scripts/sdlc_core/feature_contracts.py",
+            ]
+            for path in obsolete:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("obsolete", encoding="utf-8")
 
             installer.install(target, force=True)
 
-            self.assertFalse(obsolete.exists())
+            self.assertTrue(all(not path.exists() for path in obsolete))
             self.assertTrue(installer.install(target, force=True)["ok"])
 
     def test_installed_runtime_can_install_another_project(self) -> None:
@@ -452,7 +459,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(expected, bootstrap_source)
 
     def test_all_json_schemas_are_valid_json(self) -> None:
-        schemas = list((REPO / "schemas").glob("*.schema.json"))
+        schemas = list((REPO / "schemas").rglob("*.schema.json"))
         self.assertGreaterEqual(len(schemas), 6)
         for path in schemas:
             value = json.loads(path.read_text(encoding="utf-8"))
@@ -476,9 +483,13 @@ class InstallerTests(unittest.TestCase):
         text = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         for name in (
             "sdlc_status", "sdlc_ingest_source", "sdlc_save_checkpoint",
-            "sdlc_publish_contract", "sdlc_lifecycle", "sdlc_finalize",
+            "sdlc_begin_candidate", "sdlc_put_requirement", "sdlc_put_design",
+            "sdlc_put_verification", "sdlc_validate_candidate",
+            "sdlc_approve_candidate",
+            "sdlc_lifecycle", "sdlc_finalize",
         ):
             self.assertIn(name, text)
+        self.assertNotIn("sdlc_publish_contract", text)
         self.assertNotIn("idempotency_key", text)
         self.assertNotIn("experimental.chat.messages.transform", text)
         self.assertNotIn("config.skills.paths", text)
@@ -498,8 +509,8 @@ class InstallerTests(unittest.TestCase):
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
         self.assertIn("references/spec-interview.md", command)
         self.assertNotIn("feature-contract.schema.json", command + main)
-        self.assertIn(".sdlc-pipeline/schemas/feature-contract.schema.json", reference)
-        self.assertIn("F-xxxx", reference)
+        self.assertIn("Schema v2", reference)
+        self.assertIn("R/D/T/AC", reference)
 
     def test_spec_generation_requires_chinese_formal_documents(self) -> None:
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
@@ -634,7 +645,8 @@ class InstallerTests(unittest.TestCase):
             (sdk / "index.js").write_text(
                 "const schema = () => ({ optional() { return this }, describe() { return this } })\n"
                 "export const tool = (input) => input\n"
-                "tool.schema = { enum: schema, string: schema, boolean: schema }\n",
+                "tool.schema = { enum: schema, string: schema, boolean: schema, "
+                "object: schema, array: schema }\n",
                 encoding="utf-8",
             )
             script = (
@@ -692,7 +704,8 @@ class InstallerTests(unittest.TestCase):
             (sdk / "index.js").write_text(
                 "const schema = () => ({ optional() { return this }, describe() { return this } })\n"
                 "export const tool = (input) => input\n"
-                "tool.schema = { enum: schema, string: schema, boolean: schema }\n",
+                "tool.schema = { enum: schema, string: schema, boolean: schema, "
+                "object: schema, array: schema }\n",
                 encoding="utf-8",
             )
             script = (
@@ -750,7 +763,8 @@ class InstallerTests(unittest.TestCase):
                 "optional() { return this }, describe() { return this }"
                 "})\n"
                 "export const tool = (input) => input\n"
-                "tool.schema = { enum: schema, string: schema, boolean: schema }\n",
+                "tool.schema = { enum: schema, string: schema, boolean: schema, "
+                "object: schema, array: schema }\n",
                 encoding="utf-8",
             )
             script = (

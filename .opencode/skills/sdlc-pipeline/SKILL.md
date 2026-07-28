@@ -8,7 +8,8 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
 先调用 `sdlc_status`，只执行当前阶段：
 
 - init：读取 status 的模板元数据；需要选择时询问用户；调用一次 `lifecycle(init)`。
-- spec：读取 `references/spec-interview.md`；摄取来源、保存阻塞决策、确认后发布 Feature Contract。
+- spec：读取 `references/spec-interview.md`；摄取来源、保存阻塞决策、分片构建 Candidate，
+  validate 后按用户确认的 ID/hash 发布。
 - code：派发 coder；plugin 只传唯一 progressive context manifest；Core 根据 Git diff 生成证据映射，
   再统一执行 compile/package/lint/typecheck code gate；不运行依赖项目启动的 functional 测试。
 - test：调用一次 `lifecycle(verify_delivery)`；只启动候选、检查 readiness、运行无头浏览器
@@ -19,7 +20,10 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
 - `sdlc_ingest_source`：保存原始来源；
 - `sdlc_query_source`：按 source_id + anchor 查询受限原文片段；
 - `sdlc_save_checkpoint`：保存可恢复决策；
-- `sdlc_publish_contract`：发布已确认功能契约；
+- `sdlc_begin_candidate`：创建可恢复候选；
+- `sdlc_put_requirement|design|verification`：逐个写入小 artifact；
+- `sdlc_validate_candidate`：生成 diagnostics、preview 和冻结 hash；
+- `sdlc_approve_candidate`：只用 ID/hash/confirmed 原子发布；
 - `sdlc_lifecycle(init|verify_delivery)`：隐藏内部生命周期；
 - `sdlc_finalize`：用户确认后固化版本。
 

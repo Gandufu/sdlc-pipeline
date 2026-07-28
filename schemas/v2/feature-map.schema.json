@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/v2/feature-map.schema.json",
+  "type": "object",
+  "required": ["schema_version", "initiative_id", "title", "goal", "features"],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "initiative_id": {"type": "string", "pattern": "^I-[0-9]{4}$"},
+    "title": {"type": "string", "minLength": 1},
+    "goal": {"type": "string", "minLength": 1},
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id", "title", "requirement_ids", "depends_on", "status"
+        ],
+        "properties": {
+          "id": {"type": "string", "pattern": "^F-[0-9]{4}$"},
+          "title": {"type": "string", "minLength": 1},
+          "requirement_ids": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^R-[0-9]{4}$"}
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^F-[0-9]{4}$"}
+          },
+          "status": {"enum": ["candidate", "published", "superseded"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

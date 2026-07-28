@@ -40,48 +40,6 @@ def validate_write_path(root: Path, path_value: str) -> dict[str, Any]:
     return {"ok": True, "path": relative}
 
 
-def _validate_mapping_paths(
-    root: Path,
-    mapping: dict[str, Any],
-    label: str,
-) -> tuple[dict[str, list[str]], dict[str, dict[str, Any]]]:
-    from .trace import allowed_change_paths, matches_path, scaffold
-
-    contract = scaffold(root)
-    allowed = allowed_change_paths(root)
-    normalized: dict[str, list[str]] = {}
-    evidence: dict[str, dict[str, Any]] = {}
-    for identifier, raw_paths in mapping.items():
-        if (
-            not isinstance(raw_paths, list)
-            or not raw_paths
-            or any(not isinstance(item, str) or not item.strip() for item in raw_paths)
-        ):
-            raise SdlcError(f"{label}.{identifier} 必须是非空路径数组")
-        paths: list[str] = []
-        for raw in raw_paths:
-            candidate = root / raw
-            try:
-                relative = candidate.resolve().relative_to(root.resolve()).as_posix()
-            except ValueError as exc:
-                raise SdlcError(f"{label}.{identifier} 路径越出项目: {raw}") from exc
-            if not candidate.is_file():
-                raise SdlcError(f"{label}.{identifier} 引用的文件不存在: {relative}")
-            if matches_path(relative, contract["protected_paths"]):
-                raise SdlcError(f"{label}.{identifier} 引用了 protected path: {relative}")
-            if not matches_path(relative, allowed):
-                raise SdlcError(f"{label}.{identifier} 路径不在允许范围: {relative}")
-            if relative not in paths:
-                paths.append(relative)
-                evidence[relative] = {
-                    "path": relative,
-                    "sha256": sha256_file(candidate),
-                    "size": candidate.stat().st_size,
-                }
-        normalized[identifier] = sorted(paths)
-    return normalized, evidence
-
-
 def _extract_json(text: str) -> dict[str, Any]:
     text = text.strip()
     candidates = [text]
@@ -98,18 +56,18 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 def _context_resources(root: Path) -> list[dict[str, Any]]:
     spec = load_current_spec(root)
-    candidates: dict[str, tuple[int, str]] = {}
-    feature_contract = root / "docs/sdlc/current/feature-contract.json"
-    if feature_contract.is_file():
-        candidates["docs/sdlc/current/feature-contract.json"] = (
-            1, "authoritative Feature Contract"
-        )
-    else:
-        candidates.update({
-            "docs/sdlc/current/requirements.json": (1, "requirement view"),
-            "docs/sdlc/current/design.json": (1, "design view"),
-            "docs/sdlc/current/test-plan.json": (1, "verification view"),
-        })
+    candidates: dict[str, tuple[int, str]] = {
+        "docs/sdlc/current/feature-map.json": (1, "authoritative Feature Map"),
+    }
+    for folder, reason in (
+        ("requirements", "authoritative Requirement"),
+        ("designs", "authoritative Design"),
+        ("verification", "authoritative Verification"),
+    ):
+        directory = root / "docs" / "sdlc" / "current" / folder
+        if directory.is_dir():
+            for path in sorted(directory.glob("*.json")):
+                candidates[path.relative_to(root).as_posix()] = (1, reason)
     implementation_candidates: set[str] = set()
     for item in spec["design"]["items"]:
         for pattern in item["allowed_paths"]:
@@ -224,7 +182,7 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
             for criterion in item["acceptance_criteria"]
         ],
         "source_refs": sorted({
-            ref
+            f"{ref['source_id']}#{ref['anchor']}"
             for item in requirements
             for ref in item.get("source_refs", [])
         }),
@@ -322,66 +280,10 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     before = read_json(root / ".sdlc-pipeline" / "runs" / "coder-before.json")
     diff = validate_diff(root, before.get("worktree", before.get("changed_paths", [])))
     actual = sorted(set(diff["changed_paths"]))
-    spec = load_current_spec(root)
-    code_paths = [
-        path for path in actual
-        if (root / path).is_file()
-        and not path.startswith("tests/")
-        and not path.startswith("test/")
-        and not path.startswith("docs/sdlc/")
-        and not path.startswith(".sdlc-pipeline/")
-    ]
-    test_paths = [
-        path for path in actual
-        if (root / path).is_file()
-        and (path.startswith("tests/") or path.startswith("test/"))
-    ]
-    if not test_paths:
-        test_paths = sorted(
-            path.relative_to(root).as_posix()
-            for directory in (root / "tests", root / "test")
-            if directory.is_dir()
-            for path in directory.rglob("*")
-            if path.is_file()
-        )
-    design_mapping = {
-        item["id"]: [
-            path for path in code_paths
-            if any(
-                path == allowed.rstrip("/")
-                or path.startswith(allowed.rstrip("/") + "/")
-                or fnmatch.fnmatch(path, allowed)
-                for allowed in item["allowed_paths"]
-            )
-        ]
-        for item in spec["design"]["items"]
-    }
-    missing_design = sorted(
-        identifier for identifier, paths in design_mapping.items() if not paths
-    )
-    if missing_design:
-        raise SdlcError(f"Feature 设计没有代码证据: {missing_design}")
-    test_mapping = {
-        item["id"]: list(test_paths)
-        for item in spec["test_plan"]["items"]
-    }
-    design_mapping, design_evidence = _validate_mapping_paths(
-        root, design_mapping, "design_to_code"
-    )
-    test_evidence: dict[str, Any] = {}
-    if test_paths:
-        test_mapping, test_evidence = _validate_mapping_paths(
-            root, test_mapping, "test_to_files"
-        )
-    value["design_to_code"] = design_mapping
-    value["test_to_files"] = test_mapping
     value["changed_files"] = actual
-    value["mapping_evidence"] = {
-        "design": design_evidence,
-        "tests": test_evidence,
-    }
     value["validated_at"] = utc_now()
     value["compiled_claim_ignored"] = True
+    value["mapping_strategy"] = "post-code-delivery-trace"
     write_json(root / ".sdlc-pipeline" / "runs" / "coder-handoff.json", value)
     return {"ok": True, "handoff": value, "diff": diff}
 

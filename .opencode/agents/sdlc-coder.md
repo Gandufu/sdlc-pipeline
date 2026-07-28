@@ -13,7 +13,12 @@ permission:
   sdlc_status: allow
   sdlc_ingest_source: deny
   sdlc_save_checkpoint: deny
-  sdlc_publish_contract: deny
+  sdlc_begin_candidate: deny
+  sdlc_put_requirement: deny
+  sdlc_put_design: deny
+  sdlc_put_verification: deny
+  sdlc_validate_candidate: deny
+  sdlc_approve_candidate: deny
   sdlc_lifecycle: deny
   sdlc_finalize: deny
 ---
@@ -21,7 +26,7 @@ permission:
 先读取 task 指定的唯一 context manifest。以 `brief` 为实现事实，只在确实需要修改时读取
 `resources` 中对应的业务源码或 active rule：
 
-- tier 1：权威 Feature Contract；
+- tier 1：已发布 Spec bundle 的 Feature Map 与 R/D/T artifact；
 - tier 2：设计允许的业务实现候选；
 - tier 3：仅在对应技术栈需要时读取的 active rule。
 

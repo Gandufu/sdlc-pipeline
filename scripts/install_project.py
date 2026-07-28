@@ -19,7 +19,7 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.13.0"
+VERSION = "0.14.0"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.7"
@@ -46,6 +46,9 @@ MANAGED = (
 )
 OBSOLETE_MANAGED = (
     ".opencode/agents/sdlc-executor.md",
+    ".sdlc-pipeline/schemas/feature-contract.schema.json",
+    ".sdlc-pipeline/schemas/spec.schema.json",
+    ".sdlc-pipeline/scripts/sdlc_core/feature_contracts.py",
 )
 
 
@@ -122,9 +125,15 @@ def _contract_self_check(target: Path) -> dict[str, object]:
     runtime_text = str(runtime_scripts)
     if runtime_text not in sys.path:
         sys.path.insert(0, runtime_text)
-    from sdlc_core.schema_validation import validate_schema_instance
+    from sdlc_core.schema_validation import (
+        check_schema_documents,
+        validate_schema_instance,
+    )
 
-    checked: list[str] = []
+    checked: list[str] = [
+        f".sdlc-pipeline/schemas/{name}"
+        for name in check_schema_documents(target)
+    ]
     for path in sorted((target / ".sdlc-pipeline" / "rules").glob("*.policy.json")):
         validate_schema_instance(target, "rule-policy.schema.json", json.loads(
             path.read_text(encoding="utf-8")
