@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.15 - 2026-07-28
+
+- 修复 CLI `source-query` 已在 Core dispatch 支持、却遗漏 argparse operation 白名单的问题；
+  `sdlc_query_source` 现在可按 receipt anchor 正常读取受限原文，不会在真实 spec 阶段静默报 CLI 参数错误。
+
 ## 0.14.14 - 2026-07-28
 
 - 修复 `sdlc_ingest_source` 的 file 参数歧义：当调用方将路径填入兼容 `source` 字段而非 `uri` 时，

@@ -334,7 +334,7 @@ def main() -> int:
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
             "task-heartbeat", "task-cancel", "write-check", "path-check", "finalize",
-            "spec-candidate",
+            "spec-candidate", "source-query",
         ),
     )
     parser.add_argument("--root", help="项目根目录")

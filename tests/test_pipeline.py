@@ -1233,6 +1233,24 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(result["anchor"], "field:system")
         self.assertNotIn("设备管理", result["text"])
 
+    def test_cli_accepts_source_query_operation(self) -> None:
+        source = ingest_source(self.fixture.root, {
+            "kind": "inline",
+            "content": "设备管理系统信息",
+        })["envelope"]
+        core = REPO / "scripts" / "sdlc.py"
+        result = subprocess.run(
+            [sys.executable, str(core), "source-query", "--root", str(self.fixture.root)],
+            input=json.dumps({"source_id": source["source_id"], "anchor": "text:1"}),
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["text"], "设备管理系统信息")
+
     def test_large_unstructured_source_has_bounded_query_anchors(self) -> None:
         content = ("设备管理协议行\n" * (MAX_SOURCE_SEGMENT_CHARS // 6 + 10))
         source = ingest_source(self.fixture.root, {
