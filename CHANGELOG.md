@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.14 - 2026-07-28
+
+- 修复 `sdlc_ingest_source` 的 file 参数歧义：当调用方将路径填入兼容 `source` 字段而非 `uri` 时，
+  插件与 Core 会将其规范化为 file URI，再执行既有的外部复制、大小和 hash 门禁；不再因同一可恢复
+  输入错误触发 journal 熔断。
+
 ## 0.14.13 - 2026-07-28
 
 - 修复大外部来源摄取后将完整 SourceEnvelope 回传给 Agent 的问题：现在只返回有界 receipt（来源 ID、

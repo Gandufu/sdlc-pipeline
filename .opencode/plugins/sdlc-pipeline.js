@@ -67,6 +67,19 @@ export function sourceReceipt(result) {
   }
 }
 
+export function sourcePayload(args) {
+  const kind = args.source_type
+  const sourceIsFilePath = kind === "file" && !args.uri && args.source
+  return {
+    kind,
+    content: args.content,
+    source: sourceIsFilePath ? undefined : args.source,
+    uri: args.uri || (sourceIsFilePath ? args.source : undefined),
+    media_type: args.media_type,
+    allow_external_copy: args.allow_external_copy,
+  }
+}
+
 async function logPluginEvent(client, message, extra = {}, level = "info") {
   try {
     await client?.app?.log?.({
@@ -247,12 +260,12 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_ingest_source: tool({
-        description: "摄取一份原始需求来源并返回有界 SourceEnvelope receipt。只使用返回的 source_id/anchor；需要正文时调用 sdlc_query_source，绝不再读取项目外原路径。",
+        description: "摄取一份原始需求来源并返回有界 SourceEnvelope receipt。file 必须提供 uri；为兼容调用，source 中的 file 路径会安全规范化为 uri。只使用返回的 source_id/anchor；需要正文时调用 sdlc_query_source，绝不再读取项目外原路径。",
         args: {
           source_type: tool.schema.enum(["inline", "file", "url", "document"]),
           content: tool.schema.string().optional(),
-          source: tool.schema.string().optional(),
-          uri: tool.schema.string().optional(),
+          source: tool.schema.string().optional().describe("来源标签；file 的路径兼容为 uri。"),
+          uri: tool.schema.string().optional().describe("file 路径、URL 或受控来源 URI。"),
           media_type: tool.schema.string().optional(),
           allow_external_copy: tool.schema.boolean().optional(),
         },
@@ -260,14 +273,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           requireAgent(context, ["sdlc-main"], "sdlc_ingest_source")
           const result = await invoke(rootOf(context, fallbackRoot), "publish", {
             kind: "source",
-            payload: {
-              kind: args.source_type,
-              content: args.content,
-              source: args.source,
-              uri: args.uri,
-              media_type: args.media_type,
-              allow_external_copy: args.allow_external_copy,
-            },
+            payload: sourcePayload(args),
           }, { signal: context.abort })
           return JSON.stringify(sourceReceipt(result))
         },

@@ -1199,6 +1199,20 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(asset["sha256"], sha256_file(copied))
         self.assertEqual(ingested["uri"], asset["uri"])
 
+    def test_file_source_path_alias_is_normalized_to_uri(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            external = Path(temporary) / "protocol.md"
+            external.write_text("设备协议\n", encoding="utf-8")
+            ingested = ingest_source(self.fixture.root, {
+                "kind": "file",
+                "source": str(external),
+                "media_type": "text/markdown",
+                "allow_external_copy": True,
+            })["envelope"]
+
+        self.assertEqual(ingested["source"], str(external.resolve()))
+        self.assertTrue((self.fixture.root / ingested["asset"]["uri"]).is_file())
+
     def test_source_query_returns_only_requested_anchor(self) -> None:
         source = ingest_source(self.fixture.root, {
             "kind": "inline",

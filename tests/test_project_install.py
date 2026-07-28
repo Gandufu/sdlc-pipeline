@@ -551,6 +551,29 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("content", receipt)
         self.assertIn("do not read", receipt["next_action"])
 
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_plugin_normalizes_file_source_path_alias(self) -> None:
+        plugin = REPO / ".opencode/plugins/sdlc-pipeline.js"
+        script = (
+            "import(process.argv[1]).then(m => console.log(JSON.stringify("
+            "m.sourcePayload({source_type:'file',source:'C:/TEMP/protocol.md',"
+            "allow_external_copy:true}))))"
+        )
+        result = subprocess.run(
+            ["node", "-e", script, plugin.as_uri()],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {
+            "kind": "file",
+            "uri": "C:/TEMP/protocol.md",
+            "allow_external_copy": True,
+        })
+
     def test_plugin_has_narrow_tools_without_experimental_injection(self) -> None:
         text = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         for name in (

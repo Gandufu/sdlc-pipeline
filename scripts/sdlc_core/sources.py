@@ -22,10 +22,15 @@ def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     }
     content = payload.get("content")
     uri = payload.get("uri")
+    if kind == "file" and (not isinstance(uri, str) or not uri.strip()) and source:
+        uri = source
+        source = ""
     asset = None
     if kind == "file":
         if not isinstance(uri, str) or not uri.strip():
-            raise SdlcError("file SourceEnvelope 必须提供项目内 uri")
+            raise SdlcError(
+                "file SourceEnvelope 必须提供 uri（项目内路径，或显式允许的外部路径）"
+            )
         candidate = Path(uri).expanduser()
         if not candidate.is_absolute():
             candidate = root / candidate
