@@ -19,6 +19,9 @@
 {"state":"interviewing","question":{"id":"Q-0001","prompt":"是否新增 IPC？","answer":"采用推荐","status":"resolved","rationale":"需要真实派生状态"}}
 ```
 
+若附带 `source_refs`，持久化格式是字符串数组，例如 `["SRC-XXXXXXXXXXXX#anchor"]`；也可传
+`sdlc_ingest_source` / Candidate 工具返回的 `{source_id, anchor}` 对象，Core 会无损规范化为该字符串。
+
 大需求先建立 Feature Map，再拆成可独立验收的 Requirement。每个 R/D/T 作为独立 artifact
 立即保存，不在消息中组装单体 JSON。Requirement 包含目标、角色、范围、非范围、主流程、
 异常流程和带 source refs 的 AC；Design 只描述 module/seam/interface/data contract 与

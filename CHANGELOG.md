@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.6 - 2026-07-28
+
+- 修复 checkpoint 的 `source_refs` 与其他 OpenCode Spec 工具形态不一致造成的中间错误：Core 在
+  schema 校验前无损将 `{source_id, anchor}` 规范化为持久化的 `SRC-...#anchor` 字符串，仍拒绝
+  其他未知或畸形字段；指引同时说明两种可接受输入。
+
 ## 0.14.5 - 2026-07-28
 
 - 修复真实 OpenCode spec 回归中 checkpoint 工具因模型猜测 `stage/decisions/notes` 字段而失败的问题。

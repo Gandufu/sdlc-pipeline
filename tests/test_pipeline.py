@@ -1249,6 +1249,41 @@ class ReliabilityTests(unittest.TestCase):
         )
         self.assertEqual(journal_status(self.fixture.root)["phase"], "spec")
 
+    def test_checkpoint_normalizes_tool_style_source_reference(self) -> None:
+        source = ingest_source(self.fixture.root, {
+            "kind": "inline",
+            "source": "用户需求",
+            "content": "需要离线支持。",
+            "segments": [{
+                "anchor": "requirement:offline",
+                "text": "需要离线支持。",
+            }],
+        })["envelope"]
+
+        execute(self.fixture.root, "publish", {
+            "kind": "checkpoint",
+            "payload": {
+                "state": "interviewing",
+                "question": {
+                    "id": "Q-0001",
+                    "prompt": "是否需要离线支持？",
+                    "answer": "需要",
+                    "status": "resolved",
+                    "rationale": "现场网络不稳定",
+                },
+                "source_refs": [{
+                    "source_id": source["source_id"],
+                    "anchor": "requirement:offline",
+                }],
+            },
+        })
+
+        checkpoint = status(self.fixture.root)["spec_checkpoint"]
+        self.assertEqual(
+            checkpoint["source_refs"],
+            [f"{source['source_id']}#requirement:offline"],
+        )
+
     def test_hard_policy_produces_machine_violation(self) -> None:
         rules = self.fixture.root / ".sdlc-pipeline/rules"
         rules.mkdir(exist_ok=True)

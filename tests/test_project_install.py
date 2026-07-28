@@ -536,6 +536,7 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("question", text)
         self.assertIn("status\":\"resolved", reference)
         self.assertIn("rationale", reference)
+        self.assertIn("SRC-XXXXXXXXXXXX#anchor", reference + plugin)
 
     def test_spec_generation_requires_chinese_formal_documents(self) -> None:
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")

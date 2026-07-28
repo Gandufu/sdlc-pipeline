@@ -306,6 +306,7 @@ def close_run(root: Path, state: str = "succeeded") -> None:
 
 
 def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_checkpoint_source_refs(payload)
     validate_schema_instance(root, "spec-checkpoint.schema.json", payload)
     for reference in payload.get("source_refs", []):
         source_id, anchor = reference.split("#", 1)
@@ -359,6 +360,31 @@ def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any
         },
     )
     return {"ok": True, "checkpoint": checkpoint}
+
+
+def _normalize_checkpoint_source_refs(payload: dict[str, Any]) -> dict[str, Any]:
+    """Accept the SourceEnvelope-shaped reference used by OpenCode tools.
+
+    The persisted checkpoint deliberately stores compact ``SRC-...#anchor``
+    strings, while Candidate tools expose the same reference as an object.
+    Normalize only that lossless representation before strict schema validation;
+    every other malformed field remains a schema error.
+    """
+    normalized = dict(payload)
+    references = normalized.get("source_refs")
+    if not isinstance(references, list):
+        return normalized
+    normalized["source_refs"] = [
+        f"{reference['source_id']}#{reference['anchor']}"
+        if (
+            isinstance(reference, dict)
+            and isinstance(reference.get("source_id"), str)
+            and isinstance(reference.get("anchor"), str)
+        )
+        else reference
+        for reference in references
+    ]
+    return normalized
 
 
 def spec_checkpoint(root: Path) -> dict[str, Any] | None:
