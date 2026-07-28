@@ -14,7 +14,9 @@ const PLUGIN_PROJECT_ROOT = path.resolve(
 )
 
 function localCoreScript(root) {
-  const installed = path.join(root, ".sdlc-pipeline", "scripts", "sdlc.py")
+  const installed = path.join(
+    root, ".sdlc-pipeline", "runtime", "scripts", "sdlc.py"
+  )
   if (existsSync(installed)) return installed
   const development = path.join(root, "scripts", "sdlc.py")
   if (existsSync(development)) return development
@@ -56,7 +58,7 @@ export function sourceReceipt(result) {
     sha256: envelope.sha256,
     anchors,
     canonical_path: typeof sourceId === "string"
-      ? `.sdlc-pipeline/runs/sources/${sourceId}.json`
+      ? `.sdlc-pipeline/work/sources/${sourceId}/index.json`
       : undefined,
     asset: envelope.asset ? {
       uri: envelope.asset.uri,
@@ -260,7 +262,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_ingest_source: tool({
-        description: "摄取一份原始需求来源并返回有界 SourceEnvelope receipt。file 必须提供 uri；为兼容调用，source 中的 file 路径会安全规范化为 uri。只使用返回的 source_id/anchor；需要正文时调用 sdlc_query_source，绝不再读取项目外原路径。",
+        description: "摄取一份原始需求来源为 Source Markdown，并返回有界 receipt。file 必须提供 uri；source 中的 file 路径会安全规范化为 uri。只使用返回的 source_id/anchor；需要正文时调用 sdlc_query_source，绝不再读取项目外原路径。",
         args: {
           source_type: tool.schema.enum(["inline", "file", "url", "document"]),
           content: tool.schema.string().optional(),
@@ -295,7 +297,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_begin_candidate: tool({
-        description: "开始一个 Schema v2 Spec Candidate；正文后续按小 artifact 分片写入。",
+        description: "开始一个 Layout v3 Spec Candidate；正文后续按 Markdown artifact 分片写入。",
         args: {
           title: tool.schema.string(),
           source_refs: tool.schema.array(sourceRef),
@@ -345,7 +347,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_put_design: tool({
-        description: "写入一个 Design artifact；只声明 module seam 和 extension point，不预测代码文件。extension_points 必须逐字来自 .sdlc-pipeline/scaffold.json 的已声明 ID，禁止编造泛称。",
+        description: "写入一个 Design artifact；只声明 module seam 和 extension point，不预测代码文件。extension_points 必须逐字来自 .sdlc-pipeline/contracts/scaffold.json 的已声明 ID，禁止编造泛称。",
         args: {
           candidate_id: tool.schema.string(),
           design: tool.schema.object({

@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sdlc-pipeline.local/schemas/v2/design.schema.json",
+  "$id": "https://sdlc-pipeline.local/schemas/artifacts/design.schema.json",
   "type": "object",
   "required": [
     "schema_version", "id", "title", "requirement_ids", "modules",
     "interfaces", "data_contracts", "extension_points", "decisions"
   ],
   "properties": {
-    "schema_version": {"const": "2.0"},
+    "schema_version": {"const": "3.0"},
     "id": {"type": "string", "pattern": "^D-[0-9]{4}$"},
     "title": {"type": "string", "minLength": 1},
     "requirement_ids": {

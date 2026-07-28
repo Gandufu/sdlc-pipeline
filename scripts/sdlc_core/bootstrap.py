@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from .common import SdlcError, git, read_json, run_command
+from .layout import contracts_root
 
 
 # The adapter may run from the repository during development or from
-# <project>/.sdlc-pipeline after project-local installation.  In both layouts
+# <project>/.sdlc-pipeline/runtime after project-local installation. In both layouts
 # this file is exactly two directories below the distribution root.
 def distribution_root() -> Path:
     root = Path(__file__).resolve().parents[2]
@@ -126,7 +127,7 @@ def _git_head(root: Path) -> str:
 def _resume_registered_template(
     destination: Path, template: str
 ) -> dict[str, Any] | None:
-    contract_root = destination / ".sdlc-pipeline"
+    contract_root = contracts_root(destination)
     if not all(
         (contract_root / name).is_file()
         for name in ("lifecycle.json", "scaffold.json")
@@ -177,12 +178,23 @@ def _validate_github_template(source: Path) -> None:
         raise SdlcError(
             "GitHub 模板不能携带 .opencode 或 opencode.json；这些由已安装的插件统一管理"
         )
-    contract_root = source / ".sdlc-pipeline"
+    contract_root = source / ".sdlc-pipeline" / "contracts"
     required = {"lifecycle.json", "scaffold.json"}
     actual = {item.name for item in contract_root.iterdir()} if contract_root.is_dir() else set()
-    if not required <= actual or actual - required:
+    pipeline_root = source / ".sdlc-pipeline"
+    pipeline_entries = (
+        {item.name for item in pipeline_root.iterdir()}
+        if pipeline_root.is_dir()
+        else set()
+    )
+    if (
+        pipeline_entries != {"contracts"}
+        or not required <= actual
+        or actual - required
+    ):
         raise SdlcError(
-            "GitHub 模板必须且只能在 .sdlc-pipeline 中提供 lifecycle.json 与 scaffold.json；"
+            "GitHub 模板必须且只能在 .sdlc-pipeline/contracts 中提供 "
+            "lifecycle.json 与 scaffold.json；"
             "runner、commands 和运行现场由插件安装"
         )
 
@@ -212,10 +224,13 @@ def _import_github_template(
         copied = _copy_without_overwrite(
             checkout, destination, skip_top_level={".git", ".sdlc-pipeline"}
         )
-        (destination / ".sdlc-pipeline").mkdir(parents=True, exist_ok=True)
+        contracts_root(destination).mkdir(parents=True, exist_ok=True)
         for name in ("lifecycle.json", "scaffold.json"):
-            shutil.copy2(checkout / ".sdlc-pipeline" / name, destination / ".sdlc-pipeline" / name)
-            copied.append(f".sdlc-pipeline/{name}")
+            shutil.copy2(
+                checkout / ".sdlc-pipeline" / "contracts" / name,
+                contracts_root(destination) / name,
+            )
+            copied.append(f".sdlc-pipeline/contracts/{name}")
         shutil.copytree(checkout / ".git", destination / ".git")
         return copied, _git_head(destination)
 

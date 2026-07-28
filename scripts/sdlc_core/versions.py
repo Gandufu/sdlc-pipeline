@@ -3,17 +3,27 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifacts import current_spec_hashes, load_current_spec
+from .artifacts import current_spec_hashes, load_current_spec, load_test_results
 from .common import (
     SdlcError,
     atomic_write,
     git,
     git_available,
-    read_json,
     sha256_file,
     sha256_json,
     utc_now,
-    write_json,
+)
+from .layout import lifecycle_path, scaffold_path
+from .records import (
+    read_compact_index,
+    read_markdown_record,
+    write_compact_index,
+    write_markdown_record,
+)
+from .stores import (
+    read_evidence_record,
+    read_work_record,
+    write_work_record,
 )
 from .lifecycle import load_contract
 from .runs import token_summary
@@ -34,7 +44,13 @@ def current_version(root: Path) -> str | None:
 
 def parent_manifest(root: Path) -> dict[str, Any] | None:
     items = manifests(root)
-    return read_json(items[-1]) if items else None
+    if not items:
+        return None
+    index = read_compact_index(items[-1])
+    value = read_markdown_record(root / index["content_ref"])
+    if sha256_json(value) != index["content_hash"]:
+        raise SdlcError("版本 manifest Markdown 与索引 hash 不匹配")
+    return value
 
 
 def render_version_summary(manifest: dict[str, Any]) -> str:
@@ -88,21 +104,16 @@ def render_version_summary(manifest: dict[str, Any]) -> str:
 
 def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
     spec = load_current_spec(root)
-    candidate = read_json(root / ".sdlc-pipeline" / "runs" / "version-candidate.json")
+    candidate = read_work_record(root, "version-candidate")
     if candidate.get("version") != version or candidate.get("status") != "ready":
         raise SdlcError("版本候选不存在、版本不匹配或测试未通过")
     results_path = root / candidate["test_results"]
-    results = read_json(results_path)
+    results = load_test_results(root, candidate["test_results"])
     if results.get("status") != "pass":
         raise SdlcError("mandatory 测试未全部通过")
-    code_evidence = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json")
-    delivery_evidence = read_json(
-        root / ".sdlc-pipeline" / "runs" / "delivery-evidence.json"
-    )
-    handoff = read_json(
-        root / ".sdlc-pipeline" / "runs" / "coder-handoff.json",
-        required=False,
-    ) or {}
+    code_evidence = read_evidence_record(root, "code")
+    delivery_evidence = read_evidence_record(root, "delivery")
+    handoff = read_work_record(root, "coder-handoff", required=False) or {}
     trace = build_delivery_trace(
         root,
         changed_files=handoff.get("changed_files", []),
@@ -118,12 +129,12 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
     parent = parent_manifest(root)
     initial_sha = parent.get("final_git_sha") if parent else git(root, "rev-parse", "HEAD")
     contract = load_contract(root)
-    init_report = read_json(root / "docs" / "sdlc" / "init-report.json")
+    init_report = read_evidence_record(root, "init")
     observed_tools = {
         item["name"]: item for item in init_report.get("tools", {}).get("tools", [])
     }
     return {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "version": version,
         "status": "candidate",
         "summary": summary,
@@ -133,8 +144,8 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
         "template": {
             "id": scaffold["contract"]["template_id"],
             "version": scaffold["contract"]["template_version"],
-            "scaffold_hash": sha256_file(root / ".sdlc-pipeline" / "scaffold.json"),
-            "lifecycle_hash": sha256_file(root / ".sdlc-pipeline" / "lifecycle.json"),
+            "scaffold_hash": sha256_file(scaffold_path(root)),
+            "lifecycle_hash": sha256_file(lifecycle_path(root)),
         },
         "environment": {
             item["name"]: {
@@ -216,23 +227,51 @@ def finalize(root: Path, version: str, summary: str, confirmed: bool) -> dict[st
     manifest["commit"] = delivery_sha
     manifest["closed_at"] = utc_now()
     validate_schema_instance(root, "manifest.schema.json", manifest)
-    write_json(path, manifest)
+    details_path = path.with_name("details.md")
+    write_markdown_record(
+        details_path,
+        manifest,
+        title=f"版本证据 {version}",
+        summary_lines=[
+            f"- 状态: `{manifest['status']}`",
+            f"- 交付 commit: `{delivery_sha}`",
+        ],
+    )
+    index = {
+        "schema_version": "3.0",
+        "version": version,
+        "state": manifest["status"],
+        "parent_version": manifest.get("parent_version"),
+        "commit": delivery_sha,
+        "tag": tag,
+        "content_ref": details_path.relative_to(root).as_posix(),
+        "content_hash": sha256_json(manifest),
+        "created_at": manifest["created_at"],
+        "closed_at": manifest["closed_at"],
+    }
+    write_compact_index(path, index)
     summary_path = path.with_name("summary.md")
     atomic_write(summary_path, render_version_summary(manifest))
     git(
         root,
         "add",
         path.relative_to(root).as_posix(),
+        details_path.relative_to(root).as_posix(),
         summary_path.relative_to(root).as_posix(),
     )
     git(root, "commit", "-m", f"sdlc({version}): record evidence")
     evidence_sha = git(root, "rev-parse", "HEAD")
     git(root, "tag", "-a", tag, "-m", f"SDLC {version}: {summary}")
-    candidate_path = root / ".sdlc-pipeline" / "runs" / "version-candidate.json"
-    candidate = read_json(candidate_path)
+    candidate = read_work_record(root, "version-candidate")
     candidate["status"] = "closed"
     candidate["final_git_sha"] = delivery_sha
-    write_json(candidate_path, candidate)
+    write_work_record(
+        root,
+        "version-candidate",
+        candidate,
+        state="closed",
+        title=f"Version candidate {version}",
+    )
     return {
         "ok": True,
         "version": version,

@@ -7,7 +7,7 @@
 不再使用独立测试 subagent。
 用户阶段命令为 init/spec/code/test；status/finalize 是内部工具。
 
-需求、设计、测试计划合并为同一 spec 交互，但保持独立 JSON/Markdown 产物。生命周期、
+需求、设计、测试计划合并为同一 spec 交互，但保持独立 Markdown artifact 和 compact JSON 索引。生命周期、
 追溯、文档渲染、运行现场和版本由 Python core 承担，OpenCode plugin 只作薄 adapter。
 
 Python core 不依赖 OpenCode 的会话或工具模型，是可移植的确定性引擎；OpenCode JavaScript 是当前

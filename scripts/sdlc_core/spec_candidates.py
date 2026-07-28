@@ -1,14 +1,17 @@
 from __future__ import annotations
 
-import json
-import os
 import re
-import shutil
-import tempfile
 from pathlib import Path
 from typing import Any
 
 from .common import SdlcError, atomic_write, read_json, sha256_file, sha256_json, utc_now
+from .layout import lifecycle_path, relative_to_project, scaffold_path, work_root
+from .records import (
+    read_compact_index,
+    read_markdown_record,
+    write_compact_index,
+    write_markdown_record,
+)
 from .schema_validation import validate_schema_instance
 from .sources import load_source
 
@@ -37,20 +40,15 @@ def begin_candidate(
         if child.is_dir() and (match := _CANDIDATE_PATTERN.fullmatch(child.name))
     ]
     candidate_id = f"SC-{max(numbers, default=0) + 1:06d}"
-    feature_map = {
-        "schema_version": "2.0",
-        "initiative_id": "I-0001",
-        "title": title.strip(),
-        "goal": title.strip(),
-        "features": [],
-    }
-    validate_schema_instance(root, "v2/feature-map.schema.json", feature_map)
     revision = _commit_revision(
         root,
         candidate_id,
         previous=None,
-        changed={"feature-map.json": feature_map},
+        title=title.strip(),
         source_refs=source_refs,
+        requirements=[],
+        designs=[],
+        verification=[],
     )
     return {
         "ok": True,
@@ -68,22 +66,28 @@ def put_requirement(
     pointer, previous = _load_current_revision(root, candidate_id)
     if not isinstance(requirement, dict):
         raise SdlcError("requirement 必须是对象")
-    identifier = str(requirement.get("id", "")).strip()
-    if _REQUIREMENT_PATTERN.fullmatch(identifier) is None:
-        identifier = _next_identifier(previous / "requirements", _REQUIREMENT_PATTERN, "R")
-    previous_feature_map = read_json(previous / "feature-map.json")
-    requested_feature_id = str(requirement.get("feature_id", "")).strip()
+    documents = _load_artifacts(root, previous, "requirements")
+    requested_id = str(requirement.get("id", "")).strip()
+    identifier = (
+        requested_id
+        if _REQUIREMENT_PATTERN.fullmatch(requested_id)
+        else _next_identifier(documents, _REQUIREMENT_PATTERN, "R")
+    )
+    existing = documents.get(identifier)
+    requested_feature = str(requirement.get("feature_id", "")).strip()
     feature_id = (
-        requested_feature_id
-        if _FEATURE_PATTERN.fullmatch(requested_feature_id)
-        else _next_feature_identifier(previous_feature_map)
+        str(existing["feature_id"])
+        if existing is not None
+        else (
+            requested_feature
+            if _FEATURE_PATTERN.fullmatch(requested_feature)
+            else _next_feature_identifier(previous["feature_map"])
+        )
     )
     normalized = {
         **requirement,
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "id": identifier,
-        # Feature identity is Core-owned just like R and AC IDs.  Agents often
-        # provide a semantic slug while explicitly asking Core to allocate IDs.
         "feature_id": feature_id,
     }
     criteria = normalized.get("acceptance_criteria")
@@ -91,69 +95,33 @@ def put_requirement(
         normalized["acceptance_criteria"] = [
             {
                 **item,
-                # AC identity is a Core-owned foreign key for Verification.
-                # Never let a stale caller-provided name make the candidate
-                # fail schema validation before the deterministic mapping exists.
                 "id": f"AC-{identifier}-{index:02d}",
             }
             if isinstance(item, dict) else item
             for index, item in enumerate(criteria, 1)
         ]
     normalized.setdefault("supersedes", None)
-    validate_schema_instance(root, "v2/requirement.schema.json", normalized)
+    validate_schema_instance(root, "artifacts/requirement.schema.json", normalized)
     _validate_source_refs(root, normalized["source_refs"])
     for criterion in normalized["acceptance_criteria"]:
         _validate_source_refs(root, criterion["source_refs"])
-
-    feature_map = json.loads(json.dumps(previous_feature_map))
-    feature_id = normalized["feature_id"]
-    features = feature_map["features"]
-    feature = next((item for item in features if item["id"] == feature_id), None)
-    if feature is None:
-        feature = {
-            "id": feature_id,
-            "title": normalized["title"],
-            "requirement_ids": [],
-            "depends_on": [],
-            "status": "candidate",
-        }
-        features.append(feature)
-    if identifier not in feature["requirement_ids"]:
-        feature["requirement_ids"].append(identifier)
-        feature["requirement_ids"].sort()
-    validate_schema_instance(root, "v2/feature-map.schema.json", feature_map)
-    if (
-        read_json(previous / f"requirements/{identifier}.json", required=False)
-        == normalized
-        and feature_map == previous_feature_map
-    ):
-        pointer = read_json(_candidate_root(root, candidate_id) / "candidate.json")
-        return {
-            "ok": True,
-            "candidate_id": candidate_id,
-            "revision": pointer["current_revision"],
-            "state": pointer["state"],
-            "artifact_id": identifier,
-            "idempotent": True,
-        }
+    if existing == normalized:
+        return _idempotent_result(pointer, identifier)
+    record = _write_artifact(
+        root, candidate_id, "requirements", identifier, normalized
+    )
+    records = _replace_record(previous["requirements"], record)
     revision = _commit_revision(
         root,
         candidate_id,
         previous=previous,
-        changed={
-            f"requirements/{identifier}.json": normalized,
-            "feature-map.json": feature_map,
-        },
-        source_refs=_manifest_source_refs(previous),
+        title=previous["title"],
+        source_refs=previous["source_refs"],
+        requirements=records,
+        designs=previous["designs"],
+        verification=previous["verification"],
     )
-    return {
-        "ok": True,
-        "candidate_id": candidate_id,
-        "revision": revision["revision"],
-        "state": "draft",
-        "artifact_id": identifier,
-        "idempotent": False,
-    }
+    return _put_result(candidate_id, revision, identifier)
 
 
 def put_design(
@@ -161,23 +129,33 @@ def put_design(
     candidate_id: str,
     design: dict[str, Any],
 ) -> dict[str, Any]:
-    _, previous = _load_current_revision(root, candidate_id)
+    pointer, previous = _load_current_revision(root, candidate_id)
     normalized, identifier = _normalize_artifact(
+        root,
         previous,
         design,
-        folder="designs",
+        group="designs",
         pattern=_DESIGN_PATTERN,
         prefix="D",
     )
-    validate_schema_instance(root, "v2/design.schema.json", normalized)
-    return _put_artifact(
+    validate_schema_instance(root, "artifacts/design.schema.json", normalized)
+    existing = _load_artifacts(root, previous, "designs").get(identifier)
+    if existing == normalized:
+        return _idempotent_result(pointer, identifier)
+    record = _write_artifact(
+        root, candidate_id, "designs", identifier, normalized
+    )
+    revision = _commit_revision(
         root,
         candidate_id,
-        previous,
-        f"designs/{identifier}.json",
-        normalized,
-        identifier,
+        previous=previous,
+        title=previous["title"],
+        source_refs=previous["source_refs"],
+        requirements=previous["requirements"],
+        designs=_replace_record(previous["designs"], record),
+        verification=previous["verification"],
     )
+    return _put_result(candidate_id, revision, identifier)
 
 
 def put_verification(
@@ -185,15 +163,16 @@ def put_verification(
     candidate_id: str,
     verification: dict[str, Any],
 ) -> dict[str, Any]:
-    _, previous = _load_current_revision(root, candidate_id)
+    pointer, previous = _load_current_revision(root, candidate_id)
     normalized, identifier = _normalize_artifact(
+        root,
         previous,
         verification,
-        folder="verification",
+        group="verification",
         pattern=_VERIFICATION_PATTERN,
         prefix="T",
     )
-    lifecycle = read_json(root / ".sdlc-pipeline" / "lifecycle.json")
+    lifecycle = read_json(lifecycle_path(root))
     test_key = normalized.get("test_key")
     tests = lifecycle.get("tests", {}) if isinstance(lifecycle, dict) else {}
     test_definition = tests.get(test_key) if isinstance(test_key, str) else None
@@ -201,11 +180,8 @@ def put_verification(
         isinstance(test_definition, dict)
         and test_definition.get("allow_selector") is not True
     ):
-        # A test-key command owns its unit/integration selection.  Keeping a
-        # model-supplied selector here creates an invalid candidate and can
-        # even fail the path guard before validation explains the contract.
         normalized["selector"] = None
-    validate_schema_instance(root, "v2/verification.schema.json", normalized)
+    validate_schema_instance(root, "artifacts/verification.schema.json", normalized)
     selector = normalized.get("selector")
     if selector is not None:
         path = Path(selector)
@@ -215,310 +191,414 @@ def put_verification(
             or not path.as_posix().startswith("tests/")
         ):
             raise SdlcError(f"{identifier} selector 必须是 tests/ 下的项目内路径")
-    return _put_artifact(
+    existing = _load_artifacts(root, previous, "verification").get(identifier)
+    if existing == normalized:
+        return _idempotent_result(pointer, identifier)
+    record = _write_artifact(
+        root, candidate_id, "verification", identifier, normalized
+    )
+    revision = _commit_revision(
         root,
         candidate_id,
-        previous,
-        f"verification/{identifier}.json",
-        normalized,
-        identifier,
+        previous=previous,
+        title=previous["title"],
+        source_refs=previous["source_refs"],
+        requirements=previous["requirements"],
+        designs=previous["designs"],
+        verification=_replace_record(previous["verification"], record),
     )
+    return _put_result(candidate_id, revision, identifier)
 
 
 def validate_candidate(root: Path, candidate_id: str) -> dict[str, Any]:
     _, previous = _load_current_revision(root, candidate_id)
-    diagnostics = _candidate_diagnostics(root, previous)
+    requirements = _load_artifacts(root, previous, "requirements")
+    designs = _load_artifacts(root, previous, "designs")
+    verification = _load_artifacts(root, previous, "verification")
+    diagnostics = _candidate_diagnostics(
+        root,
+        previous["feature_map"],
+        requirements,
+        designs,
+        verification,
+    )
+    next_revision = int(previous["revision"]) + 1
     report = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "candidate_id": candidate_id,
-        "validated_revision": int(previous.name) + 1,
+        "validated_revision": next_revision,
         "ok": not diagnostics,
         "diagnostics": diagnostics,
     }
-    preview = _render_preview(previous, report)
-    committed = _commit_revision(
+    validation_path = (
+        _candidate_root(root, candidate_id)
+        / "validation"
+        / f"{next_revision:04d}.md"
+    )
+    write_markdown_record(
+        validation_path,
+        report,
+        title=f"Candidate validation {candidate_id}@{next_revision:04d}",
+        summary_lines=[
+            f"- Result: `{'pass' if report['ok'] else 'fail'}`",
+            f"- Diagnostics: `{len(diagnostics)}`",
+        ],
+    )
+    preview_path = (
+        _candidate_root(root, candidate_id)
+        / "previews"
+        / f"{next_revision:04d}.md"
+    )
+    atomic_write(
+        preview_path,
+        _render_preview(
+            candidate_id,
+            next_revision,
+            previous["feature_map"],
+            requirements,
+            designs,
+            verification,
+            report,
+        ),
+    )
+    revision = _commit_revision(
         root,
         candidate_id,
         previous=previous,
-        changed={},
-        source_refs=_manifest_source_refs(previous),
-        derived={
-            "validation.json": json.dumps(
-                report, ensure_ascii=False, indent=2
-            ) + "\n",
-            "preview.md": preview,
-        },
+        title=previous["title"],
+        source_refs=previous["source_refs"],
+        requirements=previous["requirements"],
+        designs=previous["designs"],
+        verification=previous["verification"],
         state="ready" if not diagnostics else "draft",
+        validation={
+            "ok": report["ok"],
+            "content_ref": relative_to_project(root, validation_path),
+            "sha256": sha256_file(validation_path),
+        },
+        preview={
+            "content_ref": relative_to_project(root, preview_path),
+            "sha256": sha256_file(preview_path),
+        },
     )
     if diagnostics:
         raise SdlcError("；".join(item["message"] for item in diagnostics))
     return {
         "ok": True,
         "candidate_id": candidate_id,
-        "revision": committed["revision"],
+        "revision": revision["revision"],
         "state": "ready",
-        "content_hash": committed["manifest"]["content_hash"],
-        "preview_path": (
-            f".sdlc-pipeline/runs/spec-candidates/{candidate_id}/"
-            f"revisions/{committed['revision']:04d}/preview.md"
-        ),
+        "content_hash": revision["content_hash"],
+        "preview_path": revision["preview"]["content_ref"],
     }
 
 
-def candidate_status(root: Path, candidate_id: str | None = None) -> dict[str, Any] | None:
+def candidate_status(
+    root: Path, candidate_id: str | None = None
+) -> dict[str, Any] | None:
     base = _candidate_base(root)
     if candidate_id is not None:
-        pointer = read_json(_candidate_root(root, candidate_id) / "candidate.json")
+        pointer = read_compact_index(
+            _candidate_root(root, candidate_id) / "index.json"
+        )
         return _candidate_summary(root, pointer)
     if not base.is_dir():
         return None
     pointers = [
-        read_json(path / "candidate.json")
+        read_compact_index(path / "index.json")
         for path in sorted(base.iterdir())
-        if path.is_dir() and (path / "candidate.json").is_file()
+        if path.is_dir() and (path / "index.json").is_file()
     ]
-    active = [
-        item for item in pointers
-        if item.get("state") in {"draft", "ready"}
-    ]
+    active = [item for item in pointers if item.get("state") in {"draft", "ready"}]
     selected = active[-1] if active else (pointers[-1] if pointers else None)
     return _candidate_summary(root, selected) if selected else None
 
 
-def _candidate_summary(root: Path, pointer: dict[str, Any]) -> dict[str, Any]:
-    candidate_id = pointer["candidate_id"]
-    revision_number = int(pointer["current_revision"])
-    revision = (
+def load_candidate_revision(
+    root: Path, candidate_id: str, revision: int | None = None
+) -> dict[str, Any]:
+    pointer = read_compact_index(_candidate_root(root, candidate_id) / "index.json")
+    number = int(pointer["current_revision"] if revision is None else revision)
+    return read_compact_index(
         _candidate_root(root, candidate_id)
         / "revisions"
-        / f"{revision_number:04d}"
+        / f"{number:04d}.json"
     )
-    manifest = read_json(revision / "manifest.json")
-    preview = revision / "preview.md"
-    validation = read_json(revision / "validation.json", required=False)
+
+
+def load_revision_artifacts(
+    root: Path, revision: dict[str, Any], group: str
+) -> dict[str, dict[str, Any]]:
+    return _load_artifacts(root, revision, group)
+
+
+def _candidate_summary(root: Path, pointer: dict[str, Any]) -> dict[str, Any]:
+    revision = load_candidate_revision(
+        root, pointer["candidate_id"], int(pointer["current_revision"])
+    )
     return {
         **pointer,
         "preview_path": (
-            preview.relative_to(root).as_posix() if preview.is_file() else None
+            revision.get("preview", {}).get("content_ref")
+            if isinstance(revision.get("preview"), dict)
+            else None
         ),
         "validation_ok": (
-            validation.get("ok") if isinstance(validation, dict) else None
+            revision.get("validation", {}).get("ok")
+            if isinstance(revision.get("validation"), dict)
+            else None
         ),
         "counts": {
-            "requirements": len(manifest["requirements"]),
-            "designs": len(manifest["designs"]),
-            "verification": len(manifest["verification"]),
+            "requirements": len(revision["requirements"]),
+            "designs": len(revision["designs"]),
+            "verification": len(revision["verification"]),
         },
     }
 
 
 def _normalize_artifact(
-    previous: Path,
+    root: Path,
+    previous: dict[str, Any],
     value: dict[str, Any],
     *,
-    folder: str,
+    group: str,
     pattern: re.Pattern[str],
     prefix: str,
 ) -> tuple[dict[str, Any], str]:
     if not isinstance(value, dict):
         raise SdlcError(f"{prefix} artifact 必须是对象")
+    documents = _load_artifacts(root, previous, group)
     identifier = str(value.get("id", "")).strip()
     if pattern.fullmatch(identifier) is None:
-        identifier = _next_identifier(previous / folder, pattern, prefix)
-    return {**value, "schema_version": "2.0", "id": identifier}, identifier
+        identifier = _next_identifier(documents, pattern, prefix)
+    return {**value, "schema_version": "3.0", "id": identifier}, identifier
 
 
-def _put_artifact(
+def _write_artifact(
     root: Path,
     candidate_id: str,
-    previous: Path,
-    relative: str,
-    value: dict[str, Any],
+    group: str,
     identifier: str,
+    value: dict[str, Any],
 ) -> dict[str, Any]:
-    existing = read_json(previous / relative, required=False)
-    if existing == value:
-        pointer = read_json(_candidate_root(root, candidate_id) / "candidate.json")
-        return {
-            "ok": True,
-            "candidate_id": candidate_id,
-            "revision": pointer["current_revision"],
-            "state": pointer["state"],
-            "artifact_id": identifier,
-            "idempotent": True,
-        }
-    revision = _commit_revision(
-        root,
-        candidate_id,
-        previous=previous,
-        changed={relative: value},
-        source_refs=_manifest_source_refs(previous),
+    directory = _candidate_root(root, candidate_id) / "artifacts" / group / identifier
+    versions = [
+        int(path.stem)
+        for path in directory.glob("*.md")
+        if path.stem.isdigit()
+    ] if directory.is_dir() else []
+    artifact_revision = max(versions, default=0) + 1
+    path = directory / f"{artifact_revision:04d}.md"
+    write_markdown_record(
+        path,
+        value,
+        title=f"{identifier} {value.get('title', '')}".strip(),
+        summary_lines=[
+            f"- Candidate: `{candidate_id}`",
+            f"- Artifact revision: `{artifact_revision}`",
+        ],
     )
     return {
-        "ok": True,
-        "candidate_id": candidate_id,
-        "revision": revision["revision"],
-        "state": "draft",
-        "artifact_id": identifier,
-        "idempotent": False,
+        "id": identifier,
+        "artifact_revision": artifact_revision,
+        "content_ref": relative_to_project(root, path),
+        "sha256": sha256_file(path),
+        **_artifact_relations(group, value),
     }
 
 
-def _candidate_base(root: Path) -> Path:
-    return root / ".sdlc-pipeline" / "runs" / "spec-candidates"
-
-
-def _candidate_root(root: Path, candidate_id: str) -> Path:
-    if _CANDIDATE_PATTERN.fullmatch(candidate_id) is None:
-        raise SdlcError(f"非法 candidate ID: {candidate_id!r}")
-    return _candidate_base(root) / candidate_id
-
-
-def _load_current_revision(
-    root: Path, candidate_id: str
-) -> tuple[dict[str, Any], Path]:
-    candidate_root = _candidate_root(root, candidate_id)
-    pointer = read_json(candidate_root / "candidate.json")
-    revision = int(pointer["current_revision"])
-    path = candidate_root / "revisions" / f"{revision:04d}"
-    if not path.is_dir():
-        raise SdlcError(f"candidate revision 缺失: {candidate_id}@{revision}")
-    return pointer, path
-
-
-def _next_identifier(directory: Path, pattern: re.Pattern[str], prefix: str) -> str:
-    numbers: list[int] = []
-    if directory.is_dir():
-        for path in directory.glob("*.json"):
-            match = pattern.fullmatch(path.stem)
-            if match:
-                numbers.append(int(match.group(1)))
-    return f"{prefix}-{max(numbers, default=0) + 1:04d}"
-
-
-def _next_feature_identifier(feature_map: dict[str, Any]) -> str:
-    features = feature_map.get("features", [])
-    numbers = [
-        int(match.group(1))
-        for feature in features
-        if isinstance(feature, dict)
-        and (match := _FEATURE_PATTERN.fullmatch(str(feature.get("id", ""))))
-    ]
-    return f"F-{max(numbers, default=0) + 1:04d}"
+def _artifact_relations(group: str, value: dict[str, Any]) -> dict[str, Any]:
+    common = {"title": str(value.get("title", ""))[:256]}
+    if group == "requirements":
+        return {
+            **common,
+            "feature_id": value["feature_id"],
+            "source_refs": value["source_refs"],
+            "acceptance_criteria": [
+                {
+                    "id": item["id"],
+                    "source_refs": item["source_refs"],
+                }
+                for item in value["acceptance_criteria"]
+            ],
+            "supersedes": value.get("supersedes"),
+        }
+    if group == "designs":
+        return {
+            **common,
+            "requirement_ids": value["requirement_ids"],
+            "extension_points": value["extension_points"],
+        }
+    if group == "verification":
+        return {
+            "requirement_ids": value["requirement_ids"],
+            "design_ids": value["design_ids"],
+            "acceptance_criteria_ids": value["acceptance_criteria_ids"],
+            "level": value["level"],
+            "test_key": value["test_key"],
+            "selector": value.get("selector"),
+            "mandatory": value["mandatory"],
+        }
+    raise SdlcError(f"未知 artifact group: {group}")
 
 
 def _commit_revision(
     root: Path,
     candidate_id: str,
     *,
-    previous: Path | None,
-    changed: dict[str, dict[str, Any]],
+    previous: dict[str, Any] | None,
+    title: str,
     source_refs: list[dict[str, str]],
-    derived: dict[str, str] | None = None,
+    requirements: list[dict[str, Any]],
+    designs: list[dict[str, Any]],
+    verification: list[dict[str, Any]],
     state: str = "draft",
+    validation: dict[str, Any] | None = None,
+    preview: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    candidate_root = _candidate_root(root, candidate_id)
-    revisions = candidate_root / "revisions"
-    revisions.mkdir(parents=True, exist_ok=True)
-    current_revision = 0
-    pointer_path = candidate_root / "candidate.json"
-    if pointer_path.is_file():
-        current_revision = int(read_json(pointer_path)["current_revision"])
-    revision = current_revision + 1
-    final = revisions / f"{revision:04d}"
-    if final.exists():
+    revision = 1 if previous is None else int(previous["revision"]) + 1
+    full_feature_map = _rebuild_feature_map(title, requirements)
+    validate_schema_instance(
+        root, "artifacts/feature-map.schema.json", full_feature_map
+    )
+    feature_map = {
+        key: value
+        for key, value in full_feature_map.items()
+        if key != "goal"
+    }
+    content_identity = {
+        "feature_map": full_feature_map,
+        "requirements": requirements,
+        "designs": designs,
+        "verification": verification,
+        "source_refs": source_refs,
+    }
+    value = {
+        "schema_version": "3.0",
+        "candidate_id": candidate_id,
+        "revision": revision,
+        "state": state,
+        "title": title[:256],
+        "feature_map": feature_map,
+        "requirements": sorted(requirements, key=lambda item: item["id"]),
+        "designs": sorted(designs, key=lambda item: item["id"]),
+        "verification": sorted(verification, key=lambda item: item["id"]),
+        "source_refs": source_refs,
+        "content_hash": f"sha256:{sha256_json(content_identity)}",
+        "validation": validation,
+        "preview": preview,
+        "created_at": utc_now(),
+    }
+    path = (
+        _candidate_root(root, candidate_id)
+        / "revisions"
+        / f"{revision:04d}.json"
+    )
+    if path.exists():
         raise SdlcError(f"candidate revision 已存在: {candidate_id}@{revision}")
-    temporary = Path(tempfile.mkdtemp(prefix=".writing-", dir=revisions))
-    try:
-        if previous is not None:
-            for item in previous.iterdir():
-                if item.name in {"manifest.json", "preview.md", "validation.json"}:
-                    continue
-                target = temporary / item.name
-                if item.is_dir():
-                    shutil.copytree(item, target)
-                else:
-                    shutil.copy2(item, target)
-        for relative, value in changed.items():
-            target = temporary / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(
-                json.dumps(value, ensure_ascii=False, indent=2) + "\n",
-                encoding="utf-8",
-                newline="\n",
-            )
-        for relative, content in (derived or {}).items():
-            target = temporary / relative
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8", newline="\n")
-        manifest = _build_manifest(candidate_id, revision, temporary, source_refs)
-        validate_schema_instance(root, "v2/candidate-manifest.schema.json", manifest)
-        (temporary / "manifest.json").write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
-            newline="\n",
-        )
-        os.replace(temporary, final)
-    finally:
-        if temporary.exists():
-            shutil.rmtree(temporary, ignore_errors=True)
+    write_compact_index(path, value)
     pointer = {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "candidate_id": candidate_id,
         "current_revision": revision,
         "state": state,
-        "current_hash": manifest["content_hash"],
+        "current_hash": value["content_hash"],
         "updated_at": utc_now(),
     }
-    validate_schema_instance(root, "v2/candidate-pointer.schema.json", pointer)
-    atomic_write(
-        pointer_path,
-        json.dumps(pointer, ensure_ascii=False, indent=2) + "\n",
-    )
-    return {"revision": revision, "manifest": manifest, "pointer": pointer}
+    write_compact_index(_candidate_root(root, candidate_id) / "index.json", pointer)
+    return value
 
 
-def _build_manifest(
-    candidate_id: str,
-    revision: int,
-    directory: Path,
-    source_refs: list[dict[str, str]],
+def _rebuild_feature_map(
+    title: str, requirements: list[dict[str, Any]]
 ) -> dict[str, Any]:
-    def records(folder: str) -> list[dict[str, str]]:
-        base = directory / folder
-        if not base.is_dir():
-            return []
-        return [
-            {
-                "id": path.stem,
-                "path": path.relative_to(directory).as_posix(),
-                "sha256": sha256_file(path),
-            }
-            for path in sorted(base.glob("*.json"))
-        ]
-
-    artifacts = {
-        "feature_map": {
-            "path": "feature-map.json",
-            "sha256": sha256_file(directory / "feature-map.json"),
-        },
-        "requirements": records("requirements"),
-        "designs": records("designs"),
-        "verification": records("verification"),
-        "source_refs": source_refs,
-    }
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for requirement in requirements:
+        grouped.setdefault(requirement["feature_id"], []).append(requirement)
     return {
-        "schema_version": "2.0",
-        "candidate_id": candidate_id,
-        "revision": revision,
-        **artifacts,
-        "content_hash": f"sha256:{sha256_json(artifacts)}",
+        "schema_version": "3.0",
+        "initiative_id": "I-0001",
+        "title": title,
+        "goal": title,
+        "features": [
+            {
+                "id": feature_id,
+                "title": sorted(records, key=lambda item: item["id"])[0]["title"],
+                "requirement_ids": sorted(item["id"] for item in records),
+                "depends_on": [],
+                "status": "candidate",
+            }
+            for feature_id, records in sorted(grouped.items())
+        ],
     }
 
 
-def _manifest_source_refs(revision: Path) -> list[dict[str, str]]:
-    value = read_json(revision / "manifest.json").get("source_refs", [])
-    return value if isinstance(value, list) else []
+def _load_current_revision(
+    root: Path, candidate_id: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    candidate_root = _candidate_root(root, candidate_id)
+    pointer = read_compact_index(candidate_root / "index.json")
+    revision = read_compact_index(
+        candidate_root
+        / "revisions"
+        / f"{int(pointer['current_revision']):04d}.json"
+    )
+    return pointer, revision
+
+
+def _load_artifacts(
+    root: Path, revision: dict[str, Any], group: str
+) -> dict[str, dict[str, Any]]:
+    documents = {}
+    for record in revision[group]:
+        path = root / record["content_ref"]
+        if not path.is_file() or sha256_file(path) != record["sha256"]:
+            raise SdlcError(f"artifact 缺失或 hash 漂移: {record['content_ref']}")
+        value = read_markdown_record(path)
+        documents[record["id"]] = value
+    return documents
+
+
+def _replace_record(
+    records: list[dict[str, Any]], replacement: dict[str, Any]
+) -> list[dict[str, Any]]:
+    return sorted(
+        [
+            item for item in records
+            if item["id"] != replacement["id"]
+        ] + [replacement],
+        key=lambda item: item["id"],
+    )
+
+
+def _next_identifier(
+    documents: dict[str, Any], pattern: re.Pattern[str], prefix: str
+) -> str:
+    numbers = [
+        int(match.group(1))
+        for identifier in documents
+        if (match := pattern.fullmatch(identifier))
+    ]
+    return f"{prefix}-{max(numbers, default=0) + 1:04d}"
+
+
+def _next_feature_identifier(feature_map: dict[str, Any]) -> str:
+    numbers = [
+        int(match.group(1))
+        for feature in feature_map.get("features", [])
+        if (match := _FEATURE_PATTERN.fullmatch(str(feature.get("id", ""))))
+    ]
+    return f"F-{max(numbers, default=0) + 1:04d}"
+
+
+def _candidate_base(root: Path) -> Path:
+    return work_root(root) / "candidates"
+
+
+def _candidate_root(root: Path, candidate_id: str) -> Path:
+    if _CANDIDATE_PATTERN.fullmatch(candidate_id) is None:
+        raise SdlcError(f"非法 candidate ID: {candidate_id!r}")
+    return _candidate_base(root) / candidate_id
 
 
 def _validate_source_refs(root: Path, refs: Any) -> None:
@@ -534,60 +614,32 @@ def _validate_source_refs(root: Path, refs: Any) -> None:
             raise SdlcError(f"未知来源 anchor: {source_id}#{anchor}")
 
 
-def _load_documents(directory: Path, folder: str) -> dict[str, dict[str, Any]]:
-    base = directory / folder
-    if not base.is_dir():
-        return {}
-    return {path.stem: read_json(path) for path in sorted(base.glob("*.json"))}
-
-
-def _candidate_diagnostics(root: Path, revision: Path) -> list[dict[str, str]]:
-    feature_map = read_json(revision / "feature-map.json")
-    requirements = _load_documents(revision, "requirements")
-    designs = _load_documents(revision, "designs")
-    verification = _load_documents(revision, "verification")
+def _candidate_diagnostics(
+    root: Path,
+    feature_map: dict[str, Any],
+    requirements: dict[str, dict[str, Any]],
+    designs: dict[str, dict[str, Any]],
+    verification: dict[str, dict[str, Any]],
+) -> list[dict[str, str]]:
     diagnostics: list[dict[str, str]] = []
 
     def add(code: str, message: str) -> None:
         diagnostics.append({"code": code, "message": message})
 
-    feature_ids = {item["id"] for item in feature_map["features"]}
-    for feature in feature_map["features"]:
-        if not feature["requirement_ids"]:
-            add("feature_without_requirement", f"{feature['id']} 未关联 Requirement")
-        unknown = set(feature["requirement_ids"]) - set(requirements)
-        if unknown:
-            add(
-                "unknown_feature_requirement",
-                f"{feature['id']} 引用未知 Requirement: {sorted(unknown)}",
-            )
-        unknown_dependencies = set(feature["depends_on"]) - feature_ids
-        if unknown_dependencies:
-            add(
-                "unknown_feature_dependency",
-                f"{feature['id']} 引用未知依赖: {sorted(unknown_dependencies)}",
-            )
-    _detect_feature_cycles(feature_map["features"], add)
-
-    mapped_requirements: list[str] = [
+    mapped = [
         identifier
         for feature in feature_map["features"]
         for identifier in feature["requirement_ids"]
     ]
-    duplicates = sorted({
-        identifier
-        for identifier in mapped_requirements
-        if mapped_requirements.count(identifier) > 1
-    })
-    if duplicates:
-        add("requirement_multiple_features", f"Requirement 属于多个 Feature: {duplicates}")
-    if set(mapped_requirements) != set(requirements):
-        add(
-            "requirement_feature_mismatch",
-            "Feature Map 与 Requirement 集合不一致",
+    if len(mapped) != len(set(mapped)):
+        duplicates = sorted(
+            identifier for identifier in set(mapped) if mapped.count(identifier) > 1
         )
+        add("requirement_multiple_features", f"Requirement 属于多个 Feature: {duplicates}")
+    if set(mapped) != set(requirements):
+        add("requirement_feature_mismatch", "Feature Map 与 Requirement 集合不一致")
 
-    scaffold = read_json(root / ".sdlc-pipeline" / "scaffold.json")
+    scaffold = read_json(scaffold_path(root))
     extension_points = {
         item["id"] for item in scaffold.get("extension_points", [])
     }
@@ -604,7 +656,7 @@ def _candidate_diagnostics(root: Path, revision: Path) -> list[dict[str, str]]:
     if missing_design:
         add("requirement_without_design", f"Requirement 未关联 Design: {missing_design}")
 
-    lifecycle = read_json(root / ".sdlc-pipeline" / "lifecycle.json")
+    lifecycle = read_json(lifecycle_path(root))
     test_commands = lifecycle.get("tests", {})
     acceptance_ids = {
         criterion["id"]
@@ -615,15 +667,13 @@ def _candidate_diagnostics(root: Path, revision: Path) -> list[dict[str, str]]:
     tested_designs: set[str] = set()
     covered_acceptance: set[str] = set()
     for identifier, test in verification.items():
-        unknown_r = set(test["requirement_ids"]) - set(requirements)
-        unknown_d = set(test["design_ids"]) - set(designs)
-        unknown_ac = set(test["acceptance_criteria_ids"]) - acceptance_ids
-        if unknown_r or unknown_d or unknown_ac:
-            add(
-                "unknown_verification_reference",
-                f"{identifier} 引用未知 R/D/AC: "
-                f"{sorted(unknown_r | unknown_d | unknown_ac)}",
-            )
+        unknown = (
+            set(test["requirement_ids"]) - set(requirements)
+            | set(test["design_ids"]) - set(designs)
+            | set(test["acceptance_criteria_ids"]) - acceptance_ids
+        )
+        if unknown:
+            add("unknown_verification_reference", f"{identifier} 引用未知 R/D/AC: {sorted(unknown)}")
         if test["test_key"] not in test_commands:
             add("unknown_test_key", f"{identifier} 引用未知 lifecycle test_key: {test['test_key']}")
         elif test.get("selector") and test_commands[test["test_key"]].get("allow_selector") is not True:
@@ -641,72 +691,101 @@ def _candidate_diagnostics(root: Path, revision: Path) -> list[dict[str, str]]:
         add("design_without_verification", f"Design 缺少 mandatory Verification: {missing_test_d}")
     if missing_ac:
         add("acceptance_without_verification", f"Acceptance Criteria 缺少 mandatory Verification: {missing_ac}")
-
-    for requirement in requirements.values():
-        _validate_source_refs(root, requirement["source_refs"])
-        for criterion in requirement["acceptance_criteria"]:
-            _validate_source_refs(root, criterion["source_refs"])
     return diagnostics
 
 
-def _detect_feature_cycles(
-    features: list[dict[str, Any]],
-    add: Any,
-) -> None:
-    graph = {item["id"]: item["depends_on"] for item in features}
-    visiting: set[str] = set()
-    visited: set[str] = set()
-
-    def visit(identifier: str) -> bool:
-        if identifier in visiting:
-            return True
-        if identifier in visited:
-            return False
-        visiting.add(identifier)
-        if any(dependency in graph and visit(dependency) for dependency in graph[identifier]):
-            return True
-        visiting.remove(identifier)
-        visited.add(identifier)
-        return False
-
-    if any(visit(identifier) for identifier in graph if identifier not in visited):
-        add("feature_dependency_cycle", "Feature dependency 存在环")
-
-
-def _render_preview(revision: Path, report: dict[str, Any]) -> str:
-    feature_map = read_json(revision / "feature-map.json")
-    requirements = _load_documents(revision, "requirements")
-    designs = _load_documents(revision, "designs")
-    verification = _load_documents(revision, "verification")
+def _render_preview(
+    candidate_id: str,
+    revision: int,
+    feature_map: dict[str, Any],
+    requirements: dict[str, dict[str, Any]],
+    designs: dict[str, dict[str, Any]],
+    verification: dict[str, dict[str, Any]],
+    report: dict[str, Any],
+) -> str:
     lines = [
-        f"# Spec Candidate {report['candidate_id']}",
+        f"# Spec Candidate {candidate_id}",
         "",
-        f"- Initiative：{feature_map['title']}",
-        f"- Revision：`{int(revision.name) + 1}`",
-        f"- Validation：`{'pass' if report['ok'] else 'fail'}`",
-        f"- Requirements：`{len(requirements)}`",
-        f"- Designs：`{len(designs)}`",
-        f"- Verifications：`{len(verification)}`",
+        f"- Initiative: {feature_map['title']}",
+        f"- Revision: `{revision}`",
+        f"- Validation: `{'pass' if report['ok'] else 'fail'}`",
+        f"- Requirements: `{len(requirements)}`",
+        f"- Designs: `{len(designs)}`",
+        f"- Verifications: `{len(verification)}`",
         "",
     ]
     for feature in feature_map["features"]:
         lines += [
             f"## {feature['id']} {feature['title']}",
             "",
-            f"- Requirements：{', '.join(feature['requirement_ids'])}",
+            f"- Requirements: {', '.join(feature['requirement_ids'])}",
             "",
         ]
         for identifier in feature["requirement_ids"]:
-            requirement = requirements.get(identifier)
-            if requirement:
-                lines += [
-                    f"### {identifier} {requirement['title']}",
-                    "",
-                    requirement["goal"],
-                    "",
-                ]
-    if report["diagnostics"]:
-        lines += ["## Diagnostics", ""]
-        lines += [f"- `{item['code']}` {item['message']}" for item in report["diagnostics"]]
+            requirement = requirements[identifier]
+            lines += [
+                f"### {identifier} {requirement['title']}",
+                "",
+                requirement["goal"],
+                "",
+                "Acceptance criteria:",
+                *[
+                    f"- `{item['id']}` Given {item['given']}; "
+                    f"When {item['when']}; Then {item['then']}"
+                    for item in requirement["acceptance_criteria"]
+                ],
+                "",
+            ]
+    if designs:
+        lines += ["## Designs", ""]
+        for identifier, design in designs.items():
+            lines.append(
+                f"- `{identifier}` {design['title']} → "
+                f"{', '.join(design['requirement_ids'])}"
+            )
         lines.append("")
-    return "\n".join(lines).rstrip() + "\n"
+    if verification:
+        lines += ["## Verification", ""]
+        for identifier, test in verification.items():
+            lines.append(
+                f"- `{identifier}` `{test['test_key']}` "
+                f"mandatory=`{str(test['mandatory']).lower()}`"
+            )
+        lines.append("")
+    if report["diagnostics"]:
+        lines += [
+            "## Diagnostics",
+            "",
+            *[
+                f"- `{item['code']}` {item['message']}"
+                for item in report["diagnostics"]
+            ],
+            "",
+        ]
+    return "\n".join(lines)
+
+
+def _idempotent_result(
+    pointer: dict[str, Any], identifier: str
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "candidate_id": pointer["candidate_id"],
+        "revision": pointer["current_revision"],
+        "state": pointer["state"],
+        "artifact_id": identifier,
+        "idempotent": True,
+    }
+
+
+def _put_result(
+    candidate_id: str, revision: dict[str, Any], identifier: str
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "candidate_id": candidate_id,
+        "revision": revision["revision"],
+        "state": "draft",
+        "artifact_id": identifier,
+        "idempotent": False,
+    }

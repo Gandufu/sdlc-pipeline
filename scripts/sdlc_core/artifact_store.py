@@ -6,143 +6,196 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .common import (
-    SdlcError,
-    atomic_write,
-    read_json,
-    sha256_file,
-    sha256_json,
-    utc_now,
-    write_json,
-)
+from .common import SdlcError, sha256_file, sha256_json, utc_now
+from .layout import work_root
+from .records import read_compact_index, write_compact_index
 
 
-def publish_bundle(
+def publish_baseline(
     root: Path,
     *,
-    kind: str,
-    files: dict[str, str],
-    metadata: dict[str, Any] | None = None,
+    candidate: dict[str, Any],
 ) -> dict[str, Any]:
-    """Publish an immutable multi-file bundle and atomically switch its pointer."""
-    if not files or any(
-        not name or Path(name).is_absolute() or ".." in Path(name).parts
-        for name in files
-    ):
-        raise SdlcError("artifact bundle 文件名必须是项目内相对路径")
-    encoded = {
-        name: content.encode("utf-8")
-        for name, content in sorted(files.items())
-    }
+    """Publish one immutable Markdown baseline and one compact current pointer."""
     identity = {
-        "kind": kind,
-        "files": {
-            name: sha256_json({"utf8": content.decode("utf-8")})
-            for name, content in encoded.items()
-        },
-        "metadata": metadata or {},
+        "candidate_id": candidate["candidate_id"],
+        "revision": candidate["revision"],
+        "content_hash": candidate["content_hash"],
     }
-    bundle_id = sha256_json(identity)
-    base = root / "docs" / "sdlc" / "bundles"
-    final = base / bundle_id
+    baseline_id = sha256_json(identity)
+    base = root / "docs" / "sdlc" / "baselines"
+    final = base / baseline_id
     base.mkdir(parents=True, exist_ok=True)
     if not final.is_dir():
         temporary = Path(tempfile.mkdtemp(prefix=".publishing-", dir=base))
         try:
-            for name, content in encoded.items():
-                target = temporary / name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(content)
+            files: list[dict[str, Any]] = []
+            for group in ("requirements", "designs", "verification"):
+                for record in candidate[group]:
+                    source = root / record["content_ref"]
+                    if not source.is_file() or sha256_file(source) != record["sha256"]:
+                        raise SdlcError(
+                            f"candidate artifact 缺失或 hash 漂移: {record['content_ref']}"
+                        )
+                    target = temporary / group / f"{record['id']}.md"
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(source, target)
+                    files.append({
+                        **record,
+                        "content_ref": f"{group}/{record['id']}.md",
+                        "sha256": sha256_file(target),
+                        "size": target.stat().st_size,
+                    })
+            source_ids = sorted({
+                ref["source_id"] for ref in candidate["source_refs"]
+            } | {
+                ref["source_id"]
+                for record in candidate["requirements"]
+                for ref in (
+                    record.get("source_refs", [])
+                    + [
+                        ref
+                        for criterion in record.get("acceptance_criteria", [])
+                        for ref in criterion.get("source_refs", [])
+                    ]
+                )
+            })
+            sources: list[dict[str, Any]] = []
+            for source_id in source_ids:
+                source_directory = work_root(root) / "sources" / source_id
+                source_index = read_compact_index(
+                    source_directory / "index.json"
+                )
+                source_content = root / source_index["content_ref"]
+                if not source_content.is_file():
+                    raise SdlcError(f"source Markdown 缺失: {source_id}")
+                target_directory = temporary / "sources" / source_id
+                target_directory.mkdir(parents=True, exist_ok=True)
+                target_content = target_directory / "content.md"
+                shutil.copy2(source_content, target_content)
+                formal_index = {
+                    key: value
+                    for key, value in source_index.items()
+                    if key != "asset"
+                }
+                formal_index["state"] = "published"
+                formal_index["content_ref"] = (
+                    f"docs/sdlc/baselines/{baseline_id}/sources/"
+                    f"{source_id}/content.md"
+                )
+                target_index = target_directory / "index.json"
+                write_compact_index(target_index, formal_index)
+                sources.append({
+                    "source_id": source_id,
+                    "index_ref": f"sources/{source_id}/index.json",
+                    "index_sha256": sha256_file(target_index),
+                    "content_ref": f"sources/{source_id}/content.md",
+                    "content_sha256": sha256_file(target_content),
+                })
+            preview = candidate.get("preview")
+            if not isinstance(preview, dict):
+                raise SdlcError("ready candidate 缺少 preview")
+            preview_source = root / preview["content_ref"]
+            if (
+                not preview_source.is_file()
+                or sha256_file(preview_source) != preview["sha256"]
+            ):
+                raise SdlcError("candidate preview 缺失或 hash 漂移")
+            shutil.copy2(preview_source, temporary / "spec.md")
             manifest = {
-                "schema_version": "2.0",
-                "bundle_id": bundle_id,
-                "kind": kind,
+                "schema_version": "3.0",
+                "baseline_id": baseline_id,
+                "kind": "spec",
+                "state": "published",
+                "candidate_id": candidate["candidate_id"],
+                "candidate_revision": candidate["revision"],
+                "candidate_content_hash": candidate["content_hash"],
+                "feature_index": candidate["feature_map"],
+                "source_refs": candidate["source_refs"],
+                "sources": sources,
+                "requirements": [
+                    item for item in files
+                    if item["id"].startswith("R-")
+                ],
+                "designs": [
+                    item for item in files
+                    if item["id"].startswith("D-")
+                ],
+                "verification": [
+                    item for item in files
+                    if item["id"].startswith("T-")
+                ],
+                "spec_ref": "spec.md",
+                "spec_sha256": sha256_file(temporary / "spec.md"),
                 "created_at": utc_now(),
-                "metadata": metadata or {},
-                "files": {
-                    name: {
-                        "sha256": sha256_file(temporary / name),
-                        "size": (temporary / name).stat().st_size,
-                    }
-                    for name in sorted(files)
-                },
             }
-            write_json(temporary / "bundle.json", manifest)
+            write_compact_index(temporary / "manifest.json", manifest)
             os.replace(temporary, final)
         finally:
             if temporary.exists():
                 shutil.rmtree(temporary, ignore_errors=True)
-    manifest = _verify_bundle(final, expected_kind=kind)
+    manifest = _verify_baseline(final)
     pointer = {
-        "schema_version": "2.0",
-        "kind": kind,
-        "bundle_id": bundle_id,
-        "path": f"docs/sdlc/bundles/{bundle_id}",
+        "schema_version": "3.0",
+        "kind": "spec",
+        "state": "published",
+        "baseline_id": baseline_id,
+        "path": f"docs/sdlc/baselines/{baseline_id}",
+        "content_hash": manifest["candidate_content_hash"],
         "updated_at": utc_now(),
-        "files": manifest["files"],
     }
-    atomic_write(
-        root / "docs" / "sdlc" / f"{kind}-current.json",
-        __import__("json").dumps(pointer, ensure_ascii=False, indent=2) + "\n",
+    write_compact_index(root / "docs" / "sdlc" / "current.json", pointer)
+    return {"baseline_id": baseline_id, "pointer": pointer}
+
+
+def current_baseline(root: Path) -> tuple[Path, dict[str, Any]] | None:
+    pointer = read_compact_index(
+        root / "docs" / "sdlc" / "current.json", required=False
     )
-    materialize_bundle(root, kind)
-    return {"bundle_id": bundle_id, "pointer": pointer}
-
-
-def current_bundle(root: Path, kind: str) -> tuple[Path, dict[str, Any]] | None:
-    pointer_path = root / "docs" / "sdlc" / f"{kind}-current.json"
-    pointer = read_json(pointer_path, required=False)
     if not pointer:
         return None
-    if pointer.get("kind") != kind or not isinstance(pointer.get("bundle_id"), str):
-        raise SdlcError(f"{pointer_path} 不是有效的 {kind} bundle 指针")
-    bundle = root / "docs" / "sdlc" / "bundles" / pointer["bundle_id"]
-    manifest = _verify_bundle(bundle, expected_kind=kind)
-    return bundle, manifest
+    if pointer.get("kind") != "spec" or not isinstance(
+        pointer.get("baseline_id"), str
+    ):
+        raise SdlcError("docs/sdlc/current.json 不是有效 spec baseline 指针")
+    baseline = root / pointer["path"]
+    manifest = _verify_baseline(baseline)
+    if manifest["baseline_id"] != pointer["baseline_id"]:
+        raise SdlcError("current baseline ID 不匹配")
+    return baseline, manifest
 
 
-def current_artifact_path(root: Path, kind: str, name: str) -> Path:
-    selected = current_bundle(root, kind)
-    if selected:
-        bundle, manifest = selected
-        if name not in manifest["files"]:
-            raise SdlcError(f"当前 {kind} bundle 缺少文件: {name}")
-        return bundle / name
-    return root / "docs" / "sdlc" / "current" / name
-
-
-def materialize_bundle(root: Path, kind: str) -> None:
-    selected = current_bundle(root, kind)
-    if not selected:
-        return
-    bundle, manifest = selected
-    mirror = root / "docs" / "sdlc" / "current"
-    for name, evidence in manifest["files"].items():
-        source = bundle / name
-        target = mirror / name
-        if (
-            target.is_file()
-            and sha256_file(target) == evidence["sha256"]
+def _verify_baseline(path: Path) -> dict[str, Any]:
+    manifest = read_compact_index(path / "manifest.json")
+    if manifest.get("baseline_id") != path.name:
+        raise SdlcError(f"baseline ID 与目录不匹配: {path}")
+    for group in ("requirements", "designs", "verification"):
+        for record in manifest.get(group, []):
+            artifact = path / record["content_ref"]
+            try:
+                artifact.resolve().relative_to(path.resolve())
+            except ValueError as exc:
+                raise SdlcError(
+                    f"baseline artifact 路径越界: {record['content_ref']}"
+                ) from exc
+            if not artifact.is_file() or sha256_file(artifact) != record["sha256"]:
+                raise SdlcError(
+                    f"baseline artifact 缺失或 hash 漂移: {record['content_ref']}"
+                )
+    for source in manifest.get("sources", []):
+        for field, hash_field in (
+            ("index_ref", "index_sha256"),
+            ("content_ref", "content_sha256"),
         ):
-            continue
-        atomic_write(target, source.read_text(encoding="utf-8"))
-
-
-def _verify_bundle(bundle: Path, *, expected_kind: str) -> dict[str, Any]:
-    manifest = read_json(bundle / "bundle.json")
-    if manifest.get("kind") != expected_kind:
-        raise SdlcError(f"artifact bundle kind 不匹配: {bundle}")
-    if manifest.get("bundle_id") != bundle.name:
-        raise SdlcError(f"artifact bundle ID 与目录不匹配: {bundle}")
-    files = manifest.get("files")
-    if not isinstance(files, dict) or not files:
-        raise SdlcError(f"artifact bundle 没有文件证据: {bundle}")
-    for name, evidence in files.items():
-        path = bundle / name
-        try:
-            path.resolve().relative_to(bundle.resolve())
-        except ValueError as exc:
-            raise SdlcError(f"artifact bundle 路径越界: {name}") from exc
-        if not path.is_file() or sha256_file(path) != evidence.get("sha256"):
-            raise SdlcError(f"artifact bundle 文件缺失或 hash 漂移: {name}")
+            artifact = path / source[field]
+            if (
+                not artifact.is_file()
+                or sha256_file(artifact) != source[hash_field]
+            ):
+                raise SdlcError(
+                    f"baseline source 缺失或 hash 漂移: {source[field]}"
+                )
+    spec = path / manifest["spec_ref"]
+    if not spec.is_file() or sha256_file(spec) != manifest["spec_sha256"]:
+        raise SdlcError("baseline spec.md 缺失或 hash 漂移")
     return manifest

@@ -3,8 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifact_store import current_bundle
-from .common import SdlcError, git, read_json, sha256_file, sha256_json, write_json
+from .artifact_store import current_baseline
+from .artifacts import load_test_results
+from .common import SdlcError, git, read_json, sha256_file, sha256_json
+from .layout import evidence_root, scaffold_path
+from .records import read_markdown_record, write_markdown_record
 from .schema_validation import validate_schema_instance
 
 
@@ -14,17 +17,14 @@ def build_delivery_trace(
     changed_files: list[str],
     test_results_path: str,
 ) -> dict[str, Any]:
-    selected = current_bundle(root, "spec")
+    selected = current_baseline(root)
     if not selected:
-        raise SdlcError("没有已发布 spec bundle")
-    bundle, manifest = selected
-    metadata = manifest.get("metadata", {})
-    if metadata.get("schema_version") != "2.0":
-        raise SdlcError("Delivery Trace v2 只适用于 Schema v2 spec bundle")
-    requirements = _documents(bundle, "requirements")
-    designs = _documents(bundle, "designs")
-    verification = _documents(bundle, "verification")
-    scaffold = read_json(root / ".sdlc-pipeline" / "scaffold.json")
+        raise SdlcError("没有已发布 spec baseline")
+    baseline, manifest = selected
+    requirements = _documents(baseline, manifest, "requirements")
+    designs = _documents(baseline, manifest, "designs")
+    verification = _documents(baseline, manifest, "verification")
+    scaffold = read_json(scaffold_path(root))
     extension_paths = {
         item["id"]: item["path"].rstrip("/")
         for item in scaffold.get("extension_points", [])
@@ -67,7 +67,7 @@ def build_delivery_trace(
         relative_results = results_path.resolve().relative_to(root.resolve()).as_posix()
     except ValueError as exc:
         raise SdlcError("test results 路径越出项目") from exc
-    results = read_json(results_path)
+    results = load_test_results(root, test_results_path)
     passed = {
         item["id"]
         for item in results.get("results", [])
@@ -128,23 +128,32 @@ def build_delivery_trace(
     )
     incomplete += [f"{identifier}:missing_changed_files" for identifier in uncovered_designs]
     trace = {
-        "schema_version": "2.0",
-        "spec_bundle_id": manifest["bundle_id"],
+        "schema_version": "3.0",
+        "baseline_id": manifest["baseline_id"],
         "source_fingerprint": sha256_json(list(evidence.values())),
         "rows": rows,
         "ok": not incomplete,
         "incomplete": sorted(set(incomplete)),
     }
-    validate_schema_instance(root, "v2/delivery-trace.schema.json", trace)
-    write_json(root / ".sdlc-pipeline" / "runs" / "delivery-trace.json", trace)
+    validate_schema_instance(
+        root, "artifacts/delivery-trace.schema.json", trace
+    )
+    write_markdown_record(
+        evidence_root(root) / "delivery-trace.md",
+        trace,
+        title="Delivery trace",
+        summary_lines=[
+            f"- Baseline: `{manifest['baseline_id']}`",
+            f"- Complete: `{str(trace['ok']).lower()}`",
+        ],
+    )
     return trace
 
 
-def _documents(bundle: Path, folder: str) -> dict[str, dict[str, Any]]:
-    directory = bundle / folder
-    if not directory.is_dir():
-        raise SdlcError(f"Schema v2 spec bundle 缺少 {folder}/")
+def _documents(
+    baseline: Path, manifest: dict[str, Any], folder: str
+) -> dict[str, dict[str, Any]]:
     return {
-        path.stem: read_json(path)
-        for path in sorted(directory.glob("*.json"))
+        record["id"]: read_markdown_record(baseline / record["content_ref"])
+        for record in manifest[folder]
     }

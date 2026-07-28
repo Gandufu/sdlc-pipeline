@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sdlc-pipeline.local/schemas/v2/source-ref.schema.json",
+  "$id": "https://sdlc-pipeline.local/schemas/artifacts/source-ref.schema.json",
   "$defs": {
     "source_ref": {
       "type": "object",

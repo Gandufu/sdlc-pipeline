@@ -14,8 +14,8 @@ from typing import Any
 from .artifacts import (
     current_spec_hashes,
     load_current_spec,
-    render_test_results,
     require_code_ready,
+    write_test_results,
 )
 from .common import (
     SdlcError,
@@ -25,9 +25,26 @@ from .common import (
     run_command,
     sha256_file,
     utc_now,
-    write_json,
+)
+from .layout import (
+    contracts_root,
+    evidence_root,
+    lifecycle_path as layout_lifecycle_path,
+    rules_root,
+    scaffold_path,
+    templates_root,
+)
+from .records import (
+    write_compact_index,
+    write_markdown_record,
 )
 from .runs import pid_alive, read_active, record_active, retain_process, stop_active
+from .stores import (
+    read_evidence_record,
+    read_work_record,
+    write_evidence_record,
+    write_work_record,
+)
 from .trace import verify_scaffold, worktree_fingerprint
 from .schema_validation import validate_schema_instance
 from .tooling import ensure_tooling_ignores
@@ -47,7 +64,7 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
     if path.exists():
         return {"status": "existing", "path": "AGENTS.md"}
     contract = load_contract(root)
-    scaffold = read_json(root / ".sdlc-pipeline" / "scaffold.json")
+    scaffold = read_json(scaffold_path(root))
     command_lines = []
     for name in ("install", "compile", "start", "stop", "restart"):
         command = contract["commands"].get(name)
@@ -59,7 +76,7 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
         if command
     ]
     active_rules = read_json(
-        root / ".sdlc-pipeline" / "rules" / "active.json",
+        contracts_root(root) / "active-rules.json",
         required=False,
     ) or {"rules": []}
     rule_lines = [
@@ -105,17 +122,16 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
 
 def activate_template_rules(root: Path) -> dict[str, Any]:
     """Materialize the selected template's rule set as init evidence."""
-    contract_root = root / ".sdlc-pipeline"
-    scaffold = read_json(contract_root / "scaffold.json")
+    scaffold = read_json(scaffold_path(root))
     template_id = scaffold["template_id"]
-    manifest_path = contract_root / "templates" / "manifest.json"
+    manifest_path = templates_root(root) / "manifest.json"
     rules: list[dict[str, Any]] = []
     source = "unregistered-template"
     rule_ids = scaffold.get("rules", [])
     if manifest_path.exists():
         from .bootstrap import template_registry
 
-        templates = template_registry(contract_root)
+        templates = template_registry(templates_root(root).parent)
         template = next(
             (item for item in templates if item["id"] == template_id),
             None,
@@ -133,7 +149,7 @@ def activate_template_rules(root: Path) -> dict[str, Any]:
         for name in rule_ids:
             if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name):
                 raise SdlcError(f"模板 {template_id} 声明了非法 rule ID: {name}")
-            relative = f".sdlc-pipeline/rules/{name}.md"
+            relative = f".sdlc-pipeline/runtime/rules/{name}.md"
             path = root / relative
             if not path.is_file():
                 raise SdlcError(f"模板 {template_id} 缺少声明的 rule: {relative}")
@@ -143,7 +159,7 @@ def activate_template_rules(root: Path) -> dict[str, Any]:
                 "sha256": sha256_file(path),
                 "classification": ["guidance"],
             }
-            policy_relative = f".sdlc-pipeline/rules/{name}.policy.json"
+            policy_relative = f".sdlc-pipeline/runtime/rules/{name}.policy.json"
             policy_path = root / policy_relative
             if policy_path.is_file():
                 policy = read_json(policy_path)
@@ -158,12 +174,12 @@ def activate_template_rules(root: Path) -> dict[str, Any]:
         "source": source,
         "rules": rules,
     }
-    write_json(contract_root / "rules" / "active.json", active)
+    write_compact_index(contracts_root(root) / "active-rules.json", active)
     return active
 
 
 def contract_path(root: Path) -> Path:
-    return root / ".sdlc-pipeline" / "lifecycle.json"
+    return layout_lifecycle_path(root)
 
 
 def load_contract(root: Path) -> dict[str, Any]:
@@ -237,7 +253,7 @@ def resolve_command(root: Path, command: dict[str, Any]) -> tuple[list[str], Pat
 
 
 def log_dir(root: Path) -> Path:
-    path = root / ".sdlc-pipeline" / "runs" / "logs"
+    path = evidence_root(root) / "logs"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -312,9 +328,12 @@ def run_policy_gate(root: Path, phase: str) -> dict[str, Any]:
         "created_at": utc_now(),
         "source_fingerprint": worktree_fingerprint(root),
     }
-    write_json(
-        root / ".sdlc-pipeline" / "runs" / f"policy-{phase}-evidence.json",
+    write_evidence_record(
+        root,
+        f"policy/{phase}",
         report,
+        state="passed" if report["ok"] else "failed",
+        title=f"{phase} policy evidence",
     )
     if not report["ok"]:
         raise SdlcError(
@@ -516,7 +535,7 @@ def artifact_evidence(root: Path) -> dict[str, Any]:
 
 def compile_restart_verify(root: Path) -> dict[str, Any]:
     require_code_ready(load_current_spec(root))
-    read_json(root / ".sdlc-pipeline" / "runs" / "coder-handoff.json")
+    read_work_record(root, "coder-handoff")
     drift = verify_scaffold(root)
     if not drift["ok"]:
         raise SdlcError(f"脚手架漂移，拒绝编译: {drift['drift']}")
@@ -534,7 +553,9 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
         "source_fingerprint": worktree_fingerprint(root),
         "spec_hashes": current_spec_hashes(root),
     }
-    write_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json", evidence)
+    write_evidence_record(
+        root, "code", evidence, state="passed", title="Code gate evidence"
+    )
     return evidence
 
 
@@ -600,29 +621,17 @@ def init_project(
 
 
 def _write_init_report(root: Path, report: dict[str, Any]) -> None:
-    json_path = root / "docs" / "sdlc" / "init-report.json"
-    write_json(json_path, report)
-    lines = [
-        "# SDLC Init 报告", "",
-        f"- 状态：`{report['status']}`",
-        f"- 时间：`{report['created_at']}`",
-        f"- 缺失工具：{', '.join(report.get('tools', {}).get('missing', [])) or '无'}",
-    ]
-    if "agents_md" in report:
-        lines.append(
-            f"- AGENTS.md：`{report['agents_md']['status']}`"
-        )
-    if "active_rules" in report:
-        names = [item["id"] for item in report["active_rules"].get("rules", [])]
-        lines.append(f"- Active rules：{', '.join(names) or '无'}")
-    for name in ("install", "compile", "start", "health", "artifacts", "stop"):
-        if name in report:
-            lines.append(f"- {name}：`{'pass' if report[name].get('ok') else 'fail'}`")
-    atomic_write(root / "docs" / "sdlc" / "init-report.md", "\n".join(lines) + "\n")
+    write_evidence_record(
+        root,
+        "init",
+        report,
+        state=report["status"],
+        title="SDLC Init 报告",
+    )
 
 
 def run_test_plan(root: Path) -> dict[str, Any]:
-    code_evidence = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json")
+    code_evidence = read_evidence_record(root, "code")
     if not code_evidence.get("ok"):
         raise SdlcError("code 阶段没有真实 compile/restart/verify 证据")
     spec_hashes = current_spec_hashes(root)
@@ -674,9 +683,12 @@ def run_test_plan(root: Path) -> dict[str, Any]:
         "verifiers": [],
         "created_at": utc_now(),
     }
-    write_json(
-        root / ".sdlc-pipeline" / "runs" / "policy-test-evidence.json",
+    write_evidence_record(
+        root,
+        "policy/test",
         policy,
+        state="passed",
+        title="Test policy evidence",
     )
     execution = {
         "schema_version": "1.0",
@@ -690,7 +702,13 @@ def run_test_plan(root: Path) -> dict[str, Any]:
             "source_fingerprint": code_evidence["source_fingerprint"],
         },
     }
-    write_json(root / ".sdlc-pipeline" / "runs" / "test-execution.json", execution)
+    write_evidence_record(
+        root,
+        "test-execution",
+        execution,
+        state="passed" if all(item["status"] == "pass" for item in results) else "failed",
+        title="Test execution evidence",
+    )
     return {"ok": policy["ok"] and all(item["status"] == "pass" for item in results), **execution}
 
 
@@ -719,7 +737,6 @@ def run_focused_checks(
     commands = load_contract(root)["tests"]
     results = []
     executions: dict[tuple[str, str], dict[str, Any]] = {}
-    cache_dir = root / ".sdlc-pipeline" / "runs" / "focused"
     for test_id in selected_ids:
         case = cases[test_id]
         selector = case["selector"]
@@ -731,8 +748,7 @@ def run_focused_checks(
             "spec_hashes": current_spec_hashes(root),
             "source_fingerprint": worktree_fingerprint(root),
         }
-        cache_path = cache_dir / f"{test_id}.json"
-        cached = read_json(cache_path, required=False)
+        cached = read_work_record(root, f"focused/{test_id}", required=False)
         if cached and cached.get("binding") == binding:
             results.append({**cached["result"], "cached": True})
             continue
@@ -764,12 +780,12 @@ def run_focused_checks(
         }
         if reused_from:
             focused_result["reused_execution_from"] = reused_from
-        write_json(cache_path, {
+        write_work_record(root, f"focused/{test_id}", {
             "schema_version": "1.0",
             "binding": binding,
             "result": focused_result,
             "created_at": utc_now(),
-        })
+        }, state=focused_result["status"], title=f"Focused check {test_id}")
         results.append({
             **focused_result,
         })
@@ -786,21 +802,21 @@ def run_focused_checks(
         "created_at": utc_now(),
         "authoritative_delivery_evidence": False,
     }
-    write_json(
-        root / ".sdlc-pipeline" / "runs" / "focused-check-evidence.json",
+    write_evidence_record(
+        root,
+        "focused-check",
         evidence,
+        state="passed" if evidence["ok"] else "failed",
+        title="Focused check evidence",
     )
     return evidence
 
 
 def execute_tests(root: Path) -> dict[str, Any]:
-    execution = read_json(
-        root / ".sdlc-pipeline" / "runs" / "test-execution.json",
-        required=False,
-    )
+    execution = read_evidence_record(root, "test-execution", required=False)
     if not execution:
         execution = run_test_plan(root)
-    code_evidence = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json")
+    code_evidence = read_evidence_record(root, "code")
     expected_binding = {
         "spec_hashes": current_spec_hashes(root),
         "lifecycle_sha256": sha256_file(contract_path(root)),
@@ -833,19 +849,23 @@ def execute_tests(root: Path) -> dict[str, Any]:
         "mandatory_failed": mandatory_failed,
         "open_issues": [],
     }
-    directory = root / "docs" / "sdlc" / "test-results"
     validate_schema_instance(root, "test-results.schema.json", output)
-    write_json(directory / f"{version}.json", output)
-    atomic_write(directory / f"{version}.md", render_test_results(output))
+    test_results_ref = write_test_results(root, output)
     candidate = {
         "schema_version": "1.0",
         "version": version,
         "status": "ready" if output["status"] == "pass" else "failed",
-        "test_results": f"docs/sdlc/test-results/{version}.json",
+        "test_results": test_results_ref,
         "created_at": utc_now(),
         "binding": expected_binding,
     }
-    write_json(root / ".sdlc-pipeline" / "runs" / "version-candidate.json", candidate)
+    write_work_record(
+        root,
+        "version-candidate",
+        candidate,
+        state=candidate["status"],
+        title=f"Version candidate {version}",
+    )
     return output
 
 
@@ -856,14 +876,13 @@ def verify_delivery(root: Path) -> dict[str, Any]:
         "spec_hashes": current_spec_hashes(root),
         "lifecycle_sha256": sha256_file(contract_path(root)),
     }
-    evidence_path = root / ".sdlc-pipeline" / "runs" / "delivery-evidence.json"
-    cached = read_json(evidence_path, required=False)
+    cached = read_evidence_record(root, "delivery", required=False)
     if cached and cached.get("binding") == binding:
         result_path = root / cached.get("test_results", "")
         if result_path.is_file():
             return {**cached, "cached": True}
 
-    code = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json")
+    code = read_evidence_record(root, "code")
     if not code.get("ok") or code.get("source_fingerprint") != binding["source_fingerprint"]:
         raise SdlcError("code evidence 缺失或已失效；请先重新执行 code gate")
     cleanup: dict[str, Any] = {"stopped": False}
@@ -884,10 +903,18 @@ def verify_delivery(root: Path) -> dict[str, Any]:
         "start": started,
         "health": health,
         "execution": execution,
-        "test_results": f"docs/sdlc/test-results/{results['version']}.json",
+        "test_results": (
+            f"docs/sdlc/test-results/{results['version']}/index.json"
+        ),
         "version": results["version"],
         "cleanup": cleanup,
         "verified_at": utc_now(),
     }
-    write_json(evidence_path, evidence)
+    write_evidence_record(
+        root,
+        "delivery",
+        evidence,
+        state="passed" if evidence["ok"] else "failed",
+        title="Delivery evidence",
+    )
     return evidence

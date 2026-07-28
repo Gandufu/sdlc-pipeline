@@ -3,14 +3,21 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .artifact_store import current_bundle, materialize_bundle
+from .artifact_store import current_baseline
 from .common import SdlcError, read_json, sha256_json
+from .layout import lifecycle_path, relative_to_project, scaffold_path
+from .records import (
+    read_compact_index,
+    read_markdown_record,
+    write_compact_index,
+    write_markdown_record,
+)
 from .schema_validation import validate_schema_instance
-from .sources import load_source
+from .sources import load_indexed_source
 
 
 def lifecycle_test_commands(root: Path) -> dict[str, dict[str, Any]]:
-    contract = read_json(root / ".sdlc-pipeline" / "lifecycle.json")
+    contract = read_json(lifecycle_path(root))
     tests = contract.get("tests")
     if not isinstance(tests, dict):
         raise SdlcError("lifecycle.json tests 必须是对象")
@@ -22,33 +29,29 @@ def lifecycle_test_commands(root: Path) -> dict[str, dict[str, Any]]:
 
 
 def current_spec_hashes(root: Path) -> dict[str, str]:
-    bundle, manifest = _v2_bundle(root)
-    files = manifest["files"]
+    _, manifest = _baseline(root)
 
-    def group(prefix: str) -> str:
+    def group(name: str) -> str:
         return sha256_json({
-            name: evidence["sha256"]
-            for name, evidence in sorted(files.items())
-            if name.startswith(prefix)
+            item["id"]: item["sha256"]
+            for item in manifest[name]
         })
 
     return {
-        "feature_map": files["feature-map.json"]["sha256"],
-        "requirements": group("requirements/"),
-        "designs": group("designs/"),
-        "verification": group("verification/"),
+        "feature_map": sha256_json(_full_feature_map(manifest)),
+        "requirements": group("requirements"),
+        "designs": group("designs"),
+        "verification": group("verification"),
     }
 
 
 def unresolved_blocking_questions(spec: dict[str, Any]) -> list[dict[str, Any]]:
-    # A v2 baseline can only be published after candidate validation and exact-hash
-    # approval. Interview questions live in the checkpoint, not in the baseline.
     return []
 
 
 def require_code_ready(spec: dict[str, Any]) -> None:
-    if spec.get("schema_version") != "2.0":
-        raise SdlcError("code 门禁只接受已发布的 Schema v2 Spec")
+    if spec.get("schema_version") != "3.0":
+        raise SdlcError("code 门禁只接受已发布的 Storage Layout v3 Spec")
 
 
 def render_test_results(data: dict[str, Any]) -> str:
@@ -77,21 +80,58 @@ def render_test_results(data: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def load_current_spec(root: Path) -> dict[str, Any]:
-    """Load the published v2 bundle and derive the runtime view used by Core.
-
-    This view is never persisted as aggregate requirements/design/test-plan files.
-    """
-    materialize_bundle(root, "spec")
-    bundle, _ = _v2_bundle(root)
-    feature_map = read_json(bundle / "feature-map.json")
-    validate_schema_instance(root, "v2/feature-map.schema.json", feature_map)
-    requirements = _documents(root, bundle, "requirements", "v2/requirement.schema.json")
-    designs = _documents(root, bundle, "designs", "v2/design.schema.json")
-    verification = _documents(
-        root, bundle, "verification", "v2/verification.schema.json"
+def write_test_results(root: Path, data: dict[str, Any]) -> str:
+    directory = root / "docs" / "sdlc" / "test-results" / data["version"]
+    content_path = directory / "result.md"
+    write_markdown_record(
+        content_path,
+        data,
+        title=f"测试结果 {data['version']}",
+        summary_lines=[
+            f"- 状态: `{data['status']}`",
+            f"- 测试数: `{len(data['results'])}`",
+        ],
     )
-    scaffold = read_json(root / ".sdlc-pipeline" / "scaffold.json")
+    index_path = directory / "index.json"
+    index = {
+        "schema_version": "3.0",
+        "version": data["version"],
+        "state": data["status"],
+        "result_ids": [
+            {"id": item["id"], "state": item["status"]}
+            for item in data["results"]
+        ],
+        "content_ref": relative_to_project(root, content_path),
+        "content_hash": sha256_json(data),
+        "started_at": data["started_at"],
+        "finished_at": data["finished_at"],
+    }
+    write_compact_index(index_path, index)
+    return relative_to_project(root, index_path)
+
+
+def load_test_results(root: Path, index_ref: str) -> dict[str, Any]:
+    index = read_compact_index(root / index_ref)
+    value = read_markdown_record(root / index["content_ref"])
+    if sha256_json(value) != index["content_hash"]:
+        raise SdlcError("测试结果 Markdown 与索引 hash 不匹配")
+    return value
+
+
+def load_current_spec(root: Path) -> dict[str, Any]:
+    baseline, manifest = _baseline(root)
+    feature_map = _full_feature_map(manifest)
+    validate_schema_instance(root, "artifacts/feature-map.schema.json", feature_map)
+    requirements = _documents(
+        root, baseline, manifest, "requirements", "artifacts/requirement.schema.json"
+    )
+    designs = _documents(
+        root, baseline, manifest, "designs", "artifacts/design.schema.json"
+    )
+    verification = _documents(
+        root, baseline, manifest, "verification", "artifacts/verification.schema.json"
+    )
+    scaffold = read_json(scaffold_path(root))
     extension_paths = {
         item["id"]: item["path"]
         for item in scaffold.get("extension_points", [])
@@ -101,13 +141,28 @@ def load_current_spec(root: Path) -> dict[str, Any]:
         for requirement in requirements
         for ref in requirement["source_refs"]
     })
-    sources = [load_source(root, source_id) for source_id in source_ids]
+    source_indexes = {
+        item["source_id"]: baseline / item["index_ref"]
+        for item in manifest.get("sources", [])
+    }
+    missing_sources = sorted(set(source_ids) - set(source_indexes))
+    if missing_sources:
+        raise SdlcError(f"Spec baseline 缺少来源: {missing_sources}")
+    sources = [
+        load_indexed_source(root, source_indexes[source_id])
+        for source_id in source_ids
+    ]
     runtime_requirements = [
         {
             **item,
             "description": (
                 f"目标：{item['goal']}；参与者：{item['actor']}；"
                 f"主流程：" + " → ".join(item["main_flow"])
+            ),
+            "content_ref": next(
+                (baseline / record["content_ref"]).relative_to(root).as_posix()
+                for record in manifest["requirements"]
+                if record["id"] == item["id"]
             ),
         }
         for item in requirements
@@ -124,6 +179,11 @@ def load_current_spec(root: Path) -> dict[str, Any]:
             "allowed_paths": sorted({
                 extension_paths[item] for item in design["extension_points"]
             }),
+            "content_ref": next(
+                (baseline / record["content_ref"]).relative_to(root).as_posix()
+                for record in manifest["designs"]
+                if record["id"] == design["id"]
+            ),
         }
         for design in designs
     ]
@@ -133,12 +193,18 @@ def load_current_spec(root: Path) -> dict[str, Any]:
             "title": f"{item['id']} 交付验证",
             "command": item["test_key"],
             "input": ", ".join(item["acceptance_criteria_ids"]),
+            "content_ref": next(
+                (baseline / record["content_ref"]).relative_to(root).as_posix()
+                for record in manifest["verification"]
+                if record["id"] == item["id"]
+            ),
         }
         for item in verification
     ]
     return {
-        "schema_version": "2.0",
+        "schema_version": "3.0",
         "flow": "standard",
+        "baseline_id": manifest["baseline_id"],
         "feature_map": feature_map,
         "requirements": {
             "source_inputs": sources,
@@ -161,33 +227,33 @@ def load_current_spec(root: Path) -> dict[str, Any]:
     }
 
 
-def _v2_bundle(root: Path) -> tuple[Path, dict[str, Any]]:
-    selected = current_bundle(root, "spec")
+def _baseline(root: Path) -> tuple[Path, dict[str, Any]]:
+    selected = current_baseline(root)
     if not selected:
-        raise SdlcError("没有已发布的 Schema v2 Spec bundle")
-    bundle, manifest = selected
-    if manifest.get("metadata", {}).get("schema_version") != "2.0":
-        raise SdlcError("当前 Spec bundle 不是 Schema v2")
-    files = manifest.get("files", {})
-    required = {"feature-map.json"}
-    if not required <= set(files):
-        raise SdlcError("Schema v2 Spec bundle 缺少 feature-map.json")
-    for prefix in ("requirements/", "designs/", "verification/"):
-        if not any(name.startswith(prefix) for name in files):
-            raise SdlcError(f"Schema v2 Spec bundle 缺少 {prefix}")
-    return bundle, manifest
+        raise SdlcError("没有已发布的 Storage Layout v3 Spec baseline")
+    baseline, manifest = selected
+    for group in ("requirements", "designs", "verification"):
+        if not manifest.get(group):
+            raise SdlcError(f"Spec baseline 缺少 {group}")
+    return baseline, manifest
+
+
+def _full_feature_map(manifest: dict[str, Any]) -> dict[str, Any]:
+    value = dict(manifest["feature_index"])
+    value["goal"] = value["title"]
+    return value
 
 
 def _documents(
     root: Path,
-    bundle: Path,
-    folder: str,
+    baseline: Path,
+    manifest: dict[str, Any],
+    group: str,
     schema_name: str,
 ) -> list[dict[str, Any]]:
-    directory = bundle / folder
-    documents = [read_json(path) for path in sorted(directory.glob("*.json"))]
-    if not documents:
-        raise SdlcError(f"Schema v2 Spec bundle 缺少 {folder} artifact")
-    for document in documents:
+    documents = []
+    for record in manifest[group]:
+        document = read_markdown_record(baseline / record["content_ref"])
         validate_schema_instance(root, schema_name, document)
+        documents.append(document)
     return documents

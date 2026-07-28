@@ -13,6 +13,7 @@ from .common import (
     sha256_file,
     sha256_json,
 )
+from .layout import lifecycle_path, scaffold_path
 
 from .schema_validation import validate_schema_instance
 
@@ -28,7 +29,7 @@ TOOLING_CONFIG_PATHS = [
 ]
 
 def scaffold(root: Path) -> dict[str, Any]:
-    path = root / ".sdlc-pipeline" / "scaffold.json"
+    path = scaffold_path(root)
     data = read_json(path)
     validate_schema_instance(root, "scaffold.schema.json", data)
     required = {
@@ -51,14 +52,14 @@ def _hash_matches(path: Path, expected: str) -> tuple[bool, str | None]:
 
 def verify_scaffold(root: Path) -> dict[str, Any]:
     contract = scaffold(root)
-    lifecycle = root / ".sdlc-pipeline" / "lifecycle.json"
+    lifecycle = lifecycle_path(root)
     drift: list[str] = []
     issues: list[dict[str, Any]] = []
     matches, actual = _hash_matches(lifecycle, contract["lifecycle_hash"])
     if not matches:
-        drift.append(".sdlc-pipeline/lifecycle.json")
+        drift.append(".sdlc-pipeline/contracts/lifecycle.json")
         issues.append({
-            "path": ".sdlc-pipeline/lifecycle.json",
+            "path": ".sdlc-pipeline/contracts/lifecycle.json",
             "reason": "missing" if actual is None else "hash_mismatch",
             "expected_sha256": contract["lifecycle_hash"],
             "actual_sha256": actual,
@@ -129,8 +130,11 @@ def worktree_fingerprint(root: Path) -> dict[str, Any]:
     entries = [
         item for item in changed_path_fingerprints(root)["entries"]
         if not item["path"].startswith("docs/sdlc/test-results/")
-        and not item["path"].startswith("docs/sdlc/bundles/")
-        and item["path"] != "docs/sdlc/spec-current.json"
+        and not item["path"].startswith("docs/sdlc/baselines/")
+        and item["path"] != "docs/sdlc/current.json"
+        and not item["path"].startswith(".sdlc-pipeline/state/")
+        and not item["path"].startswith(".sdlc-pipeline/work/")
+        and not item["path"].startswith(".sdlc-pipeline/evidence/")
     ]
     return {"sha256": sha256_json(entries), "entries": entries}
 
@@ -187,7 +191,9 @@ def validate_diff(
         path for path in actual
         if not matches_path(path, allowed_patterns)
         and not path.startswith("docs/sdlc/")
-        and not path.startswith(".sdlc-pipeline/runs/")
+        and not path.startswith(".sdlc-pipeline/state/")
+        and not path.startswith(".sdlc-pipeline/work/")
+        and not path.startswith(".sdlc-pipeline/evidence/")
     ]
     if protected:
         raise SdlcError(f"修改了 protected path: {protected}")

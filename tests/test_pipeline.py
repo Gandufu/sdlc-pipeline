@@ -23,7 +23,7 @@ from sdlc_core.adapter import (  # noqa: E402
     validate_coder_handoff,
     validate_write_path,
 )
-from sdlc_core.artifacts import load_current_spec  # noqa: E402
+from sdlc_core.artifacts import load_current_spec, load_test_results  # noqa: E402
 from sdlc_core.common import (  # noqa: E402
     SdlcError,
     read_json,
@@ -33,6 +33,8 @@ from sdlc_core.common import (  # noqa: E402
     write_json,
 )
 from sdlc_core.common import sha256_json  # noqa: E402
+from sdlc_core.records import read_markdown_record  # noqa: E402
+from sdlc_core.stores import write_work_record  # noqa: E402
 from sdlc_core.cli import execute  # noqa: E402
 from sdlc_core.lifecycle import (  # noqa: E402
     artifact_evidence,
@@ -64,7 +66,7 @@ from sdlc_core.status import status  # noqa: E402
 from sdlc_core.trace import (  # noqa: E402
     verify_scaffold,
 )
-from sdlc_core.versions import finalize  # noqa: E402
+from sdlc_core.versions import finalize, parent_manifest  # noqa: E402
 
 
 def run(*argv: str, cwd: Path) -> str:
@@ -132,7 +134,7 @@ def spec_payload() -> dict:
 
 
 def publish_spec(root: Path, blueprint: dict) -> dict:
-    """Test helper that publishes the compact fixture through the v2 public seams."""
+    """Publish the compact fixture through the Storage Layout v3 public seams."""
     source_input = blueprint["requirements"]["source_inputs"][0]
     if source_input.get("source_id"):
         source = source_input
@@ -141,10 +143,10 @@ def publish_spec(root: Path, blueprint: dict) -> dict:
             "kind": "inline",
             "source": source_input.get("source", "test fixture"),
             "content": source_input["content"],
-        })["envelope"]
+        })
     source_ref = {
         "source_id": source["source_id"],
-        "anchor": source["segments"][0]["anchor"],
+        "anchor": source["anchors"][0]["anchor"],
     }
     created = begin_candidate(
         root,
@@ -168,7 +170,7 @@ def publish_spec(root: Path, blueprint: dict) -> dict:
                 "then": description,
                 "source_refs": [source_ref],
             })
-        result = put_requirement(
+        put_requirement(
             root,
             created["candidate_id"],
             {
@@ -186,17 +188,9 @@ def publish_spec(root: Path, blueprint: dict) -> dict:
                 "supersedes": requirement.get("supersedes"),
             },
         )
-        document = read_json(
-            root
-            / ".sdlc-pipeline/runs/spec-candidates"
-            / created["candidate_id"]
-            / "revisions"
-            / f"{result['revision']:04d}"
-            / "requirements"
-            / f"{requirement['id']}.json"
-        )
         acceptance_by_requirement[requirement["id"]] = [
-            item["id"] for item in document["acceptance_criteria"]
+            f"AC-{requirement['id']}-{index:02d}"
+            for index in range(1, len(criteria) + 1)
         ]
     for design in blueprint["design"]["items"]:
         put_design(
@@ -252,11 +246,21 @@ class ProjectFixture:
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
         self.port = free_port()
-        (self.root / ".sdlc-pipeline").mkdir()
+        (self.root / ".sdlc-pipeline" / "contracts").mkdir(parents=True)
+        (self.root / ".sdlc-pipeline" / "runtime" / "templates").mkdir(parents=True)
+        (self.root / ".sdlc-pipeline" / "runtime" / "rules").mkdir(parents=True)
+        shutil.copy2(
+            REPO / "templates" / "manifest.json",
+            self.root
+            / ".sdlc-pipeline"
+            / "runtime"
+            / "templates"
+            / "manifest.json",
+        )
         (self.root / "src").mkdir()
         (self.root / "tests").mkdir()
         (self.root / ".sdlc-pipeline" / ".gitignore").write_text(
-            "runs/\n", encoding="utf-8"
+            "state/\nwork/\nevidence/\n", encoding="utf-8"
         )
         (self.root / "app.py").write_text(
             "from http.server import BaseHTTPRequestHandler,HTTPServer\n"
@@ -331,7 +335,10 @@ class ProjectFixture:
                 },
             },
         }
-        write_json(self.root / ".sdlc-pipeline" / "lifecycle.json", lifecycle)
+        lifecycle_path = (
+            self.root / ".sdlc-pipeline" / "contracts" / "lifecycle.json"
+        )
+        write_json(lifecycle_path, lifecycle)
         scaffold = {
             "schema_version": "1.0",
             "template_id": "fixture",
@@ -341,18 +348,21 @@ class ProjectFixture:
                 "sha256": sha256_contract_file(self.root / "app.py"),
             }],
             "protected_paths": [
-                ".sdlc-pipeline/lifecycle.json",
-                ".sdlc-pipeline/scaffold.json",
+                ".sdlc-pipeline/contracts/lifecycle.json",
+                ".sdlc-pipeline/contracts/scaffold.json",
                 "app.py",
             ],
             "extension_points": [{"id": "feature", "path": "src"}],
             "allowed_paths": ["src", "tests"],
             "lifecycle_hash": sha256_contract_file(
-                self.root / ".sdlc-pipeline" / "lifecycle.json"
+                lifecycle_path
             ),
             "capabilities": ["fixture"],
         }
-        write_json(self.root / ".sdlc-pipeline" / "scaffold.json", scaffold)
+        write_json(
+            self.root / ".sdlc-pipeline" / "contracts" / "scaffold.json",
+            scaffold,
+        )
         run("git", "init", "-q", cwd=self.root)
         run("git", "config", "user.email", "sdlc@example.invalid", cwd=self.root)
         run("git", "config", "user.name", "SDLC Test", cwd=self.root)
@@ -378,21 +388,21 @@ class SchemaAndTraceTests(unittest.TestCase):
             ):
                 publish_spec(fixture.root, payload)
             self.assertFalse(
-                (fixture.root / "docs/sdlc/spec-current.json").exists()
+                (fixture.root / "docs/sdlc/current.json").exists()
             )
         finally:
             fixture.close()
 
-    def test_publish_contains_only_v2_artifacts(self) -> None:
+    def test_publish_contains_only_v3_markdown_baseline(self) -> None:
         fixture = ProjectFixture()
         try:
             result = publish_spec(fixture.root, spec_payload())
             self.assertTrue(result["ok"])
-            bundle = fixture.root / "docs/sdlc/bundles" / result["bundle_id"]
-            self.assertTrue((bundle / "feature-map.json").is_file())
-            self.assertTrue((bundle / "requirements/R-0001.json").is_file())
-            self.assertTrue((bundle / "designs/D-0001.json").is_file())
-            self.assertTrue((bundle / "verification/T-0001.json").is_file())
+            bundle = fixture.root / "docs/sdlc/baselines" / result["baseline_id"]
+            self.assertTrue((bundle / "manifest.json").is_file())
+            self.assertTrue((bundle / "requirements/R-0001.md").is_file())
+            self.assertTrue((bundle / "designs/D-0001.md").is_file())
+            self.assertTrue((bundle / "verification/T-0001.md").is_file())
             for obsolete in (
                 "feature-contract.json", "requirements.json",
                 "design.json", "test-plan.json",
@@ -413,13 +423,11 @@ class SchemaAndTraceTests(unittest.TestCase):
             payload["requirements"]["source_inputs"][0]["content"] = raw
             publish_spec(fixture.root, payload)
             context = build_context_pack(fixture.root, "coder")
-            pack = json.loads(
-                (fixture.root / context["paths"][0]).read_text(encoding="utf-8")
-            )
+            pack = read_markdown_record(fixture.root / context["paths"][0])
             encoded = json.dumps(pack, ensure_ascii=False)
             requirements = next(
                 entry for entry in pack["resources"]
-                if entry["path"] == "docs/sdlc/current/requirements/R-0001.json"
+                if entry["path"].endswith("/requirements/R-0001.md")
             )
             self.assertNotIn(raw, encoded)
             self.assertEqual(len(requirements["sha256"]), 64)
@@ -443,7 +451,9 @@ class SchemaAndTraceTests(unittest.TestCase):
             app = fixture.root / "app.py"
             app_lf = app.read_bytes().replace(b"\r\n", b"\n")
             app.write_bytes(app_lf.replace(b"\n", b"\r\n"))
-            lifecycle = fixture.root / ".sdlc-pipeline" / "lifecycle.json"
+            lifecycle = (
+                fixture.root / ".sdlc-pipeline/contracts/lifecycle.json"
+            )
             lifecycle_lf = lifecycle.read_bytes().replace(b"\r\n", b"\n")
             lifecycle.write_bytes(lifecycle_lf.replace(b"\n", b"\r\n"))
             self.assertTrue(verify_scaffold(fixture.root)["ok"])
@@ -530,15 +540,19 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(agents.read_text(encoding="utf-8"), "# 自定义规则\n")
 
     def test_init_activates_only_rules_declared_by_selected_template(self) -> None:
-        rules = self.fixture.root / ".sdlc-pipeline" / "rules"
-        rules.mkdir()
+        rules = self.fixture.root / ".sdlc-pipeline" / "runtime" / "rules"
+        rules.mkdir(exist_ok=True)
         for name in ("typescript", "react", "java"):
             (rules / f"{name}.md").write_text(
                 f"# {name} rules\n",
                 encoding="utf-8",
             )
         write_json(
-            self.fixture.root / ".sdlc-pipeline" / "templates" / "manifest.json",
+            self.fixture.root
+            / ".sdlc-pipeline"
+            / "runtime"
+            / "templates"
+            / "manifest.json",
             {
                 "schema_version": "1.0",
                 "templates": [{
@@ -559,13 +573,16 @@ class LifecycleTests(unittest.TestCase):
 
         report = init_project(self.fixture.root)
         active = json.loads(
-            (rules / "active.json").read_text(encoding="utf-8")
+            (
+                self.fixture.root
+                / ".sdlc-pipeline/contracts/active-rules.json"
+            ).read_text(encoding="utf-8")
         )
         self.assertEqual(
             [item["path"] for item in active["rules"]],
             [
-                ".sdlc-pipeline/rules/typescript.md",
-                ".sdlc-pipeline/rules/react.md",
+                ".sdlc-pipeline/runtime/rules/typescript.md",
+                ".sdlc-pipeline/runtime/rules/react.md",
             ],
         )
         self.assertEqual(report["active_rules"], active)
@@ -580,13 +597,13 @@ class LifecycleTests(unittest.TestCase):
         context_paths = {
             item["path"]
             for pack_path in context["paths"]
-            for item in json.loads(
-                (self.fixture.root / pack_path).read_text(encoding="utf-8")
+            for item in read_markdown_record(
+                self.fixture.root / pack_path
             )["resources"]
         }
-        self.assertIn(".sdlc-pipeline/rules/typescript.md", context_paths)
-        self.assertIn(".sdlc-pipeline/rules/react.md", context_paths)
-        self.assertNotIn(".sdlc-pipeline/rules/java.md", context_paths)
+        self.assertIn(".sdlc-pipeline/runtime/rules/typescript.md", context_paths)
+        self.assertIn(".sdlc-pipeline/runtime/rules/react.md", context_paths)
+        self.assertNotIn(".sdlc-pipeline/runtime/rules/java.md", context_paths)
         self.assertEqual(status(self.fixture.root)["active_rules"], active)
 
         (rules / "typescript.md").write_text("# drifted\n", encoding="utf-8")
@@ -594,17 +611,23 @@ class LifecycleTests(unittest.TestCase):
             build_context_pack(self.fixture.root, "coder")
 
     def test_unregistered_existing_project_uses_optional_scaffold_rules(self) -> None:
-        rules = self.fixture.root / ".sdlc-pipeline" / "rules"
-        rules.mkdir()
+        rules = self.fixture.root / ".sdlc-pipeline" / "runtime" / "rules"
+        rules.mkdir(exist_ok=True)
         (rules / "typescript.md").write_text(
             "# TypeScript rules\n",
             encoding="utf-8",
         )
         shutil.copytree(
             REPO / "templates",
-            self.fixture.root / ".sdlc-pipeline" / "templates",
+            self.fixture.root / ".sdlc-pipeline" / "runtime" / "templates",
+            dirs_exist_ok=True,
         )
-        scaffold_path = self.fixture.root / ".sdlc-pipeline" / "scaffold.json"
+        scaffold_path = (
+            self.fixture.root
+            / ".sdlc-pipeline"
+            / "contracts"
+            / "scaffold.json"
+        )
         scaffold = json.loads(scaffold_path.read_text(encoding="utf-8"))
         scaffold["rules"] = ["typescript"]
         write_json(scaffold_path, scaffold)
@@ -618,7 +641,10 @@ class LifecycleTests(unittest.TestCase):
         )
 
     def test_artifact_evidence_requires_every_declared_pattern(self) -> None:
-        lifecycle_path = self.fixture.root / ".sdlc-pipeline/lifecycle.json"
+        lifecycle_path = (
+            self.fixture.root
+            / ".sdlc-pipeline/contracts/lifecycle.json"
+        )
         contract = json.loads(lifecycle_path.read_text(encoding="utf-8"))
         contract["artifacts"].append("dist/missing-artifact.bin")
         write_json(lifecycle_path, contract)
@@ -663,12 +689,14 @@ class LifecycleTests(unittest.TestCase):
 
     def test_code_gate_has_compile_policy_and_artifact_evidence(self) -> None:
         publish_spec(self.fixture.root, spec_payload())
-        write_json(
-            self.fixture.root / ".sdlc-pipeline/runs/coder-handoff.json",
+        write_work_record(
+            self.fixture.root,
+            "coder-handoff",
             {
                 "summary": "fixture",
                 "open_issues": [],
             },
+            state="validated",
         )
         evidence = compile_restart_verify(self.fixture.root)
         self.assertTrue(evidence["compile"]["ok"])
@@ -733,7 +761,10 @@ class ClosedLoopTests(unittest.TestCase):
             }))
 
         self.assertFalse(
-            (self.fixture.root / ".sdlc-pipeline/runs/coder-handoff.json").exists()
+            (
+                self.fixture.root
+                / ".sdlc-pipeline/state/records/coder-handoff.json"
+            ).exists()
         )
 
     def test_task_cancel_is_exposed_by_cli_and_aborts_coder_attempt(self) -> None:
@@ -845,9 +876,7 @@ class ClosedLoopTests(unittest.TestCase):
     def test_full_init_spec_code_test_version(self) -> None:
         self._through_code()
         delivery = verify_delivery(self.fixture.root)
-        results = json.loads(
-            (self.fixture.root / delivery["test_results"]).read_text(encoding="utf-8")
-        )
+        results = load_test_results(self.fixture.root, delivery["test_results"])
         self.assertEqual(results["status"], "pass")
         record_tokens(
             self.fixture.root,
@@ -864,9 +893,7 @@ class ClosedLoopTests(unittest.TestCase):
             run("git", "tag", "--list", "sdlc/V0001", cwd=self.fixture.root),
             "sdlc/V0001",
         )
-        manifest = json.loads((
-            self.fixture.root / "docs/sdlc/versions/V0001/manifest.json"
-        ).read_text(encoding="utf-8"))
+        manifest = parent_manifest(self.fixture.root)
         summary = (
             self.fixture.root / "docs/sdlc/versions/V0001/summary.md"
         ).read_text(encoding="utf-8")
@@ -974,7 +1001,7 @@ class ReliabilityTests(unittest.TestCase):
         )
         path = (
             self.fixture.root
-            / ".sdlc-pipeline/runs/journal"
+            / ".sdlc-pipeline/state/runs"
             / abandoned["run_id"]
             / "attempts/code"
             / f"{abandoned['attempt_id']}.json"
@@ -1011,7 +1038,7 @@ class ReliabilityTests(unittest.TestCase):
         )
         path = (
             self.fixture.root
-            / ".sdlc-pipeline/runs/journal"
+            / ".sdlc-pipeline/state/runs"
             / abandoned["run_id"]
             / "attempts/code"
             / f"{abandoned['attempt_id']}.json"
@@ -1044,7 +1071,7 @@ class ReliabilityTests(unittest.TestCase):
         )
         path = (
             self.fixture.root
-            / ".sdlc-pipeline/runs/journal"
+            / ".sdlc-pipeline/state/runs"
             / attempt["run_id"]
             / "attempts/code"
             / f"{attempt['attempt_id']}.json"
@@ -1067,8 +1094,8 @@ class ReliabilityTests(unittest.TestCase):
             str(self.fixture.root / "vitest.config.ts"),
         )
         context = build_context_pack(self.fixture.root, "coder")
-        manifest = json.loads(
-            (self.fixture.root / context["paths"][0]).read_text(encoding="utf-8")
+        manifest = read_markdown_record(
+            self.fixture.root / context["paths"][0]
         )
 
         self.assertTrue(result["ok"])
@@ -1161,26 +1188,23 @@ class ReliabilityTests(unittest.TestCase):
         with self.assertRaisesRegex(SdlcError, "不允许的字段"):
             validate_coder_handoff(self.fixture.root, json.dumps(handoff))
 
-    def test_spec_bundle_is_authoritative_and_repairs_current_mirror(self) -> None:
+    def test_spec_baseline_is_authoritative_without_current_mirror(self) -> None:
         published = publish_spec(self.fixture.root, spec_payload())
         pointer = json.loads(
-            (self.fixture.root / "docs/sdlc/spec-current.json").read_text(
+            (self.fixture.root / "docs/sdlc/current.json").read_text(
                 encoding="utf-8"
             )
         )
-        self.assertEqual(pointer["bundle_id"], published["bundle_id"])
+        self.assertEqual(pointer["baseline_id"], published["baseline_id"])
         mirror = self.fixture.root / "docs/sdlc/current/requirements/R-0001.json"
-        mirror.write_text("corrupt", encoding="utf-8")
+        self.assertFalse(mirror.exists())
 
         loaded = load_current_spec(self.fixture.root)
 
         self.assertEqual(loaded["requirements"]["items"][0]["id"], "R-0001")
-        self.assertEqual(
-            json.loads(mirror.read_text(encoding="utf-8"))["id"],
-            "R-0001",
-        )
+        self.assertFalse(mirror.exists())
 
-    def test_external_file_source_is_copied_and_hash_bound(self) -> None:
+    def test_external_text_source_is_ingested_once_as_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             external = Path(temporary) / "prototype.html"
             external.write_text("<main>Home prototype</main>\n", encoding="utf-8")
@@ -1190,14 +1214,14 @@ class ReliabilityTests(unittest.TestCase):
                 "uri": str(external),
                 "media_type": "text/html",
                 "allow_external_copy": True,
-            })["envelope"]
+            })
 
         asset = ingested["asset"]
-        copied = self.fixture.root / asset["uri"]
+        copied = self.fixture.root / ingested["content_ref"]
         self.assertTrue(copied.is_file())
         self.assertEqual(asset["original_uri"], str(external.resolve()))
-        self.assertEqual(asset["sha256"], sha256_file(copied))
-        self.assertEqual(ingested["uri"], asset["uri"])
+        self.assertNotIn("blob_ref", asset)
+        self.assertTrue(ingested["canonical_path"].endswith("index.json"))
 
     def test_file_source_path_alias_is_normalized_to_uri(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1208,10 +1232,10 @@ class ReliabilityTests(unittest.TestCase):
                 "source": str(external),
                 "media_type": "text/markdown",
                 "allow_external_copy": True,
-            })["envelope"]
+            })
 
         self.assertEqual(ingested["source"], str(external.resolve()))
-        self.assertTrue((self.fixture.root / ingested["asset"]["uri"]).is_file())
+        self.assertTrue((self.fixture.root / ingested["content_ref"]).is_file())
 
     def test_source_query_returns_only_requested_anchor(self) -> None:
         source = ingest_source(self.fixture.root, {
@@ -1221,7 +1245,7 @@ class ReliabilityTests(unittest.TestCase):
                 {"anchor": "feature:device", "text": "设备管理"},
                 {"anchor": "field:system", "text": "系统信息"},
             ],
-        })["envelope"]
+        })
 
         result = query_source(
             self.fixture.root,
@@ -1237,7 +1261,7 @@ class ReliabilityTests(unittest.TestCase):
         source = ingest_source(self.fixture.root, {
             "kind": "inline",
             "content": "设备管理系统信息",
-        })["envelope"]
+        })
         core = REPO / "scripts" / "sdlc.py"
         result = subprocess.run(
             [sys.executable, str(core), "source-query", "--root", str(self.fixture.root)],
@@ -1256,10 +1280,10 @@ class ReliabilityTests(unittest.TestCase):
         source = ingest_source(self.fixture.root, {
             "kind": "inline",
             "content": content,
-        })["envelope"]
+        })
 
-        self.assertGreater(len(source["segments"]), 1)
-        self.assertEqual(source["segments"][0]["anchor"], "text:1")
+        self.assertGreater(len(source["anchors"]), 1)
+        self.assertEqual(source["anchors"][0]["anchor"], "text:1")
         second = query_source(self.fixture.root, source["source_id"], "text:2")
         self.assertFalse(second["truncated"])
         self.assertLessEqual(len(second["text"]), MAX_SOURCE_SEGMENT_CHARS)
@@ -1322,7 +1346,7 @@ class ReliabilityTests(unittest.TestCase):
                 "anchor": "requirement:offline",
                 "text": "需要离线支持。",
             }],
-        })["envelope"]
+        })
 
         execute(self.fixture.root, "publish", {
             "kind": "checkpoint",
@@ -1349,26 +1373,30 @@ class ReliabilityTests(unittest.TestCase):
         )
 
     def test_hard_policy_produces_machine_violation(self) -> None:
-        rules = self.fixture.root / ".sdlc-pipeline/rules"
+        rules = self.fixture.root / ".sdlc-pipeline/runtime/rules"
         rules.mkdir(exist_ok=True)
         shutil.copy2(REPO / "rules/typescript.md", rules / "typescript.md")
         shutil.copy2(
             REPO / "rules/typescript.policy.json",
             rules / "typescript.policy.json",
         )
-        write_json(rules / "active.json", {
+        write_json(
+            self.fixture.root
+            / ".sdlc-pipeline/contracts/active-rules.json",
+            {
             "schema_version": "1.0",
             "template_id": "fixture",
             "source": "test",
             "rules": [{
                 "id": "typescript",
-                "path": ".sdlc-pipeline/rules/typescript.md",
+                "path": ".sdlc-pipeline/runtime/rules/typescript.md",
                 "sha256": sha256_file(rules / "typescript.md"),
-                "policy_path": ".sdlc-pipeline/rules/typescript.policy.json",
+                "policy_path": ".sdlc-pipeline/runtime/rules/typescript.policy.json",
                 "policy_sha256": sha256_file(rules / "typescript.policy.json"),
                 "classification": ["guidance", "hard", "executable"],
             }],
-        })
+            },
+        )
         (self.fixture.root / "src/unsafe.ts").write_text(
             "const value: any = 1\n", encoding="utf-8"
         )
@@ -1377,7 +1405,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(report["violations"][0]["policy"], "typescript:no-explicit-any")
 
     def test_pid_identity_mismatch_refuses_to_kill(self) -> None:
-        path = self.fixture.root / ".sdlc-pipeline/runs/active.json"
+        path = self.fixture.root / ".sdlc-pipeline/state/process.json"
         write_json(path, {
             "pid": 4242,
             "process_identity": {

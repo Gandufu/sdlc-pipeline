@@ -12,6 +12,7 @@ from .artifacts import (
 from .bootstrap import template_registry
 from .common import read_json
 from .common import sha256_file
+from .layout import contracts_root, lifecycle_path, runtime_root
 from .journal import journal_status, spec_checkpoint as load_spec_checkpoint
 from .memory import memory_summary
 from .runs import active_identity_matches, pid_alive, read_active
@@ -19,6 +20,7 @@ from .trace import verify_scaffold
 from .trace import worktree_fingerprint
 from .versions import current_version, parent_manifest
 from .spec_candidates import candidate_status
+from .stores import read_evidence_record, read_work_record
 
 
 def status(root: Path) -> dict[str, Any]:
@@ -30,18 +32,18 @@ def status(root: Path) -> dict[str, Any]:
     closed_baseline = bool(
         parent and parent.get("status") == "closed" and not fingerprint["entries"]
     )
-    contract_root = root / ".sdlc-pipeline"
+    contract_root = contracts_root(root)
     contracts_present = all(
         (contract_root / name).is_file()
         for name in ("lifecycle.json", "scaffold.json")
     )
-    init = read_json(root / "docs" / "sdlc" / "init-report.json", required=False)
+    init = read_evidence_record(root, "init", required=False)
     init_completed = bool(
         contracts_present and init and init.get("status") == "pass"
     )
     gates["init"] = closed_baseline or init_completed
     if not gates["init"]:
-        missing.append("docs/sdlc/init-report.json(pass)")
+        missing.append(".sdlc-pipeline/evidence/records/init.md(pass)")
     spec = None
     spec_hashes: dict[str, str] | None = None
     blocking_questions: list[dict[str, Any]] = []
@@ -57,7 +59,7 @@ def status(root: Path) -> dict[str, Any]:
         })
         gates["spec"] = False
         missing.append("requirements/design/test-plan")
-    code = read_json(root / ".sdlc-pipeline" / "runs" / "code-evidence.json", required=False)
+    code = read_evidence_record(root, "code", required=False)
     gates["code"] = closed_baseline or bool(
         code and code.get("ok")
         and code.get("spec_hashes") == spec_hashes
@@ -65,12 +67,13 @@ def status(root: Path) -> dict[str, Any]:
     )
     if not gates["code"]:
         missing.append("compile/restart/health/artifact evidence")
-    candidate = read_json(
-        root / ".sdlc-pipeline" / "runs" / "version-candidate.json",
-        required=False,
+    candidate = read_work_record(root, "version-candidate", required=False)
+    lifecycle_contract_path = lifecycle_path(root)
+    lifecycle_sha256 = (
+        sha256_file(lifecycle_contract_path)
+        if lifecycle_contract_path.is_file()
+        else None
     )
-    lifecycle_path = root / ".sdlc-pipeline" / "lifecycle.json"
-    lifecycle_sha256 = sha256_file(lifecycle_path) if lifecycle_path.is_file() else None
     expected_test_binding = {
         "spec_hashes": spec_hashes,
         "lifecycle_sha256": lifecycle_sha256,
@@ -133,7 +136,7 @@ def status(root: Path) -> dict[str, Any]:
             "error": str(exc),
         }
     try:
-        templates = template_registry()
+        templates = template_registry(runtime_root(root))
     except Exception as exc:
         templates = []
         template_error = str(exc)
@@ -144,7 +147,7 @@ def status(root: Path) -> dict[str, Any]:
         required=False,
     ) or {}
     active_rules = read_json(
-        contract_root / "rules" / "active.json",
+        contract_root / "active-rules.json",
         required=False,
     )
     init_state = {

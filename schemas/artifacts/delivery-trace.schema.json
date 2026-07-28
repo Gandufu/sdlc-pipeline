@@ -1,14 +1,14 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sdlc-pipeline.local/schemas/v2/delivery-trace.schema.json",
+  "$id": "https://sdlc-pipeline.local/schemas/artifacts/delivery-trace.schema.json",
   "type": "object",
   "required": [
-    "schema_version", "spec_bundle_id", "source_fingerprint",
+    "schema_version", "baseline_id", "source_fingerprint",
     "rows", "ok", "incomplete"
   ],
   "properties": {
-    "schema_version": {"const": "2.0"},
-    "spec_bundle_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "schema_version": {"const": "3.0"},
+    "baseline_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "source_fingerprint": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
     "rows": {
       "type": "array",

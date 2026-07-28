@@ -6,18 +6,20 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .common import SdlcError, read_json, utc_now, write_json
+from .common import SdlcError, utc_now
+from .layout import state_root
+from .records import read_compact_index, write_compact_index
 
 
 _OWNED_PROCESSES: dict[int, subprocess.Popen[Any]] = {}
 
 
 def state_dir(root: Path) -> Path:
-    return root / ".sdlc-pipeline" / "runs"
+    return state_root(root)
 
 
 def active_path(root: Path) -> Path:
-    return state_dir(root) / "active.json"
+    return state_dir(root) / "process.json"
 
 
 def token_path(root: Path) -> Path:
@@ -25,7 +27,7 @@ def token_path(root: Path) -> Path:
 
 
 def read_active(root: Path) -> dict[str, Any] | None:
-    return read_json(active_path(root), required=False)
+    return read_compact_index(active_path(root), required=False)
 
 
 def pid_alive(pid: int) -> bool:
@@ -161,7 +163,7 @@ def record_active(root: Path, value: dict[str, Any]) -> None:
     identity = process_identity(pid)
     if identity is None:
         raise SdlcError(f"无法取得进程 {pid} 的创建身份，拒绝记录不安全 PID")
-    write_json(active_path(root), {
+    write_compact_index(active_path(root), {
         **value, "process_identity": identity, "recorded_at": utc_now()
     })
 
@@ -226,8 +228,8 @@ def record_tokens(
     repeated_chars: int = 0,
     source: str = "opencode",
 ) -> dict[str, Any]:
-    value = read_json(token_path(root), required=False) or {
-        "schema_version": "1.0",
+    value = read_compact_index(token_path(root), required=False) or {
+        "schema_version": "3.0",
         "phases": {},
     }
     item = value["phases"].setdefault(
@@ -245,13 +247,13 @@ def record_tokens(
     item["samples"] += 1
     item["source"] = source
     value["updated_at"] = utc_now()
-    write_json(token_path(root), value)
+    write_compact_index(token_path(root), value)
     return value
 
 
 def token_summary(root: Path) -> dict[str, Any]:
-    return read_json(token_path(root), required=False) or {
-        "schema_version": "1.0",
+    return read_compact_index(token_path(root), required=False) or {
+        "schema_version": "3.0",
         "phases": {},
         "source": "unavailable",
     }

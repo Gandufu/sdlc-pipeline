@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.15.0 - 2026-07-28
+
+- 不兼容升级到 Storage Layout v3；删除旧 `runs`、内层 `.opencode`、Schema v2 目录、bundle 与
+  current mirror，不提供旧现场迁移。
+- 新增 Store Module：JSON 仅保存 compact 索引、ID、状态、引用和 hash；会话、Candidate、结果、
+  handoff、错误与证据正文改为 Markdown structured record，并在读取时校验 content hash。
+- Source 正文只保存一次，Candidate revision 只引用独立 Markdown artifact；批准后发布自包含的
+  `docs/sdlc/baselines/<id>`，删除 `work/` 后仍可加载正式 Spec。
+- 安装目录统一为 `runtime/contracts/state/work/evidence`，强制升级删除所有旧受管目录和 schema；
+  init 不再提前创建 `docs/sdlc`。
+- 测试结果和版本完整 manifest 改为 Markdown，JSON manifest 只保留 compact pointer；release smoke
+  和 evidence collector 同时读取宿主 tool error、compact attempt 与 Markdown error/result，禁止
+  最终成功掩盖中间失败。
+- release smoke 支持 `--model` / `OPENCODE_MODEL` 显式选择稳定模型，provider 在首 token 前挂起时
+  可保留失败 session 后用另一已配置模型重新验证。
+
 ## 0.14.16 - 2026-07-28
 
 - 修复 Schema v2 分片的可选 `R/D/T id` 仍会把 Agent 的语义名直接送入正则校验的问题。

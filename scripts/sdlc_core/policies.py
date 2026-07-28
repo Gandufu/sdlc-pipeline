@@ -6,12 +6,13 @@ from pathlib import Path
 from typing import Any
 
 from .common import SdlcError, git, read_json, sha256_file
+from .layout import contracts_root
 from .schema_validation import validate_schema_instance
 
 
 def active_policy_packs(root: Path) -> list[dict[str, Any]]:
     active = read_json(
-        root / ".sdlc-pipeline" / "rules" / "active.json",
+        contracts_root(root) / "active-rules.json",
         required=False,
     ) or {"rules": []}
     packs = []

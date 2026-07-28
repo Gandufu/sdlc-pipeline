@@ -1,14 +1,20 @@
 from __future__ import annotations
 
-import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from .common import SdlcError, read_json, sha256_json, utc_now, write_json
+from .common import SdlcError, sha256_json, utc_now
 from .failures import failure_fingerprint
+from .layout import evidence_root, relative_to_project, state_root, work_root
+from .records import (
+    read_compact_index,
+    read_markdown_record,
+    write_compact_index,
+    write_markdown_record,
+)
 from .schema_validation import validate_schema_instance
 from .sources import load_source
 
@@ -17,26 +23,32 @@ TERMINAL_STATES = {"succeeded", "failed", "blocked", "aborted"}
 
 
 def journal_root(root: Path) -> Path:
-    return root / ".sdlc-pipeline" / "runs" / "journal"
+    return state_root(root) / "runs"
 
 
 def active_run(root: Path) -> dict[str, Any] | None:
-    pointer = read_json(journal_root(root) / "active.json", required=False)
+    pointer = read_compact_index(state_root(root) / "active.json", required=False)
     if not pointer:
         return None
-    run = read_json(journal_root(root) / pointer["run_id"] / "run.json", required=False)
-    return run
+    return read_compact_index(
+        _run_dir(root, pointer["run_id"]) / "index.json", required=False
+    )
 
 
 def ensure_run(root: Path, phase: str) -> dict[str, Any]:
     run = active_run(root)
     if run and run.get("state") not in {"succeeded", "aborted"}:
         if run.get("phase") != phase:
+            if run.get("state") in {"failed", "blocked"}:
+                raise SdlcError(
+                    f"Run {run['run_id']} 在 {run['phase']} 阶段失败；"
+                    "禁止通过切换阶段清除失败状态"
+                )
             previous = run.get("phase")
             run["phase"] = phase
             run["state"] = "running"
             run["updated_at"] = utc_now()
-            write_json(_run_dir(root, run["run_id"]) / "run.json", run)
+            write_compact_index(_run_dir(root, run["run_id"]) / "index.json", run)
             append_event(
                 root,
                 run["run_id"],
@@ -47,18 +59,21 @@ def ensure_run(root: Path, phase: str) -> dict[str, Any]:
         return run
     run_id = f"RUN-{utc_now().replace(':', '').replace('-', '')}-{uuid.uuid4().hex[:8]}"
     run = {
-        "schema_version": "1.0",
+        "schema_version": "3.0",
         "run_id": run_id,
         "state": "running",
         "phase": phase,
         "created_at": utc_now(),
         "updated_at": utc_now(),
         "attempt_count": 0,
-        "last_error": None,
+        "session_ref": relative_to_project(
+            root, work_root(root) / "sessions" / f"{run_id}.md"
+        ),
+        "last_error_ref": None,
+        "last_failure": None,
     }
-    directory = journal_root(root) / run_id
-    write_json(directory / "run.json", run)
-    write_json(journal_root(root) / "active.json", {"run_id": run_id})
+    write_compact_index(_run_dir(root, run_id) / "index.json", run)
+    write_compact_index(state_root(root) / "active.json", {"run_id": run_id})
     append_event(root, run_id, "run.started", phase=phase)
     return run
 
@@ -77,7 +92,7 @@ def begin_attempt(
     run = ensure_run(root, phase)
     if run.get("state") == "blocked":
         raise SdlcError(
-            "Run 已进入 BLOCKED；请先处理最近失败或显式开始新 Run"
+            "Run 已进入 BLOCKED；请处理最近失败后显式开始新 Run"
         )
     _reconcile_abandoned_attempts(root, run)
     run_id = run["run_id"]
@@ -95,9 +110,10 @@ def begin_attempt(
                     f"idempotency key 已绑定不同输入: {idempotency_key}"
                 )
             if cached.get("state") == "succeeded":
+                result = read_markdown_record(root / cached["result_ref"])
                 return {
                     "cached": True,
-                    "result": cached["result"],
+                    "result": result,
                     "attempt_id": cached["attempt_id"],
                     "run_id": run_id,
                 }
@@ -112,7 +128,7 @@ def begin_attempt(
             datetime.now(timezone.utc) + timedelta(seconds=deadline_seconds)
         ).isoformat()
     attempt = {
-        "schema_version": "1.0",
+        "schema_version": "3.0",
         "run_id": run_id,
         "attempt_id": attempt_id,
         "phase": phase,
@@ -126,18 +142,20 @@ def begin_attempt(
         "last_heartbeat_at": started_at,
         "deadline_at": deadline_at,
         "finished_at": None,
-        "result": None,
-        "error": None,
+        "result_ref": None,
+        "result_hash": None,
+        "error_ref": None,
     }
     run.update({
         "state": "running",
         "phase": phase,
         "attempt_count": attempt_number,
         "updated_at": utc_now(),
-        "last_error": None,
     })
-    write_json(_run_dir(root, run_id) / "run.json", run)
-    write_json(_attempt_path(root, run_id, phase, attempt_id), attempt)
+    write_compact_index(_run_dir(root, run_id) / "index.json", run)
+    write_compact_index(
+        _attempt_path(root, run_id, phase, attempt_id), attempt
+    )
     append_event(
         root,
         run_id,
@@ -169,7 +187,7 @@ def heartbeat_attempt(
     if owner_pid is not None and attempt.get("owner") != _owner_identity(owner_pid):
         raise SdlcError("heartbeat owner 与 coder dispatch owner 不匹配")
     attempt["last_heartbeat_at"] = utc_now()
-    write_json(
+    write_compact_index(
         _attempt_path(
             root, run["run_id"], attempt["phase"], attempt["attempt_id"]
         ),
@@ -236,19 +254,52 @@ def finish_attempt(
     if state not in TERMINAL_STATES:
         raise SdlcError(f"非法 attempt terminal state: {state}")
     run_id = attempt["run_id"]
+    attempt_id = attempt["attempt_id"]
     attempt_path = _attempt_path(
-        root, run_id, attempt["phase"], attempt["attempt_id"]
+        root, run_id, attempt["phase"], attempt_id
     )
-    stored = read_json(attempt_path)
+    stored = read_compact_index(attempt_path)
+    result_ref = None
+    result_hash = None
+    if result is not None:
+        result_path = (
+            work_root(root) / "runs" / run_id / "attempts" / f"{attempt_id}-result.md"
+        )
+        write_markdown_record(
+            result_path,
+            result,
+            title=f"Attempt {attempt_id} result",
+            summary_lines=[
+                f"- Phase: `{attempt['phase']}`",
+                f"- Step: `{attempt['step']}`",
+                f"- State: `{state}`",
+            ],
+        )
+        result_ref = relative_to_project(root, result_path)
+        result_hash = sha256_json(result)
+    error_ref = None
+    if error:
+        error_path = evidence_root(root) / "errors" / run_id / f"{attempt_id}.md"
+        write_markdown_record(
+            error_path,
+            {"message": error},
+            title=f"Attempt {attempt_id} error",
+            summary_lines=[
+                f"- Phase: `{attempt['phase']}`",
+                f"- Step: `{attempt['step']}`",
+                f"- State: `{state}`",
+            ],
+        )
+        error_ref = relative_to_project(root, error_path)
     stored.update({
         "state": state,
         "finished_at": utc_now(),
-        "result": result,
-        "result_hash": sha256_json(result) if result is not None else None,
-        "error": error,
+        "result_ref": result_ref,
+        "result_hash": result_hash,
+        "error_ref": error_ref,
     })
-    write_json(attempt_path, stored)
-    run = read_json(_run_dir(root, run_id) / "run.json")
+    write_compact_index(attempt_path, stored)
+    run = read_compact_index(_run_dir(root, run_id) / "index.json")
     final_state = "running" if state == "succeeded" else state
     last_failure = run.get("last_failure")
     if state == "failed" and error:
@@ -262,25 +313,26 @@ def finish_attempt(
         last_failure = {**failure, "repeat_count": repeat_count}
         if repeat_count >= 2:
             final_state = "blocked"
-    elif state == "succeeded":
-        last_failure = None
     run.update({
         "state": final_state,
         "phase": attempt["phase"],
         "updated_at": utc_now(),
-        "last_error": error,
+        "last_error_ref": error_ref,
         "last_failure": last_failure,
     })
-    write_json(_run_dir(root, run_id) / "run.json", run)
+    write_compact_index(_run_dir(root, run_id) / "index.json", run)
     if attempt.get("idempotency_key"):
-        write_json(
+        if state == "succeeded" and result_ref is None:
+            raise SdlcError("幂等成功 attempt 必须持久化 result_ref")
+        write_compact_index(
             _idempotency_path(root, run_id, attempt["idempotency_key"]),
             {
                 "key": attempt["idempotency_key"],
                 "binding": attempt["input_hash"],
-                "attempt_id": attempt["attempt_id"],
+                "attempt_id": attempt_id,
                 "state": state,
-                "result": result,
+                "result_ref": result_ref,
+                "result_hash": result_hash,
                 "updated_at": utc_now(),
             },
         )
@@ -290,8 +342,12 @@ def finish_attempt(
         f"attempt.{state}",
         phase=attempt["phase"],
         step=attempt["step"],
-        attempt_id=attempt["attempt_id"],
-        data={"error": error, "result_hash": stored.get("result_hash")},
+        attempt_id=attempt_id,
+        data={
+            "error_ref": error_ref,
+            "result_ref": result_ref,
+            "result_hash": result_hash,
+        },
     )
 
 
@@ -301,22 +357,23 @@ def close_run(root: Path, state: str = "succeeded") -> None:
         return
     run["state"] = state
     run["updated_at"] = utc_now()
-    write_json(_run_dir(root, run["run_id"]) / "run.json", run)
+    write_compact_index(_run_dir(root, run["run_id"]) / "index.json", run)
     append_event(root, run["run_id"], f"run.{state}", phase=run.get("phase"))
 
 
 def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
     payload = _normalize_checkpoint_source_refs(payload)
-    validate_schema_instance(root, "spec-checkpoint.schema.json", payload)
+    validate_schema_instance(
+        root, "interactions/spec-checkpoint.schema.json", payload
+    )
     for reference in payload.get("source_refs", []):
         source_id, anchor = reference.split("#", 1)
         source = load_source(root, source_id)
         if anchor not in {item["anchor"] for item in source["segments"]}:
             raise SdlcError(f"未知来源 anchor: {reference}")
     run = ensure_run(root, "spec")
-    path = _run_dir(root, run["run_id"]) / "checkpoints" / "spec.json"
-    checkpoint = read_json(path, required=False) or {
-        "schema_version": "1.0",
+    current = spec_checkpoint(root) or {
+        "schema_version": "3.0",
         "run_id": run["run_id"],
         "state": "interviewing",
         "source_refs": [],
@@ -331,22 +388,47 @@ def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any
         if not isinstance(question, dict) or not question.get("id"):
             raise SdlcError("spec checkpoint question 必须包含 id")
         decisions = [
-            item for item in checkpoint["decisions"]
+            item for item in current["decisions"]
             if item.get("id") != question["id"]
         ]
         decisions.append({**question, "recorded_at": utc_now()})
-        checkpoint["decisions"] = sorted(decisions, key=lambda item: item["id"])
+        current["decisions"] = sorted(decisions, key=lambda item: item["id"])
     for name in ("source_refs", "confirmed_facts", "assumptions", "risks"):
         if name in payload:
             if not isinstance(payload[name], list):
                 raise SdlcError(f"spec checkpoint {name} 必须是数组")
-            checkpoint[name] = payload[name]
+            current[name] = payload[name]
     if "state" in payload:
         if payload["state"] not in {"interviewing", "ready", "confirmed", "published"}:
             raise SdlcError("非法 spec checkpoint state")
-        checkpoint["state"] = payload["state"]
-    checkpoint["updated_at"] = utc_now()
-    write_json(path, checkpoint)
+        current["state"] = payload["state"]
+    current["updated_at"] = utc_now()
+    content_path = (
+        work_root(root) / "runs" / run["run_id"] / "checkpoints" / "spec.md"
+    )
+    write_markdown_record(
+        content_path,
+        current,
+        title=f"Spec checkpoint {run['run_id']}",
+        summary_lines=[
+            f"- State: `{current['state']}`",
+            f"- Decisions: `{len(current['decisions'])}`",
+        ],
+    )
+    index = {
+        "schema_version": "3.0",
+        "run_id": run["run_id"],
+        "checkpoint_id": "spec",
+        "state": current["state"],
+        "source_refs": current["source_refs"],
+        "decision_ids": [item["id"] for item in current["decisions"]],
+        "content_ref": relative_to_project(root, content_path),
+        "content_hash": sha256_json(current),
+        "updated_at": current["updated_at"],
+    }
+    write_compact_index(
+        _run_dir(root, run["run_id"]) / "checkpoints" / "spec.json", index
+    )
     append_event(
         root,
         run["run_id"],
@@ -355,21 +437,14 @@ def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any
         step="grilling",
         data={
             "question_id": (question or {}).get("id"),
-            "state": checkpoint["state"],
-            "decision_count": len(checkpoint["decisions"]),
+            "state": current["state"],
+            "decision_count": len(current["decisions"]),
         },
     )
-    return {"ok": True, "checkpoint": checkpoint}
+    return {"ok": True, "checkpoint": current}
 
 
 def _normalize_checkpoint_source_refs(payload: dict[str, Any]) -> dict[str, Any]:
-    """Accept the SourceEnvelope-shaped reference used by OpenCode tools.
-
-    The persisted checkpoint deliberately stores compact ``SRC-...#anchor``
-    strings, while Candidate tools expose the same reference as an object.
-    Normalize only that lossless representation before strict schema validation;
-    every other malformed field remains a schema error.
-    """
     normalized = dict(payload)
     references = normalized.get("source_refs")
     if not isinstance(references, list):
@@ -391,10 +466,16 @@ def spec_checkpoint(root: Path) -> dict[str, Any] | None:
     run = active_run(root)
     if not run:
         return None
-    return read_json(
+    index = read_compact_index(
         _run_dir(root, run["run_id"]) / "checkpoints" / "spec.json",
         required=False,
     )
+    if not index:
+        return None
+    value = read_markdown_record(root / index["content_ref"])
+    if sha256_json(value) != index["content_hash"]:
+        raise SdlcError("spec checkpoint Markdown 与索引 hash 不匹配")
+    return value
 
 
 def journal_status(root: Path) -> dict[str, Any]:
@@ -410,9 +491,11 @@ def journal_status(root: Path) -> dict[str, Any]:
         "state": run["state"],
         "phase": run["phase"],
         "attempt_count": run["attempt_count"],
-        "last_error": run.get("last_error"),
+        "last_error": _error_message(root, run.get("last_error_ref")),
+        "last_error_ref": run.get("last_error_ref"),
         "last_failure": run.get("last_failure"),
         "updated_at": run["updated_at"],
+        "session_ref": run["session_ref"],
         "running_attempts": [
             {
                 "attempt_id": item["attempt_id"],
@@ -440,21 +523,21 @@ def append_event(
     attempt_id: str | None = None,
     data: dict[str, Any] | None = None,
 ) -> None:
-    value = {
-        "schema_version": "1.0",
-        "event_id": uuid.uuid4().hex,
-        "run_id": run_id,
-        "event": event,
-        "phase": phase,
-        "step": step,
-        "attempt_id": attempt_id,
-        "created_at": utc_now(),
-        "data": data or {},
-    }
-    path = _run_dir(root, run_id) / "events.jsonl"
+    path = work_root(root) / "sessions" / f"{run_id}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
+    first = not path.exists()
     with path.open("a", encoding="utf-8", newline="\n") as stream:
-        stream.write(json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n")
+        if first:
+            stream.write(f"# Session {run_id}\n\n")
+        stream.write(
+            f"## {utc_now()} · {event}\n\n"
+            f"- Phase: `{phase or ''}`\n"
+            f"- Step: `{step or ''}`\n"
+            f"- Attempt: `{attempt_id or ''}`\n"
+        )
+        for key, value in sorted((data or {}).items()):
+            stream.write(f"- {key}: `{value}`\n")
+        stream.write("\n")
         stream.flush()
         os.fsync(stream.fileno())
 
@@ -475,7 +558,9 @@ def _idempotency_path(root: Path, run_id: str, key: str) -> Path:
 def _idempotency_record(
     root: Path, run_id: str, key: str
 ) -> dict[str, Any] | None:
-    return read_json(_idempotency_path(root, run_id, key), required=False)
+    return read_compact_index(
+        _idempotency_path(root, run_id, key), required=False
+    )
 
 
 def _owner_identity(pid: int | None = None) -> dict[str, Any]:
@@ -502,17 +587,16 @@ def _running_attempts(root: Path, run_id: str) -> list[dict[str, Any]]:
     directory = _run_dir(root, run_id) / "attempts"
     if not directory.is_dir():
         return []
-    attempts: list[dict[str, Any]] = []
+    attempts = []
     for path in directory.glob("*/*.json"):
-        value = read_json(path, required=False)
+        value = read_compact_index(path, required=False)
         if value and value.get("state") == "running":
             attempts.append(value)
     return sorted(attempts, key=lambda item: item["attempt_id"])
 
 
 def _reconcile_abandoned_attempts(root: Path, run: dict[str, Any]) -> None:
-    recovered = False
-    for attempt in _running_attempts(root, run["run_id"]):
+    for attempt in list(_running_attempts(root, run["run_id"])):
         deadline_at = attempt.get("deadline_at")
         expired = bool(
             deadline_at
@@ -520,41 +604,19 @@ def _reconcile_abandoned_attempts(root: Path, run: dict[str, Any]) -> None:
         )
         if _owner_alive(attempt.get("owner")) and not expired:
             continue
-        recovered = True
         reason = (
             "attempt deadline expired before completion"
             if expired
             else "owner process exited before attempt completion"
         )
-        path = _attempt_path(
-            root, run["run_id"], attempt["phase"], attempt["attempt_id"]
-        )
-        attempt.update({
-            "state": "aborted",
-            "finished_at": utc_now(),
-            "error": reason,
-        })
-        write_json(path, attempt)
-        append_event(
-            root,
-            run["run_id"],
-            "attempt.aborted",
-            phase=attempt["phase"],
-            step=attempt["step"],
-            attempt_id=attempt["attempt_id"],
-            data={"error": attempt["error"], "recovered": True},
-        )
-    if recovered:
-        run.update({
-            "state": "aborted",
-            "updated_at": utc_now(),
-            "last_error": reason,
-        })
-        write_json(_run_dir(root, run["run_id"]) / "run.json", run)
-        append_event(
-            root,
-            run["run_id"],
-            "run.aborted",
-            phase=run.get("phase"),
-            data={"reason": run["last_error"], "recovered": True},
-        )
+        finish_attempt(root, attempt, state="aborted", error=reason)
+
+
+def _error_message(root: Path, reference: Any) -> str | None:
+    if not isinstance(reference, str) or not reference:
+        return None
+    value = read_markdown_record(root / reference, required=False)
+    if not value:
+        return None
+    message = value.get("message")
+    return message if isinstance(message, str) else None

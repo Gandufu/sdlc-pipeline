@@ -29,19 +29,39 @@ class OpenCodeReleaseSmokeTests(unittest.TestCase):
             (logs / "04-sdlc-code.jsonl").write_text(
                 '{"subagent_type":"sdlc-coder"}\n', encoding="utf-8"
             )
-            runs = root / ".sdlc-pipeline" / "runs"
-            attempts = runs / "journal" / "RUN-TEST" / "attempts" / "code"
+            state = root / ".sdlc-pipeline" / "state"
+            attempts = state / "runs" / "RUN-TEST" / "attempts" / "code"
             attempts.mkdir(parents=True)
             (attempts / "A000001.json").write_text(json.dumps({
                 "step": "task-before:coder",
                 "operation": "task-before",
                 "state": "succeeded",
             }), encoding="utf-8")
-            (runs / "coder-handoff.json").write_text(json.dumps({
+            handoff = {
                 "summary": "implemented R-0001",
                 "changed_files": ["src/feature.ts", "tests/feature.test.ts"],
-            }), encoding="utf-8")
-            (runs / "code-evidence.json").write_text(json.dumps({
+            }
+            handoff_md = (
+                root / ".sdlc-pipeline/work/records/coder-handoff.md"
+            )
+            handoff_md.parent.mkdir(parents=True)
+            handoff_md.write_text(
+                "# Handoff\n\n<!-- sdlc-record:begin -->\n```json\n"
+                + json.dumps(handoff)
+                + "\n```\n<!-- sdlc-record:end -->\n",
+                encoding="utf-8",
+            )
+            handoff_index = state / "records" / "coder-handoff.json"
+            handoff_index.parent.mkdir(parents=True)
+            handoff_index.write_text(
+                json.dumps({
+                    "content_ref": (
+                        ".sdlc-pipeline/work/records/coder-handoff.md"
+                    ),
+                }),
+                encoding="utf-8",
+            )
+            code = {
                 "ok": True,
                 "compile": {"ok": True},
                 "artifact_evidence": {"ok": True},
@@ -49,7 +69,25 @@ class OpenCodeReleaseSmokeTests(unittest.TestCase):
                     {"id": "lint", "ok": True},
                     {"id": "static-analysis", "ok": True},
                 ]},
-            }), encoding="utf-8")
+            }
+            code_md = root / ".sdlc-pipeline/evidence/records/code.md"
+            code_md.parent.mkdir(parents=True)
+            code_md.write_text(
+                "# Code\n\n<!-- sdlc-record:begin -->\n```json\n"
+                + json.dumps(code)
+                + "\n```\n<!-- sdlc-record:end -->\n",
+                encoding="utf-8",
+            )
+            code_index = state / "evidence" / "code.json"
+            code_index.parent.mkdir(parents=True)
+            code_index.write_text(
+                json.dumps({
+                    "content_ref": (
+                        ".sdlc-pipeline/evidence/records/code.md"
+                    ),
+                }),
+                encoding="utf-8",
+            )
 
             report = smoke.assert_code_stage(root, logs)
 
@@ -81,16 +119,24 @@ class OpenCodeReleaseSmokeTests(unittest.TestCase):
     def test_spec_argument_must_be_persisted_as_source_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            sources = root / ".sdlc-pipeline" / "runs" / "sources"
+            sources = (
+                root / ".sdlc-pipeline" / "work" / "sources" / "SRC-TEST"
+            )
             sources.mkdir(parents=True)
-            (sources / "SRC-TEST.json").write_text(json.dumps({
+            (sources / "content.md").write_text(
+                "# Source\n\n需求标记 SMOKE_ARGUMENT_PROBE_7F3A\n",
+                encoding="utf-8",
+            )
+            (sources / "index.json").write_text(json.dumps({
                 "source_id": "SRC-TEST",
-                "content": "需求标记 SMOKE_ARGUMENT_PROBE_7F3A",
+                "content_ref": (
+                    ".sdlc-pipeline/work/sources/SRC-TEST/content.md"
+                ),
             }), encoding="utf-8")
 
             source = smoke.assert_spec_argument_source(
                 root, "SMOKE_ARGUMENT_PROBE_7F3A"
             )
             self.assertEqual(source["source_id"], "SRC-TEST")
-            with self.assertRaisesRegex(smoke.SmokeError, "Source Envelope"):
+            with self.assertRaisesRegex(smoke.SmokeError, "Source Markdown"):
                 smoke.assert_spec_argument_source(root, "missing-marker")

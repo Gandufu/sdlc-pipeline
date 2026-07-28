@@ -1,4 +1,4 @@
-# Schema v2 Spec Candidate 澄清规则
+# Storage Layout v3 Spec Candidate 澄清规则
 
 先读取项目、scaffold、active policy、lifecycle 与已摄取来源；能从事实得到的答案不询问用户。
 
@@ -25,7 +25,8 @@
 大需求先建立 Feature Map，再拆成可独立验收的 Requirement。每个 R/D/T 作为独立 artifact
 立即保存，不在消息中组装单体 JSON。Requirement 包含目标、角色、范围、非范围、主流程、
 异常流程和带 source refs 的 AC；Design 只描述 module/seam/interface/data contract 与
-extension point，不预测实际代码文件。写 Design 前必须读取 `.sdlc-pipeline/scaffold.json`；
+extension point，不预测实际代码文件。写 Design 前必须读取
+`.sdlc-pipeline/contracts/scaffold.json`；
 `extension_points` 只能逐字使用该文件已声明的 ID，不能编造 `feature` 等泛称。Verification 建立 AC
 到 lifecycle 逻辑测试键 `test_key`
 （如 `unit`、`integration`、`functional`）的映射，不能填写 `pnpm test` 等 shell command。
@@ -45,7 +46,7 @@ test key 必须传 `selector: null`，不要填测试文件名。
 
 不得把“采用推荐”“继续”“没问题”等局部答复推断为发布授权。不得让用户或模型在批准时
 重发 candidate 正文。Core 负责分片 Schema、跨引用、来源 anchor、revision/hash 校验，
-并在批准后原子发布只包含分片 artifact 的 v2 bundle。
+并在批准后原子发布自包含的 Markdown baseline。
 
 中断恢复时读取 `sdlc_status.spec_candidate`：draft 从当前 revision 继续 put；ready 直接展示
 原 preview/hash 等待确认；published 不重复生成。

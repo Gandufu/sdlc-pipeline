@@ -25,8 +25,8 @@ SPEC.loader.exec_module(installer)
 def create_remote_template(root: Path, template_id: str = "electron-scaffold") -> str:
     root.mkdir()
     (root / "app.txt").write_text("registered template\n", encoding="utf-8")
-    contracts = root / ".sdlc-pipeline"
-    contracts.mkdir()
+    contracts = root / ".sdlc-pipeline" / "contracts"
+    contracts.mkdir(parents=True)
     lifecycle_text = "{}\n"
     (contracts / "lifecycle.json").write_text(lifecycle_text, encoding="utf-8")
     scaffold = {
@@ -35,8 +35,8 @@ def create_remote_template(root: Path, template_id: str = "electron-scaffold") -
         "template_version": "1.0.0",
         "key_files": [],
         "protected_paths": [
-            ".sdlc-pipeline/lifecycle.json",
-            ".sdlc-pipeline/scaffold.json",
+            ".sdlc-pipeline/contracts/lifecycle.json",
+            ".sdlc-pipeline/contracts/scaffold.json",
         ],
         "extension_points": [{"id": "app", "path": "app.txt"}],
         "allowed_paths": ["app.txt"],
@@ -98,11 +98,25 @@ class InstallerTests(unittest.TestCase):
                 ).is_file()
             )
             installed_templates = sorted(
-                path.relative_to(target / ".sdlc-pipeline/templates").as_posix()
-                for path in (target / ".sdlc-pipeline/templates").rglob("*")
+                path.relative_to(
+                    target / ".sdlc-pipeline/runtime/templates"
+                ).as_posix()
+                for path in (
+                    target / ".sdlc-pipeline/runtime/templates"
+                ).rglob("*")
                 if path.is_file()
             )
             self.assertEqual(installed_templates, ["manifest.json"])
+            self.assertFalse((target / ".sdlc-pipeline/opencode").exists())
+            self.assertFalse((target / ".sdlc-pipeline/runs").exists())
+            self.assertFalse((target / ".sdlc-pipeline/scripts").exists())
+            self.assertFalse((target / "docs/sdlc").exists())
+            self.assertTrue(
+                (
+                    target
+                    / ".sdlc-pipeline/runtime/scripts/sdlc.py"
+                ).is_file()
+            )
 
     def test_install_preserves_unmanaged_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -186,9 +200,11 @@ class InstallerTests(unittest.TestCase):
             installer.install(target)
             obsolete = [
                 target / ".opencode/agents/sdlc-executor.md",
-                target / ".sdlc-pipeline/schemas/feature-contract.schema.json",
-                target / ".sdlc-pipeline/schemas/spec.schema.json",
-                target / ".sdlc-pipeline/scripts/sdlc_core/feature_contracts.py",
+                target
+                / ".sdlc-pipeline/runtime/schemas/feature-contract.schema.json",
+                target / ".sdlc-pipeline/runtime/schemas/spec.schema.json",
+                target
+                / ".sdlc-pipeline/runtime/scripts/sdlc_core/feature_contracts.py",
             ]
             for path in obsolete:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -207,7 +223,10 @@ class InstallerTests(unittest.TestCase):
             first.mkdir()
             second.mkdir()
             installer.install(first)
-            runtime_installer = first / ".sdlc-pipeline/scripts/install_project.py"
+            runtime_installer = (
+                first
+                / ".sdlc-pipeline/runtime/scripts/install_project.py"
+            )
             spec = importlib.util.spec_from_file_location("runtime_installer", runtime_installer)
             assert spec and spec.loader
             module = importlib.util.module_from_spec(spec)
@@ -245,7 +264,11 @@ class InstallerTests(unittest.TestCase):
             clone.assert_called_once()
             self.assertTrue(result["ok"])
             self.assertEqual(result["plugin_dependencies"], prepared)
-            self.assertTrue((target / ".sdlc-pipeline/scripts/sdlc.py").exists())
+            self.assertTrue(
+                (
+                    target / ".sdlc-pipeline/runtime/scripts/sdlc.py"
+                ).exists()
+            )
 
     def test_downloaded_installer_can_load_without_file_global(self) -> None:
         source = (REPO / "scripts" / "install_project.py").read_text(
@@ -336,7 +359,12 @@ class InstallerTests(unittest.TestCase):
                 (project / "app.txt").read_text(encoding="utf-8"),
                 "registered template\n",
             )
-            self.assertTrue((project / ".sdlc-pipeline/lifecycle.json").exists())
+            self.assertTrue(
+                (
+                    project
+                    / ".sdlc-pipeline/contracts/lifecycle.json"
+                ).exists()
+            )
 
     def test_adapter_only_workspace_is_not_an_existing_project(self) -> None:
         sys.path.insert(0, str(REPO / "scripts"))
@@ -398,8 +426,8 @@ class InstallerTests(unittest.TestCase):
             project = base / "project"
             remote.mkdir()
             (remote / "app.txt").write_text("remote template\n", encoding="utf-8")
-            contracts = remote / ".sdlc-pipeline"
-            contracts.mkdir()
+            contracts = remote / ".sdlc-pipeline" / "contracts"
+            contracts.mkdir(parents=True)
             (contracts / "lifecycle.json").write_text("{}\n", encoding="utf-8")
             (contracts / "scaffold.json").write_text("{}\n", encoding="utf-8")
             subprocess.run(["git", "init", "-q"], cwd=remote, check=True)
@@ -424,7 +452,12 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(result["git_baseline"], source_sha)
             self.assertTrue((project / ".git").exists())
             self.assertEqual((project / "app.txt").read_text(encoding="utf-8"), "remote template\n")
-            self.assertTrue((project / ".sdlc-pipeline/lifecycle.json").exists())
+            self.assertTrue(
+                (
+                    project
+                    / ".sdlc-pipeline/contracts/lifecycle.json"
+                ).exists()
+            )
 
     def test_templates_directory_contains_metadata_only(self) -> None:
         registry = json.loads(
@@ -496,7 +529,7 @@ class InstallerTests(unittest.TestCase):
             [
                 "0001-opencode-first.md",
                 "0002-external-template-assets.md",
-                "0003-schema-v2-candidates.md",
+                "0003-storage-layout-v3.md",
             ],
         )
 
@@ -531,7 +564,7 @@ class InstallerTests(unittest.TestCase):
         script = (
             "import(process.argv[1]).then(m => console.log(JSON.stringify("
             "m.sourceReceipt({ok:true,envelope:{source_id:'SRC-TEST',kind:'file',"
-            "source:'external.md',uri:'.sdlc-pipeline/runs/source-assets/test.md',"
+            "source:'external.md',uri:'.sdlc-pipeline/work/sources/test.md',"
             "media_type:'text/plain',sha256:'hash',content:'x'.repeat(20000),"
             "segments:[{anchor:'text:1',text:'x'.repeat(20000),sha256:'segment'}]}}))))"
         )
@@ -614,11 +647,14 @@ class InstallerTests(unittest.TestCase):
             encoding="utf-8"
         )
         for text in (command, main, skill):
-            self.assertIn(".sdlc-pipeline/references/spec-interview.md", text)
+            self.assertIn(
+                ".sdlc-pipeline/runtime/references/spec-interview.md",
+                text,
+            )
         self.assertIn("$ARGUMENTS", command)
         self.assertIn("不得丢弃", command)
         self.assertNotIn("feature-contract.schema.json", command + main)
-        self.assertIn("Schema v2", reference)
+        self.assertIn("Storage Layout v3", reference)
         self.assertIn("R/D/T/AC", reference)
 
     def test_code_command_stops_before_test_lifecycle(self) -> None:
@@ -725,7 +761,9 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("code 阶段不运行依赖项目启动的 functional 测试", adapter)
         self.assertIn("steps: 16", coder)
         self.assertIn("temperature: 0.1", coder)
-        self.assertIn('".sdlc-pipeline/scripts/**": deny', coder)
+        self.assertIn(
+            '".sdlc-pipeline/runtime/scripts/**": deny', coder
+        )
         self.assertIn("CODER_DEADLINE_SECONDS = 5 * 60", plugin)
         self.assertIn("output.args.prompt =", plugin)
         self.assertNotIn("output.args.prompt = `${output.args.prompt", plugin)
@@ -745,13 +783,19 @@ class InstallerTests(unittest.TestCase):
             plugin_path = target / ".opencode" / "plugins" / "sdlc-pipeline.js"
             plugin_path.parent.mkdir(parents=True)
             shutil.copy2(REPO / ".opencode/plugins/sdlc-pipeline.js", plugin_path)
-            core = target / ".sdlc-pipeline" / "scripts" / "sdlc.py"
+            core = (
+                target
+                / ".sdlc-pipeline"
+                / "runtime"
+                / "scripts"
+                / "sdlc.py"
+            )
             core.parent.mkdir(parents=True)
             core.write_text(
                 "import json, sys\n"
                 "payload = json.load(sys.stdin)\n"
                 "if sys.argv[1] == 'task-before':\n"
-                "    print(json.dumps({'ok': True, 'context_pack': {'paths': ['.sdlc-pipeline/runs/context/coder-manifest.json'], 'characters': 1, 'resource_count': 1}, 'instruction': '只读取必要文件'}))\n"
+                "    print(json.dumps({'ok': True, 'context_pack': {'paths': ['.sdlc-pipeline/work/records/context/coder.md'], 'characters': 1, 'resource_count': 1}, 'instruction': '只读取必要文件'}))\n"
                 "else:\n"
                 "    print(json.dumps({'ok': True}))\n",
                 encoding="utf-8",
@@ -800,12 +844,17 @@ class InstallerTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             attempts = (
-                root / ".sdlc-pipeline" / "runs" / "journal" / "RUN-TEST"
+                root / ".sdlc-pipeline" / "state" / "runs" / "RUN-TEST"
                 / "attempts" / "spec"
             )
             attempts.mkdir(parents=True)
             for index in range(1, 15):
                 failed = index == 1
+                error_ref = (
+                    f".sdlc-pipeline/evidence/errors/RUN-TEST/"
+                    f"A{index:06d}.md"
+                    if failed else None
+                )
                 (attempts / f"A{index:06d}.json").write_text(
                     json.dumps({
                         "attempt_id": f"A{index:06d}",
@@ -814,11 +863,25 @@ class InstallerTests(unittest.TestCase):
                         "state": "failed" if failed else "succeeded",
                         "started_at": f"2026-01-01T00:00:{index:02d}+00:00",
                         "finished_at": f"2026-01-01T00:00:{index:02d}+00:00",
-                        "error": "early schema failure" if failed else None,
-                        "result": None if failed else {"ok": True},
+                        "error_ref": error_ref,
+                        "result_ref": (
+                            None if failed else
+                            f".sdlc-pipeline/work/runs/RUN-TEST/attempts/"
+                            f"A{index:06d}-result.md"
+                        ),
                     }),
                     encoding="utf-8",
                 )
+                if failed:
+                    error_path = root / error_ref
+                    error_path.parent.mkdir(parents=True, exist_ok=True)
+                    error_path.write_text(
+                        "# Error\n\n<!-- sdlc-record:begin -->\n"
+                        "```json\n"
+                        '{"message":"early schema failure"}\n'
+                        "```\n<!-- sdlc-record:end -->\n",
+                        encoding="utf-8",
+                    )
 
             evidence = collector.collect(root)
 
@@ -891,7 +954,13 @@ class InstallerTests(unittest.TestCase):
             plugin_path = target / ".opencode" / "plugins" / "sdlc-pipeline.js"
             plugin_path.parent.mkdir(parents=True)
             shutil.copy2(REPO / ".opencode/plugins/sdlc-pipeline.js", plugin_path)
-            core = target / ".sdlc-pipeline" / "scripts" / "sdlc.py"
+            core = (
+                target
+                / ".sdlc-pipeline"
+                / "runtime"
+                / "scripts"
+                / "sdlc.py"
+            )
             core.parent.mkdir(parents=True)
             core.write_text(
                 "import json, sys\n"

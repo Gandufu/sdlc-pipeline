@@ -20,7 +20,7 @@ subtask: false
 
 不得接受 slash command 参数、路径、GitHub 地址或 ref。不得在用户选择前调用 init 做模式探测。
 `sdlc_lifecycle` 会继续执行既有的 template import、工具探测与受控安装、
-按模板 `rules` 生成 `.sdlc-pipeline/rules/active.json`，再执行
+按模板 `rules` 生成 `.sdlc-pipeline/contracts/active-rules.json`，再执行
 install/compile/start/health/artifact/stop，并生成或保留 `AGENTS.md` 和 `init-report`。
 后续 coder 只加载 active rules；发行包中的其他规则文件只是目录，不进入上下文。
 

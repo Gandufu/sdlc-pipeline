@@ -19,18 +19,17 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.14.16"
+VERSION = "0.15.0"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.7"
 COPY_EXCLUDED_PARTS = {"node_modules", "__pycache__", ".cache"}
 MANAGED = (
-    ("scripts", ".sdlc-pipeline/scripts"),
-    ("templates", ".sdlc-pipeline/templates"),
-    ("rules", ".sdlc-pipeline/rules"),
-    ("references", ".sdlc-pipeline/references"),
-    ("schemas", ".sdlc-pipeline/schemas"),
-    (".opencode", ".sdlc-pipeline/opencode"),
+    ("scripts", ".sdlc-pipeline/runtime/scripts"),
+    ("templates", ".sdlc-pipeline/runtime/templates"),
+    ("rules", ".sdlc-pipeline/runtime/rules"),
+    ("references", ".sdlc-pipeline/runtime/references"),
+    ("schemas", ".sdlc-pipeline/runtime/schemas"),
     (".opencode/plugins/sdlc-pipeline.js", ".opencode/plugins/sdlc-pipeline.js"),
     (".opencode/agents/sdlc-main.md", ".opencode/agents/sdlc-main.md"),
     (".opencode/agents/sdlc-coder.md", ".opencode/agents/sdlc-coder.md"),
@@ -47,9 +46,21 @@ MANAGED = (
 )
 OBSOLETE_MANAGED = (
     ".opencode/agents/sdlc-executor.md",
-    ".sdlc-pipeline/schemas/feature-contract.schema.json",
-    ".sdlc-pipeline/schemas/spec.schema.json",
-    ".sdlc-pipeline/scripts/sdlc_core/feature_contracts.py",
+    ".sdlc-pipeline/opencode",
+    ".sdlc-pipeline/scripts",
+    ".sdlc-pipeline/templates",
+    ".sdlc-pipeline/rules",
+    ".sdlc-pipeline/references",
+    ".sdlc-pipeline/schemas",
+    ".sdlc-pipeline/runs",
+    ".sdlc-pipeline/lifecycle.json",
+    ".sdlc-pipeline/scaffold.json",
+    ".sdlc-pipeline/runtime/schemas/feature-contract.schema.json",
+    ".sdlc-pipeline/runtime/schemas/spec.schema.json",
+    ".sdlc-pipeline/runtime/schemas/source-envelope.schema.json",
+    ".sdlc-pipeline/runtime/schemas/spec-checkpoint.schema.json",
+    ".sdlc-pipeline/runtime/schemas/v2",
+    ".sdlc-pipeline/runtime/scripts/sdlc_core/feature_contracts.py",
 )
 
 
@@ -112,7 +123,7 @@ def _ensure_opencode_dependencies(target: Path) -> None:
 
 
 def _ensure_tooling_ignores(target: Path) -> dict[str, object]:
-    runtime_scripts = target / ".sdlc-pipeline" / "scripts"
+    runtime_scripts = target / ".sdlc-pipeline" / "runtime" / "scripts"
     runtime_text = str(runtime_scripts)
     if runtime_text not in sys.path:
         sys.path.insert(0, runtime_text)
@@ -122,7 +133,7 @@ def _ensure_tooling_ignores(target: Path) -> dict[str, object]:
 
 
 def _contract_self_check(target: Path) -> dict[str, object]:
-    runtime_scripts = target / ".sdlc-pipeline" / "scripts"
+    runtime_scripts = target / ".sdlc-pipeline" / "runtime" / "scripts"
     runtime_text = str(runtime_scripts)
     if runtime_text not in sys.path:
         sys.path.insert(0, runtime_text)
@@ -132,15 +143,19 @@ def _contract_self_check(target: Path) -> dict[str, object]:
     )
 
     checked: list[str] = [
-        f".sdlc-pipeline/schemas/{name}"
+        f".sdlc-pipeline/runtime/schemas/{name}"
         for name in check_schema_documents(target)
     ]
-    for path in sorted((target / ".sdlc-pipeline" / "rules").glob("*.policy.json")):
+    for path in sorted(
+        (target / ".sdlc-pipeline" / "runtime" / "rules").glob("*.policy.json")
+    ):
         validate_schema_instance(target, "rule-policy.schema.json", json.loads(
             path.read_text(encoding="utf-8")
         ))
         checked.append(path.relative_to(target).as_posix())
-    manifest = target / ".sdlc-pipeline" / "templates" / "manifest.json"
+    manifest = (
+        target / ".sdlc-pipeline" / "runtime" / "templates" / "manifest.json"
+    )
     if manifest.is_file():
         validate_schema_instance(
             target,
@@ -155,6 +170,14 @@ def _source(name: str) -> Path:
     direct = PLUGIN_ROOT / name
     if direct.exists():
         return direct
+    if (
+        PLUGIN_ROOT.name == "runtime"
+        and PLUGIN_ROOT.parent.name == ".sdlc-pipeline"
+    ):
+        project_root = PLUGIN_ROOT.parent.parent
+        installed = project_root / name
+        if installed.exists():
+            return installed
     if name == ".opencode":
         return PLUGIN_ROOT / "opencode"
     if name.startswith(".opencode/"):
@@ -249,6 +272,8 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
             obsolete = target / obsolete_name
             if obsolete.is_file():
                 obsolete.unlink()
+            elif obsolete.is_dir():
+                shutil.rmtree(obsolete)
     contract_self_check = _contract_self_check(target)
     _ensure_opencode_dependencies(target)
     config_path = target / "opencode.json"
@@ -263,11 +288,12 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
         "version": VERSION,
         "host": "opencode",
         "layout": "project-local",
+        "layout_version": "3.0",
         "desktop_compatible": True,
     }
     atomic_write(
         target / ".sdlc-pipeline" / ".gitignore",
-        "runs/\n**/__pycache__/\n*.py[cod]\n",
+        "state/\nwork/\nevidence/\n**/__pycache__/\n*.py[cod]\n",
     )
     tooling_ignore = _ensure_tooling_ignores(target)
     atomic_write(marker, json.dumps(value, ensure_ascii=False, indent=2) + "\n")

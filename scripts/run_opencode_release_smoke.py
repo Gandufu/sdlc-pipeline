@@ -38,6 +38,36 @@ def read_json(path: Path) -> dict[str, Any]:
     return value
 
 
+def read_markdown_record(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise SmokeError(f"无法读取 Markdown 证据 {path}: {error}") from error
+    match = re.search(
+        r"<!-- sdlc-record:begin -->\s*```json\s*(\{.*\})\s*```"
+        r"\s*<!-- sdlc-record:end -->",
+        text,
+        re.DOTALL,
+    )
+    if not match:
+        raise SmokeError(f"Markdown 证据缺少 structured record: {path}")
+    try:
+        value = json.loads(match.group(1))
+    except json.JSONDecodeError as error:
+        raise SmokeError(f"Markdown 证据无法解析: {path}") from error
+    if not isinstance(value, dict):
+        raise SmokeError(f"Markdown 证据必须是对象: {path}")
+    return value
+
+
+def read_indexed_record(root: Path, index_path: Path) -> dict[str, Any]:
+    index = read_json(index_path)
+    reference = index.get("content_ref")
+    if not isinstance(reference, str):
+        raise SmokeError(f"索引缺少 content_ref: {index_path}")
+    return read_markdown_record(root / reference)
+
+
 def write_json(path: Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -53,10 +83,14 @@ def run_opencode(
     prompt: str,
     executable: str,
     timeout_seconds: int,
+    model: str | None = None,
 ) -> None:
     """Run one command and always retain both stdout and stderr."""
     log_path = logs / f"{label}.jsonl"
-    argv = [executable, "run", "--format", "json", prompt]
+    argv = [executable, "run", "--format", "json"]
+    if model:
+        argv.extend(["--model", model])
+    argv.append(prompt)
     try:
         result = subprocess.run(
             argv,
@@ -86,7 +120,9 @@ def run_opencode(
 
 
 def core_status(root: Path) -> dict[str, Any]:
-    core = root / ".sdlc-pipeline" / "scripts" / "sdlc.py"
+    core = (
+        root / ".sdlc-pipeline" / "runtime" / "scripts" / "sdlc.py"
+    )
     if not core.is_file():
         raise SmokeError(f"未找到已安装 Core: {core}")
     try:
@@ -115,7 +151,7 @@ def core_status(root: Path) -> dict[str, Any]:
 
 
 def attempt_documents(root: Path) -> list[tuple[Path, dict[str, Any]]]:
-    journal = root / ".sdlc-pipeline" / "runs" / "journal"
+    journal = root / ".sdlc-pipeline" / "state" / "runs"
     documents: list[tuple[Path, dict[str, Any]]] = []
     for path in sorted(journal.glob("*/attempts/*/*.json")):
         documents.append((path, read_json(path)))
@@ -136,10 +172,17 @@ def find_successful_coder_attempt(root: Path) -> tuple[Path, dict[str, Any]]:
 
 
 def handoff_from_attempt(root: Path, attempt: dict[str, Any]) -> dict[str, Any]:
-    handoff_path = root / ".sdlc-pipeline" / "runs" / "coder-handoff.json"
+    handoff_path = (
+        root / ".sdlc-pipeline" / "state" / "records" / "coder-handoff.json"
+    )
     if handoff_path.is_file():
-        return read_json(handoff_path)
-    result = attempt.get("result")
+        return read_indexed_record(root, handoff_path)
+    result_ref = attempt.get("result_ref")
+    result = (
+        read_markdown_record(root / result_ref)
+        if isinstance(result_ref, str)
+        else None
+    )
     if isinstance(result, dict) and isinstance(result.get("handoff"), dict):
         return result["handoff"]
     raise SmokeError("找不到 coder-handoff.json，也没有 journal handoff")
@@ -169,8 +212,10 @@ def assert_code_stage(root: Path, logs: Path) -> dict[str, Any]:
     ):
         raise SmokeError("coder handoff 缺少非空业务 changed_files")
 
-    evidence_path = root / ".sdlc-pipeline" / "runs" / "code-evidence.json"
-    evidence = read_json(evidence_path)
+    evidence_path = (
+        root / ".sdlc-pipeline" / "state" / "evidence" / "code.json"
+    )
+    evidence = read_indexed_record(root, evidence_path)
     for key in ("compile", "artifact_evidence", "policy"):
         value = evidence.get(key)
         if not isinstance(value, dict) or value.get("ok") is not True:
@@ -199,7 +244,11 @@ def assert_no_intermediate_failures(root: Path) -> None:
     failures = []
     for path, attempt in attempt_documents(root):
         state = attempt.get("state")
-        error = attempt.get("error")
+        error_ref = attempt.get("error_ref")
+        error = None
+        if isinstance(error_ref, str):
+            value = read_markdown_record(root / error_ref)
+            error = value.get("message")
         if state != "succeeded" or error:
             failures.append({
                 "path": path.as_posix(),
@@ -251,15 +300,22 @@ def require_gate(status: dict[str, Any], gate: str) -> None:
 
 def assert_spec_argument_source(root: Path, marker: str) -> dict[str, Any]:
     """Prove that the argument passed to ``/sdlc-spec`` became source evidence."""
-    source_dir = root / ".sdlc-pipeline" / "runs" / "sources"
+    source_dir = root / ".sdlc-pipeline" / "work" / "sources"
     matches: list[dict[str, Any]] = []
-    for path in sorted(source_dir.glob("SRC-*.json")):
+    for path in sorted(source_dir.glob("SRC-*/index.json")):
         source = read_json(path)
-        if marker in str(source.get("content", "")):
+        content_ref = source.get("content_ref")
+        content_path = root / content_ref if isinstance(content_ref, str) else None
+        content = (
+            content_path.read_text(encoding="utf-8")
+            if content_path is not None and content_path.is_file()
+            else ""
+        )
+        if marker in content:
             matches.append(source)
     if not matches:
         raise SmokeError(
-            "spec Candidate 虽已生成，但 /sdlc-spec 命令参数没有进入 Source Envelope"
+            "spec Candidate 虽已生成，但 /sdlc-spec 命令参数没有进入 Source Markdown"
         )
     return matches[-1]
 
@@ -269,12 +325,16 @@ def run_smoke(
     logs: Path,
     executable: str,
     timeout_seconds: int,
+    model: str | None = None,
 ) -> dict[str, Any]:
     if not (target / ".sdlc-pipeline" / "installation.json").is_file():
         raise SmokeError("target 不是已通过 install_project 安装的项目")
     logs.mkdir(parents=True, exist_ok=True)
 
-    run_opencode(target, logs, "01-sdlc-init", "/sdlc-init", executable, timeout_seconds)
+    run_opencode(
+        target, logs, "01-sdlc-init", "/sdlc-init",
+        executable, timeout_seconds, model,
+    )
     require_gate(core_status(target), "init")
 
     spec_marker = "SMOKE_ARGUMENT_PROBE_7F3A"
@@ -285,7 +345,10 @@ def run_smoke(
         "生成候选、validate 并展示 candidate ID/hash，不要发布，也不要询问额外问题。"
         f" 命令参数摄取探针：{spec_marker}。"
     )
-    run_opencode(target, logs, "02-sdlc-spec", specification, executable, timeout_seconds)
+    run_opencode(
+        target, logs, "02-sdlc-spec", specification,
+        executable, timeout_seconds, model,
+    )
     candidate = core_status(target).get("spec_candidate")
     if not isinstance(candidate, dict) or candidate.get("state") != "ready":
         raise SmokeError("spec 未生成 ready Candidate")
@@ -300,14 +363,20 @@ def run_smoke(
         f"candidate_id={candidate_id}、content_hash={content_hash} 和 confirmed=true "
         "调用 sdlc_approve_candidate；不要重新生成或修改 Candidate。"
     )
-    run_opencode(target, logs, "03-sdlc-spec-approve", approval, executable, timeout_seconds)
+    run_opencode(
+        target, logs, "03-sdlc-spec-approve", approval,
+        executable, timeout_seconds, model,
+    )
     approved = core_status(target)
     require_gate(approved, "spec")
     published = approved.get("spec_candidate")
     if not isinstance(published, dict) or published.get("state") != "published":
         raise SmokeError("spec approval 未得到 published Candidate")
 
-    run_opencode(target, logs, "04-sdlc-code", "/sdlc-code", executable, timeout_seconds)
+    run_opencode(
+        target, logs, "04-sdlc-code", "/sdlc-code",
+        executable, timeout_seconds, model,
+    )
     require_gate(core_status(target), "code")
     code_report = assert_code_stage(target, logs)
     assert_no_intermediate_failures(target)
@@ -333,12 +402,19 @@ def main() -> int:
         help="OpenCode executable (default: OPENCODE_BIN or platform global CLI)",
     )
     parser.add_argument("--timeout-seconds", type=int, default=900)
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("OPENCODE_MODEL"),
+        help="Optional OpenCode provider/model override",
+    )
     args = parser.parse_args()
     target = args.target.resolve()
     logs = args.logs_dir.resolve()
     report_path = logs / "release-smoke.json"
     try:
-        report = run_smoke(target, logs, args.opencode, args.timeout_seconds)
+        report = run_smoke(
+            target, logs, args.opencode, args.timeout_seconds, args.model
+        )
     except Exception as error:
         report = {
             "ok": False,

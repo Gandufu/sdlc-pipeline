@@ -7,7 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import load_current_spec, require_code_ready
-from .common import SdlcError, read_json, sha256_file, utc_now, write_json
+from .artifact_store import current_baseline
+from .common import SdlcError, read_json, sha256_file, utc_now
+from .layout import contracts_root, rules_root, runtime_root
+from .stores import (
+    read_work_record,
+    record_index,
+    write_work_record,
+)
 from .trace import (
     TOOLING_CONFIG_PATHS,
     changed_path_fingerprints,
@@ -56,18 +63,23 @@ def _extract_json(text: str) -> dict[str, Any]:
 
 def _context_resources(root: Path) -> list[dict[str, Any]]:
     spec = load_current_spec(root)
+    selected = current_baseline(root)
+    if not selected:
+        raise SdlcError("缺少已发布的 spec baseline")
+    baseline, _ = selected
     candidates: dict[str, tuple[int, str]] = {
-        "docs/sdlc/current/feature-map.json": (1, "authoritative Feature Map"),
+        (baseline / "spec.md").relative_to(root).as_posix(): (
+            1,
+            "authoritative Spec preview",
+        ),
     }
-    for folder, reason in (
+    for group, reason in (
         ("requirements", "authoritative Requirement"),
-        ("designs", "authoritative Design"),
-        ("verification", "authoritative Verification"),
+        ("design", "authoritative Design"),
+        ("test_plan", "authoritative Verification"),
     ):
-        directory = root / "docs" / "sdlc" / "current" / folder
-        if directory.is_dir():
-            for path in sorted(directory.glob("*.json")):
-                candidates[path.relative_to(root).as_posix()] = (1, reason)
+        for item in spec[group]["items"]:
+            candidates[item["content_ref"]] = (1, reason)
     implementation_candidates: set[str] = set()
     for item in spec["design"]["items"]:
         for pattern in item["allowed_paths"]:
@@ -89,7 +101,7 @@ def _context_resources(root: Path) -> list[dict[str, Any]]:
                 if (
                     candidate.is_file()
                     and candidate.stat().st_size <= 80_000
-                    and ".sdlc-pipeline/scripts" not in candidate.as_posix()
+                    and runtime_root(root).as_posix() not in candidate.as_posix()
                     and ".opencode" not in candidate.parts
                     and ".sdlc-pipeline" not in candidate.parts
                     and any(
@@ -107,21 +119,20 @@ def _context_resources(root: Path) -> list[dict[str, Any]]:
     for name in sorted(implementation_candidates)[:MAX_IMPLEMENTATION_RESOURCES]:
         candidates[name] = (2, "design-allowed business implementation candidate")
     active_rules = read_json(
-        root / ".sdlc-pipeline" / "rules" / "active.json",
-        required=False,
+        contracts_root(root) / "active-rules.json", required=False
     ) or {"rules": []}
     for rule in active_rules.get("rules", []):
         path = rule.get("path")
         if (
             not isinstance(path, str)
-            or not path.startswith(".sdlc-pipeline/rules/")
+            or not path.startswith(".sdlc-pipeline/runtime/rules/")
             or not path.endswith(".md")
         ):
             raise SdlcError(f"active rule 路径非法: {path!r}")
         rule_path = root / path
         try:
             rule_path.resolve().relative_to(
-                (root / ".sdlc-pipeline" / "rules").resolve()
+                rules_root(root).resolve()
             )
         except ValueError as exc:
             raise SdlcError(f"active rule 越出规则目录: {path}") from exc
@@ -212,16 +223,21 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
         "resources": _context_resources(root),
         "instruction": (
             "以 brief 为实现事实；只在修改需要时读取 resources。"
-            "禁止读取 .sdlc-pipeline/scripts/** 来理解 Core。"
+            "禁止读取 .sdlc-pipeline/runtime/scripts/** 来理解 Core。"
             "tier=1 是权威契约，tier=2 是业务实现候选，tier=3 是 active rule。"
         ),
     }
-    directory = root / ".sdlc-pipeline" / "runs" / "context"
-    path = directory / f"{role}-manifest.json"
-    write_json(path, pack)
+    write_work_record(
+        root,
+        f"context/{role}",
+        pack,
+        state="ready",
+        title=f"{role} context manifest",
+    )
+    index = record_index(root, f"context/{role}")
     characters = len(json.dumps(pack, ensure_ascii=False))
     return {
-        "paths": [path.relative_to(root).as_posix()],
+        "paths": [index["content_ref"]],
         "parts": 1,
         "characters": characters,
         "repeated_chars": 0,
@@ -243,26 +259,22 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
     if role == "coder":
         require_code_ready(load_current_spec(root))
     verify_extension_points(root)
-    before_path = root / ".sdlc-pipeline" / "runs" / f"{role}-before.json"
-    spec_pointer = read_json(
-        root / "docs" / "sdlc" / "spec-current.json",
-        required=False,
-    ) or {}
-    previous = read_json(before_path, required=False)
+    spec_pointer = read_json(root / "docs" / "sdlc" / "current.json", required=False) or {}
+    previous = read_work_record(root, f"task/{role}-before", required=False)
     reuse_baseline = (
         role == "coder"
         and previous is not None
-        and previous.get("spec_bundle_id") == spec_pointer.get("bundle_id")
+        and previous.get("baseline_id") == spec_pointer.get("baseline_id")
         and not current["gates"]["code"]
     )
     if not reuse_baseline:
         before = changed_path_fingerprints(root)
-        write_json(before_path, {
+        write_work_record(root, f"task/{role}-before", {
             "created_at": utc_now(),
-            "spec_bundle_id": spec_pointer.get("bundle_id"),
+            "baseline_id": spec_pointer.get("baseline_id"),
             "changed_paths": [item["path"] for item in before["entries"]],
             "worktree": before,
-        })
+        }, state="captured", title=f"{role} task before snapshot")
     context = build_context_pack(root, role)
     from .runs import record_tokens
 
@@ -298,7 +310,7 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
 def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     value = _extract_json(text)
     validate_schema_instance(root, "handoff.schema.json", value)
-    before = read_json(root / ".sdlc-pipeline" / "runs" / "coder-before.json")
+    before = read_work_record(root, "task/coder-before")
     diff = validate_diff(root, before.get("worktree", before.get("changed_paths", [])))
     actual = sorted(set(diff["changed_paths"]))
     if not actual:
@@ -309,7 +321,13 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     value["validated_at"] = utc_now()
     value["compiled_claim_ignored"] = True
     value["mapping_strategy"] = "post-code-delivery-trace"
-    write_json(root / ".sdlc-pipeline" / "runs" / "coder-handoff.json", value)
+    write_work_record(
+        root,
+        "coder-handoff",
+        value,
+        state="validated",
+        title="Coder handoff",
+    )
     return {"ok": True, "handoff": value, "diff": diff}
 
 

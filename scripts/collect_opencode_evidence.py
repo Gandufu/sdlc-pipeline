@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -34,6 +35,35 @@ def read_json(path: Path) -> Any | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
+
+
+def read_markdown_record(path: Path) -> dict[str, Any] | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(
+        r"<!-- sdlc-record:begin -->\s*```json\s*(\{.*\})\s*```"
+        r"\s*<!-- sdlc-record:end -->",
+        text,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    try:
+        value = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def attempt_error(root: Path, document: dict[str, Any]) -> str | None:
+    reference = document.get("error_ref")
+    if not isinstance(reference, str):
+        return None
+    value = read_markdown_record(root / reference)
+    message = (value or {}).get("message")
+    return message if isinstance(message, str) else None
 
 
 def run_command(argv: list[str], cwd: Path) -> dict[str, Any]:
@@ -79,7 +109,7 @@ def file_record(root: Path, path: Path) -> dict[str, Any]:
     }
 
 
-def latest_attempts(journal_root: Path) -> list[dict[str, Any]]:
+def latest_attempts(root: Path, journal_root: Path) -> list[dict[str, Any]]:
     candidates: list[tuple[Path, dict[str, Any]]] = []
     for path in journal_root.glob("*/attempts/*/*.json"):
         document = read_json(path)
@@ -95,7 +125,6 @@ def latest_attempts(journal_root: Path) -> list[dict[str, Any]]:
     )
     records = []
     for path, document in candidates[:12]:
-        result = document.get("result")
         records.append({
             "path": path.relative_to(journal_root).as_posix(),
             "attempt_id": document.get("attempt_id"),
@@ -104,13 +133,13 @@ def latest_attempts(journal_root: Path) -> list[dict[str, Any]]:
             "state": document.get("state"),
             "started_at": document.get("started_at"),
             "finished_at": document.get("finished_at"),
-            "error": document.get("error"),
-            "result_ok": result.get("ok") if isinstance(result, dict) else None,
+            "error": attempt_error(root, document),
+            "result_ref": document.get("result_ref"),
         })
     return records
 
 
-def journal_failure_summary(journal_root: Path) -> dict[str, Any]:
+def journal_failure_summary(root: Path, journal_root: Path) -> dict[str, Any]:
     """Preserve every failure pattern even when old attempts age out of the tail."""
     groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
     total = 0
@@ -125,7 +154,7 @@ def journal_failure_summary(journal_root: Path) -> dict[str, Any]:
     ))
     for document in candidates:
         state = str(document.get("state", "unknown"))
-        raw_error = document.get("error")
+        raw_error = attempt_error(root, document)
         if state == "succeeded" and not raw_error:
             continue
         phase = str(document.get("phase", "unknown"))
@@ -149,7 +178,7 @@ def journal_failure_summary(journal_root: Path) -> dict[str, Any]:
 
 
 def collect(root: Path) -> dict[str, Any]:
-    core = root / ".sdlc-pipeline" / "scripts" / "sdlc.py"
+    core = root / ".sdlc-pipeline" / "runtime" / "scripts" / "sdlc.py"
     status: Any = None
     status_command: dict[str, Any] | None = None
     if core.is_file():
@@ -164,9 +193,10 @@ def collect(root: Path) -> dict[str, Any]:
                 pass
         status_command = public_command(raw_status)
 
-    current = root / "docs" / "sdlc" / "current"
-    journal = root / ".sdlc-pipeline" / "runs" / "journal"
-    source_dir = root / ".sdlc-pipeline" / "runs" / "sources"
+    pointer = read_json(root / "docs" / "sdlc" / "current.json") or {}
+    current = root / str(pointer.get("path", "docs/sdlc/baselines/__missing__"))
+    journal = root / ".sdlc-pipeline" / "state" / "runs"
+    source_dir = root / ".sdlc-pipeline" / "work" / "sources"
     return {
         "schema_version": "1.0",
         "captured_at": datetime.now(timezone.utc).isoformat(),
@@ -175,18 +205,18 @@ def collect(root: Path) -> dict[str, Any]:
         "core_status_command": status_command,
         "spec_artifacts": [
             file_record(root, path)
-            for path in sorted(current.glob("*"))
+            for path in sorted(current.rglob("*"))
             if path.is_file()
         ],
-        "source_envelopes": [
+        "source_indexes": [
             file_record(root, path)
             for path in sorted(source_dir.rglob("*.json"))
         ] if source_dir.is_dir() else [],
         "latest_journal_attempts": (
-            latest_attempts(journal) if journal.is_dir() else []
+            latest_attempts(root, journal) if journal.is_dir() else []
         ),
         "journal_failure_summary": (
-            journal_failure_summary(journal) if journal.is_dir()
+            journal_failure_summary(root, journal) if journal.is_dir()
             else {"total": 0, "groups": []}
         ),
         "release_artifacts": [

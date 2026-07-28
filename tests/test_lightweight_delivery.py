@@ -10,6 +10,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
+from sdlc_core.records import read_markdown_record  # noqa: E402
 
 
 class LightweightDeliveryContractTests(unittest.TestCase):
@@ -28,10 +29,8 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             )
 
             result = before_task(fixture.root, "coder")
-            pack = json.loads(
-                (fixture.root / result["context_pack"]["paths"][0]).read_text(
-                    encoding="utf-8"
-                )
+            pack = read_markdown_record(
+                fixture.root / result["context_pack"]["paths"][0]
             )
 
             self.assertEqual(pack["mode"], "progressive")
@@ -53,7 +52,9 @@ class LightweightDeliveryContractTests(unittest.TestCase):
                 {resource["path"] for resource in pack["resources"]},
             )
             self.assertFalse(any(
-                resource["path"].startswith(".sdlc-pipeline/scripts/")
+                resource["path"].startswith(
+                    ".sdlc-pipeline/runtime/scripts/"
+                )
                 for resource in pack["resources"]
             ))
             self.assertLess(result["context_pack"]["characters"], 8_000)
@@ -140,7 +141,10 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             self.assertIn("复用 feature seam", first["decisions"])
             self.assertNotIn("原始用户输入", json.dumps(first, ensure_ascii=False))
 
-            lifecycle = fixture.root / ".sdlc-pipeline/lifecycle.json"
+            lifecycle = (
+                fixture.root
+                / ".sdlc-pipeline/contracts/lifecycle.json"
+            )
             value = json.loads(lifecycle.read_text(encoding="utf-8"))
             value["project_type"] = "python-fixture-v2"
             lifecycle.write_text(
@@ -179,38 +183,49 @@ class LightweightDeliveryContractTests(unittest.TestCase):
 
             self.assertEqual(changed_paths(root), ["src/main/ipc.ts"])
 
-    def test_schema_v2_is_the_only_spec_schema(self) -> None:
+    def test_layout_v3_artifact_schemas_are_the_only_spec_schemas(self) -> None:
         names = {
             path.relative_to(REPO / "schemas").as_posix()
             for path in (REPO / "schemas").rglob("*.schema.json")
         }
-        self.assertIn("v2/requirement.schema.json", names)
-        self.assertIn("v2/design.schema.json", names)
-        self.assertIn("v2/verification.schema.json", names)
+        self.assertIn("artifacts/requirement.schema.json", names)
+        self.assertIn("artifacts/design.schema.json", names)
+        self.assertIn("artifacts/verification.schema.json", names)
         self.assertNotIn("feature-contract.schema.json", names)
         self.assertNotIn("spec.schema.json", names)
 
-    def test_v2_candidate_publishes_one_atomic_fragment_bundle(self) -> None:
+    def test_v3_candidate_publishes_one_atomic_markdown_baseline(self) -> None:
         from tests.test_pipeline import ProjectFixture, publish_spec, spec_payload
 
         fixture = ProjectFixture()
         try:
             published = publish_spec(fixture.root, spec_payload())
-            bundle = fixture.root / "docs/sdlc/bundles" / published["bundle_id"]
+            bundle = fixture.root / "docs/sdlc/baselines" / published["baseline_id"]
             expected = {
-                "feature-map.json",
-                "requirements/R-0001.json",
-                "designs/D-0001.json",
-                "verification/T-0001.json",
+                "manifest.json",
+                "requirements/R-0001.md",
+                "designs/D-0001.md",
+                "verification/T-0001.md",
                 "spec.md",
-                "index.md",
             }
             actual = {
                 path.relative_to(bundle).as_posix()
                 for path in bundle.rglob("*")
-                if path.is_file() and path.name != "bundle.json"
+                if path.is_file()
             }
-            self.assertEqual(actual, expected)
+            self.assertTrue(expected.issubset(actual))
+            self.assertEqual(
+                len([path for path in actual if path.endswith("/content.md")]),
+                1,
+            )
+            self.assertEqual(
+                len([
+                    path
+                    for path in actual
+                    if path.startswith("sources/") and path.endswith("/index.json")
+                ]),
+                1,
+            )
         finally:
             fixture.close()
 

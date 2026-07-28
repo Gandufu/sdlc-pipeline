@@ -41,7 +41,7 @@ Electron 项目必须检查：
 
 ## 4. 生成独立模板合约
 
-读取 [references/template-contract.md](references/template-contract.md)。模板仓库拥有全部源码、依赖、文档、`.sdlc-pipeline/lifecycle.json` 和 `.sdlc-pipeline/scaffold.json`；插件只登记数据源元数据，不复制模板资产。
+读取 [references/template-contract.md](references/template-contract.md)。模板仓库拥有全部源码、依赖、文档、`.sdlc-pipeline/contracts/lifecycle.json` 和 `.sdlc-pipeline/contracts/scaffold.json`；插件只登记数据源元数据，不复制模板资产。
 
 生命周期至少覆盖：
 

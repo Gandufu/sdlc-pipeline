@@ -1,11 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sdlc-pipeline.local/schemas/spec-checkpoint.schema.json",
+  "$id": "https://sdlc-pipeline.local/schemas/interactions/spec-checkpoint.schema.json",
   "type": "object",
   "properties": {
-    "state": {
-      "enum": ["interviewing", "ready", "confirmed", "published"]
-    },
+    "state": {"enum": ["interviewing", "ready", "confirmed", "published"]},
     "question": {
       "type": "object",
       "required": ["id", "prompt", "answer", "status", "rationale"],
@@ -20,10 +18,7 @@
     },
     "source_refs": {
       "type": "array",
-      "items": {
-        "type": "string",
-        "pattern": "^SRC-[A-F0-9]{12}#[^#]+$"
-      }
+      "items": {"type": "string", "pattern": "^SRC-[A-F0-9]{12}#[^#]+$"}
     },
     "confirmed_facts": {
       "type": "array",

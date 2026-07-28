@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sdlc-pipeline.local/schemas/v2/feature-map.schema.json",
+  "$id": "https://sdlc-pipeline.local/schemas/artifacts/feature-map.schema.json",
   "type": "object",
   "required": ["schema_version", "initiative_id", "title", "goal", "features"],
   "properties": {
-    "schema_version": {"const": "2.0"},
+    "schema_version": {"const": "3.0"},
     "initiative_id": {"type": "string", "pattern": "^I-[0-9]{4}$"},
     "title": {"type": "string", "minLength": 1},
     "goal": {"type": "string", "minLength": 1},

@@ -43,7 +43,7 @@ _SUPPORTED = _ANNOTATIONS | {
 
 
 def schema_root(project_root: Path) -> Path:
-    installed = project_root / ".sdlc-pipeline" / "schemas"
+    installed = project_root / ".sdlc-pipeline" / "runtime" / "schemas"
     if installed.is_dir():
         return installed
     distribution = Path(__file__).resolve().parents[2] / "schemas"

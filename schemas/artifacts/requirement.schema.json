@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sdlc-pipeline.local/schemas/v2/requirement.schema.json",
+  "$id": "https://sdlc-pipeline.local/schemas/artifacts/requirement.schema.json",
   "type": "object",
   "required": [
     "schema_version", "id", "feature_id", "title", "goal", "actor",
@@ -8,7 +8,7 @@
     "acceptance_criteria"
   ],
   "properties": {
-    "schema_version": {"const": "2.0"},
+    "schema_version": {"const": "3.0"},
     "id": {"type": "string", "pattern": "^R-[0-9]{4}$"},
     "feature_id": {"type": "string", "pattern": "^F-[0-9]{4}$"},
     "title": {"type": "string", "minLength": 1},

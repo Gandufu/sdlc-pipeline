@@ -8,7 +8,9 @@ from typing import Any
 
 from .adapter import after_task, before_task, validate_write_path
 from .bootstrap import bootstrap
-from .common import SdlcError, project_root, read_json
+from .common import SdlcError, project_root
+from .layout import contracts_root
+from .stores import read_evidence_record
 from .lifecycle import (
     compile_restart_verify,
     execute_tests,
@@ -113,14 +115,13 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
                     "sdlc-init 不接受路径、GitHub 地址或 ref；"
                     "模板只能从 sdlc_status.templates 中选择"
                 )
-            contract_root = lifecycle_root / ".sdlc-pipeline"
+            contract_root = contracts_root(lifecycle_root)
             contracts_present = all(
                 (contract_root / name).is_file()
                 for name in ("lifecycle.json", "scaffold.json")
             )
-            existing_report = read_json(
-                lifecycle_root / "docs" / "sdlc" / "init-report.json",
-                required=False,
+            existing_report = read_evidence_record(
+                lifecycle_root, "init", required=False
             )
             if (
                 contracts_present

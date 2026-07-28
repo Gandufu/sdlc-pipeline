@@ -7,7 +7,8 @@
 
 SDLC Pipeline 插件不再携带模板源码或模板专属约定。插件的 `templates/` 目录只维护
 `manifest.json` 数据源注册表；每个模板作为独立 Git 仓库维护完整源码、依赖、锁文件、文档、
-测试以及 `.sdlc-pipeline/lifecycle.json`、`.sdlc-pipeline/scaffold.json`。
+测试以及 `.sdlc-pipeline/contracts/lifecycle.json`、
+`.sdlc-pipeline/contracts/scaffold.json`。
 
 无参数 `/sdlc-init` 先幂等检查 init evidence；未初始化时读取 registry 元数据，以问答方式让
 用户选择模板，再解析 repository/ref，在临时目录 clone/checkout 后导入当前空项目并保留模板
