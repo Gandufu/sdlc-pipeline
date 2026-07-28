@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.3 - 2026-07-28
+
+- evidence collector 除最近 attempt 外，新增全 Run 的失败分组、次数和首末 attempt，避免长流程将
+  早期错误静默挤出诊断报告；最终门禁通过不再掩盖中间失败。
+
 ## 0.14.2 - 2026-07-28
 
 - 修复 coder 在 8 个 tool step 内只完成全量预读、尚未写入即结束的空交付：manifest 提供首个

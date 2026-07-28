@@ -110,6 +110,44 @@ def latest_attempts(journal_root: Path) -> list[dict[str, Any]]:
     return records
 
 
+def journal_failure_summary(journal_root: Path) -> dict[str, Any]:
+    """Preserve every failure pattern even when old attempts age out of the tail."""
+    groups: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    total = 0
+    candidates: list[dict[str, Any]] = []
+    for path in journal_root.glob("*/attempts/*/*.json"):
+        document = read_json(path)
+        if isinstance(document, dict):
+            candidates.append(document)
+    candidates.sort(key=lambda document: (
+        str(document.get("started_at", "")),
+        str(document.get("attempt_id", "")),
+    ))
+    for document in candidates:
+        state = str(document.get("state", "unknown"))
+        raw_error = document.get("error")
+        if state == "succeeded" and not raw_error:
+            continue
+        phase = str(document.get("phase", "unknown"))
+        step = str(document.get("step", "unknown"))
+        error = str(raw_error) if raw_error else f"state={state}"
+        key = (phase, step, state, error)
+        attempt_id = document.get("attempt_id")
+        group = groups.setdefault(key, {
+            "phase": phase,
+            "step": step,
+            "state": state,
+            "error": error,
+            "count": 0,
+            "first_attempt_id": attempt_id,
+            "last_attempt_id": attempt_id,
+        })
+        group["count"] += 1
+        group["last_attempt_id"] = attempt_id
+        total += 1
+    return {"total": total, "groups": list(groups.values())}
+
+
 def collect(root: Path) -> dict[str, Any]:
     core = root / ".sdlc-pipeline" / "scripts" / "sdlc.py"
     status: Any = None
@@ -146,6 +184,10 @@ def collect(root: Path) -> dict[str, Any]:
         ] if source_dir.is_dir() else [],
         "latest_journal_attempts": (
             latest_attempts(journal) if journal.is_dir() else []
+        ),
+        "journal_failure_summary": (
+            journal_failure_summary(journal) if journal.is_dir()
+            else {"total": 0, "groups": []}
         ),
         "release_artifacts": [
             file_record(root, root / relative)

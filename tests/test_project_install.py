@@ -634,6 +634,54 @@ class InstallerTests(unittest.TestCase):
             self.assertIn("本次任务目标：实现 R-0001 应用外壳", args["prompt"])
             self.assertNotIn("调用方上下文不得复制", args["prompt"])
 
+    def test_evidence_collector_keeps_early_failure_summary(self) -> None:
+        collector_spec = importlib.util.spec_from_file_location(
+            "collect_opencode_evidence",
+            REPO / "scripts" / "collect_opencode_evidence.py",
+        )
+        assert collector_spec and collector_spec.loader
+        collector = importlib.util.module_from_spec(collector_spec)
+        collector_spec.loader.exec_module(collector)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            attempts = (
+                root / ".sdlc-pipeline" / "runs" / "journal" / "RUN-TEST"
+                / "attempts" / "spec"
+            )
+            attempts.mkdir(parents=True)
+            for index in range(1, 15):
+                failed = index == 1
+                (attempts / f"A{index:06d}.json").write_text(
+                    json.dumps({
+                        "attempt_id": f"A{index:06d}",
+                        "phase": "spec",
+                        "step": "validate",
+                        "state": "failed" if failed else "succeeded",
+                        "started_at": f"2026-01-01T00:00:{index:02d}+00:00",
+                        "finished_at": f"2026-01-01T00:00:{index:02d}+00:00",
+                        "error": "early schema failure" if failed else None,
+                        "result": None if failed else {"ok": True},
+                    }),
+                    encoding="utf-8",
+                )
+
+            evidence = collector.collect(root)
+
+            self.assertNotIn(
+                "A000001",
+                [item["attempt_id"] for item in evidence["latest_journal_attempts"]],
+            )
+            self.assertEqual(evidence["journal_failure_summary"]["total"], 1)
+            self.assertEqual(evidence["journal_failure_summary"]["groups"], [{
+                "phase": "spec",
+                "step": "validate",
+                "state": "failed",
+                "error": "early schema failure",
+                "count": 1,
+                "first_attempt_id": "A000001",
+                "last_attempt_id": "A000001",
+            }])
+
     def test_spec_guidance_distinguishes_test_key_from_shell_command(self) -> None:
         text = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
         self.assertIn("逻辑测试键", text)

@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.14.2`。
+OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.14.3`。
 
 它面向固定脚手架和给定需求完成一个可交付功能：需求澄清、设计、编码、确定性验证和版本固化。
 Python Core 保存机器真值与运行证据，OpenCode plugin 只负责薄适配和最小上下文编排。
