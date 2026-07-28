@@ -18,6 +18,10 @@ subtask: false
    用户选择后调用一次
    `sdlc_lifecycle(action=init, options={"template":"<selected-id>"})`。
 
+这是严格的跨消息边界：当前轮首次看到未初始化项目时，只能展示模板并提出选择问题，然后停止。
+不得在同一轮调用 `sdlc_lifecycle`，不得把命令文本、模板列表、单一候选或模型自己的推断当作用户选择。
+只有同一会话中随后到达的、明确选择模板的用户消息，才可以调用 init。
+
 不得接受 slash command 参数、路径、GitHub 地址或 ref。不得在用户选择前调用 init 做模式探测。
 `sdlc_lifecycle` 会继续执行既有的 template import、工具探测与受控安装、
 按模板 `rules` 生成 `.sdlc-pipeline/contracts/active-rules.json`，再执行

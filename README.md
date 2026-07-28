@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.15.0`。
+OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.15.1`。
 
 插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
 状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
@@ -23,7 +23,8 @@ curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scri
 `--force` 会删除插件曾管理的旧 `.sdlc-pipeline/runs`、内层 `.opencode`、顶层
 `scripts/templates/rules/references/schemas`、旧合同和 Schema v2 文件。不要用它迁移需要保留的旧运行现场。
 安装器会准备 `@opencode-ai/plugin`、校验发行包 Schema/模板/rule policy，并更新常见
-Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。
+Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未导入合同的新项目会先展示模板并停止等待
+用户下一轮明确选择；即使只有一个候选也不会自动初始化。
 
 ## 整体流程
 
@@ -129,7 +130,7 @@ OpenCode 允许用户手动切换主代理或直接 `@` 调用 agent，这不是
 Run 中不要切 agent、不要手动 `@` 子代理；团队边界见
 [docs/operational-boundaries.md](docs/operational-boundaries.md)。
 
-## 开发与发布验证
+## 本地验证
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = "1"
@@ -137,18 +138,6 @@ python -m unittest discover -s tests -v
 node --check .opencode/plugins/sdlc-pipeline.js
 git diff --check
 ```
-
-真实 release smoke 必须从全新项目执行并保留每一步原始日志：
-
-```powershell
-python .sdlc-pipeline/runtime/scripts/run_opencode_release_smoke.py `
-  --target . `
-  --logs-dir ..\opencode-release-smoke-evidence `
-  --model alibaba-token-plan-cn/qwen3.7-max
-```
-
-smoke 断言 task 目标确为 `sdlc-coder`、task-before/after 成功、handoff 有真实业务改动、code gate
-通过，且所有 OpenCode tool event 和 Core attempt 的中间过程均无失败。
 
 设计细节见 [Storage Layout v3](docs/design/Storage-Layout-v3.md) 和
 [ADR-0003](docs/adr/0003-storage-layout-v3.md)。

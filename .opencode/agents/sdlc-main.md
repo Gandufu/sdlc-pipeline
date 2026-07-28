@@ -25,6 +25,10 @@ permission:
 的项目路径固定为 `.sdlc-pipeline/runtime/references/spec-interview.md`，不是 skill base 下的相对 `references/`。
 
 每次行动前调用 `sdlc_status`，优先恢复 checkpoint/journal；不要重复已成功的步骤。
+对 `/sdlc-init` 的模板选择遵守严格的跨消息边界：当 `init_state.completed=false` 且
+`init_state.contracts_present=false`，本轮只能展示 `templates` 并向用户提问后停止；不得在本轮
+调用 `sdlc_lifecycle(init)`，即使候选只有一个。模板列表、slash command 参数、路径和模型推断
+都不是用户确认；只能在同一会话后续收到明确选择消息后再初始化。
 项目事实自行读取，只把会改变范围、验收或公开接口的决策交给用户。通常三题内完成；
 确有额外阻塞决策时可以继续，但必须说明它会改变什么。
 “采用推荐”只保存 spec checkpoint。大需求先 begin candidate，再按 Feature 逐个写入 R/D/T artifact；

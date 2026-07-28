@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.15.1 - 2026-07-28
+
+- 删除泛化 OpenCode smoke runner 及其测试、文档和临时项目。真实验收只在目标功能项目中执行，
+  并按阶段审查原始 JSONL、journal、Git diff、规则和 Markdown/JSON 产物。
+- 强化 `/sdlc-init` 和 `sdlc-main` 的跨消息边界：没有合同的新项目必须先展示模板并停止，只有
+  后续明确的用户选择才可执行 init，单一候选、命令参数和模型推断均不能替代确认。
+
 ## 0.15.0 - 2026-07-28
 
 - 不兼容升级到 Storage Layout v3；删除旧 `runs`、内层 `.opencode`、Schema v2 目录、bundle 与
@@ -10,11 +17,6 @@
   `docs/sdlc/baselines/<id>`，删除 `work/` 后仍可加载正式 Spec。
 - 安装目录统一为 `runtime/contracts/state/work/evidence`，强制升级删除所有旧受管目录和 schema；
   init 不再提前创建 `docs/sdlc`。
-- 测试结果和版本完整 manifest 改为 Markdown，JSON manifest 只保留 compact pointer；release smoke
-  和 evidence collector 同时读取宿主 tool error、compact attempt 与 Markdown error/result，禁止
-  最终成功掩盖中间失败。
-- release smoke 支持 `--model` / `OPENCODE_MODEL` 显式选择稳定模型，provider 在首 token 前挂起时
-  可保留失败 session 后用另一已配置模型重新验证。
 
 ## 0.14.16 - 2026-07-28
 
@@ -47,39 +49,27 @@
 
 ## 0.14.11 - 2026-07-28
 
-- 真实 0.14.10 release smoke 保留并拦截 coder 首次在测试中写入 `as any`、随后重试才通过 code
-  policy 的过程错误。将 TypeScript hard invariant（`: any`、`as any`、`<any>`）提升到 coder 的
+- 将 TypeScript hard invariant（`: any`、`as any`、`<any>`）提升到 coder 的
   常驻指令与 context pack，并明确只实现确认的 R/D/T/AC、不得为臆造的无效输入测试使用类型逃逸。
 
 ## 0.14.10 - 2026-07-28
 
-- 真实 0.14.9 release smoke 保留并拦截两项此前最终 code gate 会掩盖的 OpenCode tool error：Spec 将
-  skill base 误当为项目 reference 路径，以及 `/sdlc-code` 在 code gate 后擅自调用 test 专属
+- 修复 Spec 将 skill base 误当为项目 reference 路径，以及 `/sdlc-code` 在 code gate 后擅自调用 test 专属
   `verify_delivery`。Spec 指引现固定为项目内 `.sdlc-pipeline/references/spec-interview.md`；code
   command 与主 agent 明确在 code gate 后停止，任何 test lifecycle 仅可由用户随后 `/sdlc-test`
   启动的 `sdlc-tester` 执行。
 
 ## 0.14.9 - 2026-07-28
 
-- 真实 0.14.8 release smoke 保留并拦截了 Spec 首次 `put-requirement` 将语义 slug
-  `pipeline-ready-card` 填入 `feature_id`、随后重试为 `F-0001` 的中间 schema 错误。Core 现在像
+- Core 现在像
   R/AC 一样分配 Feature ID：保留规范 `F-xxxx`，其余缺失或语义 hint 统一分配下一个 `F-xxxx`，避免
   模型格式猜测产生可恢复但不应存在的错误。
-
-## 0.14.8 - 2026-07-28
-
-- 修复 Windows 真实 release smoke 通过 Python `shell=False` 启动全局 Node CLI 时只传 `opencode`
-  导致 `WinError 2` 的问题；默认改用可直接 spawn 的 `opencode.cmd`，仍可用 `OPENCODE_BIN`
-  覆盖。首次 smoke 的失败 JSON 和 runner error 原始记录保留为发布证据，未被视为通过。
 
 ## 0.14.7 - 2026-07-28
 
 - 修复真实 spec 写入中 Design 可能猜测非脚手架 extension point、随后被 Candidate 校验拒绝的问题。
   spec reference、主会话与 Design 工具均要求在写入前读取 `scaffold.json`，并逐字使用已声明的
   `extension_points` ID；Core 继续保留未知 ID 拒绝。
-- 新增发布专用真实 OpenCode smoke：`init → spec → approve → code` 必须在原始 CLI 日志中确认
-  `sdlc-coder` task 目标，并检查 journal task-before/task-after、非空 coder handoff 与 code gate；
-  每一步输出和失败都会保存在证据目录，不允许用最终绿灯掩盖中间错误。
 - 对齐 README 的 coder 预算为实际 `steps: 16`；Schema v2 ADR 重编号为 ADR-0003。
 - plugin 可用 `SDLC_PYTHON` 或 `PYTHON` 指定 Python；未指定时 Windows 用 `python`、其他平台优先
   `python3`。CLI 现为所有 `Exception` 产生含 `error_type` 的结构化 JSON。

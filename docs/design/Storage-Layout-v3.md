@@ -48,8 +48,8 @@ Candidate artifact 各自追加 Markdown revision。Candidate revision JSON 只�
 
 Run、Attempt 和 checkpoint 索引位于 `state/runs`。Attempt 的成功结果写
 `work/runs/.../<attempt>-result.md`，失败写 `evidence/errors/.../<attempt>.md`。状态索引只保存
-`result_ref/error_ref`。release smoke 同时扫描宿主 JSONL tool error 和全部 Core attempt，不允许
-最终 gate 掩盖中间失败。
+`result_ref/error_ref`。真实目标项目的阶段审计必须同时检查宿主 JSONL tool error 和全部 Core
+attempt，不允许最终 gate 掩盖中间失败。
 
 ## 清理与保留
 
@@ -61,5 +61,5 @@ Run、Attempt 和 checkpoint 索引位于 `state/runs`。Attempt 的成功结果
 ## 验证
 
 测试必须覆盖 compact index 不变量、Candidate 引用而非复制、删除 `work/` 后 baseline 可加载、
-installer fresh tree allowlist、强制升级删除旧布局、完整 Core lifecycle 和真实 OpenCode release
-smoke。
+installer fresh tree allowlist、强制升级删除旧布局和完整 Core lifecycle。真实目标项目另按阶段
+审查执行过程和交付结果。
