@@ -99,6 +99,83 @@ class SchemaV2CandidateTests(unittest.TestCase):
         self.assertEqual(document["id"], "R-0001")
         self.assertEqual(document["acceptance_criteria"][0]["id"], "AC-R-0001-01")
 
+    def test_requirement_derives_acceptance_criterion_id_from_requirement(self) -> None:
+        """Core owns AC names even when a caller sends a stale or malformed id."""
+        candidate_id = self._candidate_with_requirement(
+            acceptance_criterion_id="AC-R-invalid-99"
+        )
+        document = json.loads((
+            self.fixture.root
+            / ".sdlc-pipeline/runs/spec-candidates"
+            / candidate_id
+            / "revisions/0002/requirements/R-0001.json"
+        ).read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            document["acceptance_criteria"][0]["id"], "AC-R-0001-01"
+        )
+
+    def test_verification_clears_selector_for_non_selector_test_key(self) -> None:
+        lifecycle_path = self.fixture.root / ".sdlc-pipeline/lifecycle.json"
+        lifecycle = json.loads(lifecycle_path.read_text(encoding="utf-8"))
+        lifecycle["tests"]["unit"]["allow_selector"] = False
+        write_json(lifecycle_path, lifecycle)
+        candidate_id = self._candidate_with_requirement()
+        design = put_design(
+            self.fixture.root,
+            candidate_id,
+            self._design_payload(),
+        )
+
+        verification = put_verification(
+            self.fixture.root,
+            candidate_id,
+            {
+                "requirement_ids": ["R-0001"],
+                "design_ids": [design["artifact_id"]],
+                "acceptance_criteria_ids": ["AC-R-0001-01"],
+                "level": "unit",
+                "test_key": "unit",
+                "selector": "tests/unit/system-info.test.ts",
+                "preconditions": "项目依赖已安装",
+                "expected": "系统信息渲染单元测试通过",
+                "mandatory": True,
+            },
+        )
+        document = json.loads((
+            self.fixture.root
+            / ".sdlc-pipeline/runs/spec-candidates"
+            / candidate_id
+            / f"revisions/{verification['revision']:04d}/verification/T-0001.json"
+        ).read_text(encoding="utf-8"))
+
+        self.assertIsNone(document["selector"])
+
+    def test_functional_verification_keeps_path_safety_check(self) -> None:
+        candidate_id = self._candidate_with_requirement()
+        design = put_design(
+            self.fixture.root,
+            candidate_id,
+            self._design_payload(),
+        )
+
+        with self.assertRaisesRegex(SdlcError, "selector 必须是 tests/"):
+            put_verification(
+                self.fixture.root,
+                candidate_id,
+                {
+                    "requirement_ids": ["R-0001"],
+                    "design_ids": [design["artifact_id"]],
+                    "acceptance_criteria_ids": ["AC-R-0001-01"],
+                    "level": "functional",
+                    "test_key": "functional",
+                    "selector": "src/system-info.test.ts",
+                    "preconditions": "候选应用已启动",
+                    "expected": "展示设备系统信息",
+                    "mandatory": True,
+                },
+            )
+
     def test_validate_candidate_freezes_complete_r_d_t_chain(self) -> None:
         candidate_id = self._candidate_with_requirement()
         design = put_design(
@@ -262,7 +339,11 @@ class SchemaV2CandidateTests(unittest.TestCase):
                 self.fixture.root, "unsafe.schema.json", {}
             )
 
-    def _candidate_with_requirement(self) -> str:
+    def _candidate_with_requirement(
+        self,
+        *,
+        acceptance_criterion_id: str | None = None,
+    ) -> str:
         created = begin_candidate(
             self.fixture.root,
             title="设备管理",
@@ -288,6 +369,8 @@ class SchemaV2CandidateTests(unittest.TestCase):
                 "main_flow": ["进入设备管理", "读取系统信息", "展示结果"],
                 "alternate_flows": [],
                 "acceptance_criteria": [{
+                    **({"id": acceptance_criterion_id}
+                       if acceptance_criterion_id is not None else {}),
                     "given": "设备可访问",
                     "when": "打开系统信息",
                     "then": "展示设备系统信息",
@@ -299,6 +382,22 @@ class SchemaV2CandidateTests(unittest.TestCase):
             },
         )
         return created["candidate_id"]
+
+    @staticmethod
+    def _design_payload() -> dict:
+        return {
+            "title": "设备系统信息读取",
+            "requirement_ids": ["R-0001"],
+            "modules": [{
+                "name": "DeviceSystemInfo",
+                "responsibility": "读取并规范化系统信息",
+                "seam": "设备管理用例接口",
+            }],
+            "interfaces": [],
+            "data_contracts": [],
+            "extension_points": ["feature"],
+            "decisions": [],
+        }
 
     def _ready_candidate(self) -> tuple[str, dict]:
         candidate_id = self._candidate_with_requirement()

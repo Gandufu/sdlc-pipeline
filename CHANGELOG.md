@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.4 - 2026-07-28
+
+- 修复 Schema v2 spec 写入会把 agent 提供的无效 AC id 直接送入 schema 校验的问题：AC id
+  现在始终由 Core 按 Requirement 和顺序派生，避免可恢复的中间错误污染 Run。
+- 修复 unit/integration 等没有 `allow_selector` 的 lifecycle test key 接收 selector 后产生
+  路径错误和 candidate 校验错误的问题：Core 在持久化前规范化为 `null`；functional 仍严格要求
+  `tests/` 下的项目内相对 selector。
+- 补充 spec 主会话和澄清规则，明确 AC/selector 的责任边界，并以回归测试覆盖错误规范化与
+  functional 路径防护。
+
 ## 0.14.3 - 2026-07-28
 
 - evidence collector 除最近 attempt 外，新增全 Run 的失败分组、次数和首末 attempt，避免长流程将

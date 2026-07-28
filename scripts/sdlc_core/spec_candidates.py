@@ -80,7 +80,10 @@ def put_requirement(
         normalized["acceptance_criteria"] = [
             {
                 **item,
-                "id": item.get("id") or f"AC-{identifier}-{index:02d}",
+                # AC identity is a Core-owned foreign key for Verification.
+                # Never let a stale caller-provided name make the candidate
+                # fail schema validation before the deterministic mapping exists.
+                "id": f"AC-{identifier}-{index:02d}",
             }
             if isinstance(item, dict) else item
             for index, item in enumerate(criteria, 1)
@@ -180,6 +183,18 @@ def put_verification(
         pattern=_VERIFICATION_PATTERN,
         prefix="T",
     )
+    lifecycle = read_json(root / ".sdlc-pipeline" / "lifecycle.json")
+    test_key = normalized.get("test_key")
+    tests = lifecycle.get("tests", {}) if isinstance(lifecycle, dict) else {}
+    test_definition = tests.get(test_key) if isinstance(test_key, str) else None
+    if (
+        isinstance(test_definition, dict)
+        and test_definition.get("allow_selector") is not True
+    ):
+        # A test-key command owns its unit/integration selection.  Keeping a
+        # model-supplied selector here creates an invalid candidate and can
+        # even fail the path guard before validation explains the contract.
+        normalized["selector"] = None
     validate_schema_instance(root, "v2/verification.schema.json", normalized)
     selector = normalized.get("selector")
     if selector is not None:
