@@ -249,6 +249,21 @@ def require_gate(status: dict[str, Any], gate: str) -> None:
         raise SmokeError(f"{gate} gate 未通过: {json.dumps(status, ensure_ascii=False)}")
 
 
+def assert_spec_argument_source(root: Path, marker: str) -> dict[str, Any]:
+    """Prove that the argument passed to ``/sdlc-spec`` became source evidence."""
+    source_dir = root / ".sdlc-pipeline" / "runs" / "sources"
+    matches: list[dict[str, Any]] = []
+    for path in sorted(source_dir.glob("SRC-*.json")):
+        source = read_json(path)
+        if marker in str(source.get("content", "")):
+            matches.append(source)
+    if not matches:
+        raise SmokeError(
+            "spec Candidate 虽已生成，但 /sdlc-spec 命令参数没有进入 Source Envelope"
+        )
+    return matches[-1]
+
+
 def run_smoke(
     target: Path,
     logs: Path,
@@ -262,11 +277,13 @@ def run_smoke(
     run_opencode(target, logs, "01-sdlc-init", "/sdlc-init", executable, timeout_seconds)
     require_gate(core_status(target), "init")
 
+    spec_marker = "SMOKE_ARGUMENT_PROBE_7F3A"
     specification = (
         "/sdlc-spec 为这个 Electron scaffold 创建最小候选：在首页增加“Pipeline ready”"
         "卡片，显示标题、已发布 Specs、测试计划状态。只需要 unit verification（test_key=unit；"
         "selector 留空），不添加 functional。请读取 scaffold.json 并逐字使用已声明的 extension_points；"
         "生成候选、validate 并展示 candidate ID/hash，不要发布，也不要询问额外问题。"
+        f" 命令参数摄取探针：{spec_marker}。"
     )
     run_opencode(target, logs, "02-sdlc-spec", specification, executable, timeout_seconds)
     candidate = core_status(target).get("spec_candidate")
@@ -276,6 +293,7 @@ def run_smoke(
     content_hash = candidate.get("current_hash")
     if not isinstance(candidate_id, str) or not isinstance(content_hash, str):
         raise SmokeError("ready Candidate 缺少 candidate_id 或 current_hash")
+    spec_source = assert_spec_argument_source(target, spec_marker)
 
     approval = (
         "/sdlc-spec 确认发布。请只使用当前 candidate 的 "
@@ -300,6 +318,7 @@ def run_smoke(
         "target": str(target),
         "logs_dir": str(logs),
         "code": code_report,
+        "spec_argument_source_id": spec_source.get("source_id"),
         "intermediate_failures": 0,
     }
 

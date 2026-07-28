@@ -566,6 +566,8 @@ class InstallerTests(unittest.TestCase):
         )
         for text in (command, main, skill):
             self.assertIn(".sdlc-pipeline/references/spec-interview.md", text)
+        self.assertIn("$ARGUMENTS", command)
+        self.assertIn("不得丢弃", command)
         self.assertNotIn("feature-contract.schema.json", command + main)
         self.assertIn("Schema v2", reference)
         self.assertIn("R/D/T/AC", reference)

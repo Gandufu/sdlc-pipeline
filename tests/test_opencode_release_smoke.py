@@ -77,3 +77,20 @@ class OpenCodeReleaseSmokeTests(unittest.TestCase):
 
             with self.assertRaisesRegex(smoke.SmokeError, "tool error"):
                 smoke.assert_no_raw_tool_errors(logs)
+
+    def test_spec_argument_must_be_persisted_as_source_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            sources = root / ".sdlc-pipeline" / "runs" / "sources"
+            sources.mkdir(parents=True)
+            (sources / "SRC-TEST.json").write_text(json.dumps({
+                "source_id": "SRC-TEST",
+                "content": "需求标记 SMOKE_ARGUMENT_PROBE_7F3A",
+            }), encoding="utf-8")
+
+            source = smoke.assert_spec_argument_source(
+                root, "SMOKE_ARGUMENT_PROBE_7F3A"
+            )
+            self.assertEqual(source["source_id"], "SRC-TEST")
+            with self.assertRaisesRegex(smoke.SmokeError, "Source Envelope"):
+                smoke.assert_spec_argument_source(root, "missing-marker")
