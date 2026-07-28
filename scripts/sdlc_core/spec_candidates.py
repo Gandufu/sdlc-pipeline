@@ -14,6 +14,7 @@ from .sources import load_source
 
 
 _CANDIDATE_PATTERN = re.compile(r"^SC-([0-9]{6})$")
+_FEATURE_PATTERN = re.compile(r"^F-([0-9]{4})$")
 _REQUIREMENT_PATTERN = re.compile(r"^R-([0-9]{4})$")
 _DESIGN_PATTERN = re.compile(r"^D-([0-9]{4})$")
 _VERIFICATION_PATTERN = re.compile(r"^T-([0-9]{4})$")
@@ -70,10 +71,20 @@ def put_requirement(
     identifier = str(requirement.get("id", "")).strip()
     if not identifier:
         identifier = _next_identifier(previous / "requirements", _REQUIREMENT_PATTERN, "R")
+    previous_feature_map = read_json(previous / "feature-map.json")
+    requested_feature_id = str(requirement.get("feature_id", "")).strip()
+    feature_id = (
+        requested_feature_id
+        if _FEATURE_PATTERN.fullmatch(requested_feature_id)
+        else _next_feature_identifier(previous_feature_map)
+    )
     normalized = {
         **requirement,
         "schema_version": "2.0",
         "id": identifier,
+        # Feature identity is Core-owned just like R and AC IDs.  Agents often
+        # provide a semantic slug while explicitly asking Core to allocate IDs.
+        "feature_id": feature_id,
     }
     criteria = normalized.get("acceptance_criteria")
     if isinstance(criteria, list):
@@ -94,7 +105,6 @@ def put_requirement(
     for criterion in normalized["acceptance_criteria"]:
         _validate_source_refs(root, criterion["source_refs"])
 
-    previous_feature_map = read_json(previous / "feature-map.json")
     feature_map = json.loads(json.dumps(previous_feature_map))
     feature_id = normalized["feature_id"]
     features = feature_map["features"]
@@ -384,6 +394,17 @@ def _next_identifier(directory: Path, pattern: re.Pattern[str], prefix: str) -> 
             if match:
                 numbers.append(int(match.group(1)))
     return f"{prefix}-{max(numbers, default=0) + 1:04d}"
+
+
+def _next_feature_identifier(feature_map: dict[str, Any]) -> str:
+    features = feature_map.get("features", [])
+    numbers = [
+        int(match.group(1))
+        for feature in features
+        if isinstance(feature, dict)
+        and (match := _FEATURE_PATTERN.fullmatch(str(feature.get("id", ""))))
+    ]
+    return f"F-{max(numbers, default=0) + 1:04d}"
 
 
 def _commit_revision(

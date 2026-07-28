@@ -269,7 +269,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_put_requirement: tool({
-        description: "写入一个独立 Requirement artifact；ID 缺省时由 Core 分配。",
+        description: "写入一个独立 Requirement artifact；R/Feature/AC ID 均由 Core 分配或规范化，feature_id 可传语义 hint，禁止为格式猜测而重试。",
         args: {
           candidate_id: tool.schema.string(),
           requirement: tool.schema.object({

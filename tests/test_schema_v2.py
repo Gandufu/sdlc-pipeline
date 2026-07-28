@@ -115,6 +115,19 @@ class SchemaV2CandidateTests(unittest.TestCase):
             document["acceptance_criteria"][0]["id"], "AC-R-0001-01"
         )
 
+    def test_requirement_derives_feature_id_from_semantic_hint(self) -> None:
+        candidate_id = self._candidate_with_requirement(
+            feature_id="pipeline-ready-card"
+        )
+        document = json.loads((
+            self.fixture.root
+            / ".sdlc-pipeline/runs/spec-candidates"
+            / candidate_id
+            / "revisions/0002/requirements/R-0001.json"
+        ).read_text(encoding="utf-8"))
+
+        self.assertEqual(document["feature_id"], "F-0001")
+
     def test_verification_clears_selector_for_non_selector_test_key(self) -> None:
         lifecycle_path = self.fixture.root / ".sdlc-pipeline/lifecycle.json"
         lifecycle = json.loads(lifecycle_path.read_text(encoding="utf-8"))
@@ -343,6 +356,7 @@ class SchemaV2CandidateTests(unittest.TestCase):
         self,
         *,
         acceptance_criterion_id: str | None = None,
+        feature_id: str = "F-0001",
     ) -> str:
         created = begin_candidate(
             self.fixture.root,
@@ -356,7 +370,7 @@ class SchemaV2CandidateTests(unittest.TestCase):
             self.fixture.root,
             created["candidate_id"],
             {
-                "feature_id": "F-0001",
+                "feature_id": feature_id,
                 "title": "查看系统信息",
                 "goal": "管理员能够查看设备系统信息",
                 "actor": "设备管理员",

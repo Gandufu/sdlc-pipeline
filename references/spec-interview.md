@@ -29,7 +29,7 @@ extension point，不预测实际代码文件。写 Design 前必须读取 `.sdl
 `extension_points` 只能逐字使用该文件已声明的 ID，不能编造 `feature` 等泛称。Verification 建立 AC
 到 lifecycle 逻辑测试键 `test_key`
 （如 `unit`、`integration`、`functional`）的映射，不能填写 `pnpm test` 等 shell command。
-`R/D/T/AC` ID 由 Core 分配或校验；尤其不得手填 AC id，Requirement 保存后按所属 R 与顺序
+`F/R/D/T/AC` ID 由 Core 分配或校验；`feature_id` 可提供语义 hint，Core 会规范化为 `F-xxxx`；尤其不得手填 AC id，Requirement 保存后按所属 R 与顺序
 使用 `AC-R-xxxx-yy`。仅当 lifecycle 中该 `test_key` 的 `allow_selector` 为 true 时才填写
 `selector`，且必须是 `tests/` 下的项目内相对路径；unit/integration 等不允许 selector 的
 test key 必须传 `selector: null`，不要填测试文件名。

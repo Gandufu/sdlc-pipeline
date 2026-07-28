@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.9 - 2026-07-28
+
+- 真实 0.14.8 release smoke 保留并拦截了 Spec 首次 `put-requirement` 将语义 slug
+  `pipeline-ready-card` 填入 `feature_id`、随后重试为 `F-0001` 的中间 schema 错误。Core 现在像
+  R/AC 一样分配 Feature ID：保留规范 `F-xxxx`，其余缺失或语义 hint 统一分配下一个 `F-xxxx`，避免
+  模型格式猜测产生可恢复但不应存在的错误。
+
 ## 0.14.8 - 2026-07-28
 
 - 修复 Windows 真实 release smoke 通过 Python `shell=False` 启动全局 Node CLI 时只传 `opencode`
