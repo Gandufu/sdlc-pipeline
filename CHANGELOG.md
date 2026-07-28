@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.8 - 2026-07-28
+
+- 修复 Windows 真实 release smoke 通过 Python `shell=False` 启动全局 Node CLI 时只传 `opencode`
+  导致 `WinError 2` 的问题；默认改用可直接 spawn 的 `opencode.cmd`，仍可用 `OPENCODE_BIN`
+  覆盖。首次 smoke 的失败 JSON 和 runner error 原始记录保留为发布证据，未被视为通过。
+
 ## 0.14.7 - 2026-07-28
 
 - 修复真实 spec 写入中 Design 可能猜测非脚手架 extension point、随后被 Candidate 校验拒绝的问题。

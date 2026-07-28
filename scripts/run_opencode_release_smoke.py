@@ -23,6 +23,11 @@ class SmokeError(RuntimeError):
     """A release-smoke assertion failed after its raw evidence was persisted."""
 
 
+def default_opencode_executable(platform_name: str = os.name) -> str:
+    """Return a directly spawnable global Node CLI name for this platform."""
+    return "opencode.cmd" if platform_name == "nt" else "opencode"
+
+
 def read_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -305,8 +310,8 @@ def main() -> int:
     parser.add_argument("--logs-dir", type=Path, required=True)
     parser.add_argument(
         "--opencode",
-        default=os.environ.get("OPENCODE_BIN", "opencode"),
-        help="OpenCode executable (default: OPENCODE_BIN or opencode)",
+        default=os.environ.get("OPENCODE_BIN", default_opencode_executable()),
+        help="OpenCode executable (default: OPENCODE_BIN or platform global CLI)",
     )
     parser.add_argument("--timeout-seconds", type=int, default=900)
     args = parser.parse_args()

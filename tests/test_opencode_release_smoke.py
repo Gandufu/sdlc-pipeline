@@ -17,6 +17,10 @@ SPEC.loader.exec_module(smoke)
 
 
 class OpenCodeReleaseSmokeTests(unittest.TestCase):
+    def test_windows_uses_directly_spawnable_cmd_shim(self) -> None:
+        self.assertEqual(smoke.default_opencode_executable("nt"), "opencode.cmd")
+        self.assertEqual(smoke.default_opencode_executable("posix"), "opencode")
+
     def test_code_stage_asserts_native_coder_dispatch_and_delivery_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
