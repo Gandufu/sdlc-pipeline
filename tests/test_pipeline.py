@@ -47,7 +47,11 @@ from sdlc_core.lifecycle import (  # noqa: E402
 from sdlc_core.journal import begin_attempt, journal_status  # noqa: E402
 from sdlc_core.policies import evaluate_hard_policies  # noqa: E402
 from sdlc_core.runs import clear_active, pid_alive, record_active, record_tokens, stop_active  # noqa: E402
-from sdlc_core.sources import ingest_source, query_source  # noqa: E402
+from sdlc_core.sources import (  # noqa: E402
+    MAX_SOURCE_SEGMENT_CHARS,
+    ingest_source,
+    query_source,
+)
 from sdlc_core.spec_candidates import (  # noqa: E402
     begin_candidate,
     put_design,
@@ -1214,6 +1218,19 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(result["text"], "系统信息")
         self.assertEqual(result["anchor"], "field:system")
         self.assertNotIn("设备管理", result["text"])
+
+    def test_large_unstructured_source_has_bounded_query_anchors(self) -> None:
+        content = ("设备管理协议行\n" * (MAX_SOURCE_SEGMENT_CHARS // 6 + 10))
+        source = ingest_source(self.fixture.root, {
+            "kind": "inline",
+            "content": content,
+        })["envelope"]
+
+        self.assertGreater(len(source["segments"]), 1)
+        self.assertEqual(source["segments"][0]["anchor"], "text:1")
+        second = query_source(self.fixture.root, source["source_id"], "text:2")
+        self.assertFalse(second["truncated"])
+        self.assertLessEqual(len(second["text"]), MAX_SOURCE_SEGMENT_CHARS)
 
     def test_command_deadline_terminates_child_process_tree(self) -> None:
         pid_file = self.fixture.root / "child.pid"

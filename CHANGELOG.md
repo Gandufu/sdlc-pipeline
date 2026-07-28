@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.13 - 2026-07-28
+
+- 修复大外部来源摄取后将完整 SourceEnvelope 回传给 Agent 的问题：现在只返回有界 receipt（来源 ID、
+  分段 anchor、长度、短预览与 hash），正文必须经 `sdlc_query_source` 按段读取。
+- 未提供分段的文本来源会自动按 8,000 字符、优先行边界生成可查询 anchor，避免 OpenCode 工具输出截断后
+  触发大记录 grep 或回读外部路径。
+
 ## 0.14.12 - 2026-07-28
 
 - 修复 `/sdlc-spec <需求或确认文本>` 未将 OpenCode 命令参数注入模板的问题；现在参数通过

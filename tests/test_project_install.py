@@ -525,6 +525,32 @@ class InstallerTests(unittest.TestCase):
             ["sdlc-python", "configured-python", "python3", "python"],
         )
 
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_plugin_returns_bounded_source_receipt(self) -> None:
+        plugin = REPO / ".opencode/plugins/sdlc-pipeline.js"
+        script = (
+            "import(process.argv[1]).then(m => console.log(JSON.stringify("
+            "m.sourceReceipt({ok:true,envelope:{source_id:'SRC-TEST',kind:'file',"
+            "source:'external.md',uri:'.sdlc-pipeline/runs/source-assets/test.md',"
+            "media_type:'text/plain',sha256:'hash',content:'x'.repeat(20000),"
+            "segments:[{anchor:'text:1',text:'x'.repeat(20000),sha256:'segment'}]}}))))"
+        )
+        result = subprocess.run(
+            ["node", "-e", script, plugin.as_uri()],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(result.stdout)
+        self.assertEqual(receipt["source_id"], "SRC-TEST")
+        self.assertEqual(receipt["anchors"][0]["characters"], 20000)
+        self.assertLessEqual(len(receipt["anchors"][0]["preview"]), 160)
+        self.assertNotIn("content", receipt)
+        self.assertIn("do not read", receipt["next_action"])
+
     def test_plugin_has_narrow_tools_without_experimental_injection(self) -> None:
         text = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         for name in (

@@ -15,3 +15,6 @@ subtask: false
 <user-input>
 $ARGUMENTS
 </user-input>
+
+项目外文件必须先经 `sdlc_ingest_source(allow_external_copy=true)` 摄取。摄取 receipt 已给出可引用的
+`source_id/anchor`；只可通过 `sdlc_query_source` 读取受限片段，绝不再用 read、grep 等工具读取原外部路径。

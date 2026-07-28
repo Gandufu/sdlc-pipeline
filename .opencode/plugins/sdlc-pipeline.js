@@ -34,6 +34,39 @@ export function pythonExecutable(environment = process.env, platformName = proce
   return platformName === "win32" ? "python" : "python3"
 }
 
+export function sourceReceipt(result) {
+  const envelope = result?.envelope
+  if (!envelope || typeof envelope !== "object") return result
+  const sourceId = envelope.source_id
+  const anchors = Array.isArray(envelope.segments)
+    ? envelope.segments.map((segment) => ({
+      anchor: segment.anchor,
+      characters: typeof segment.text === "string" ? segment.text.length : 0,
+      sha256: segment.sha256,
+      preview: typeof segment.text === "string" ? segment.text.slice(0, 160) : "",
+    }))
+    : []
+  return {
+    ok: result.ok === true,
+    source_id: sourceId,
+    kind: envelope.kind,
+    source: envelope.source,
+    uri: envelope.uri,
+    media_type: envelope.media_type,
+    sha256: envelope.sha256,
+    anchors,
+    canonical_path: typeof sourceId === "string"
+      ? `.sdlc-pipeline/runs/sources/${sourceId}.json`
+      : undefined,
+    asset: envelope.asset ? {
+      uri: envelope.asset.uri,
+      sha256: envelope.asset.sha256,
+      size: envelope.asset.size,
+    } : undefined,
+    next_action: "Use only source_id/anchor above. Query sdlc_query_source for bounded text; do not read the original external path.",
+  }
+}
+
 async function logPluginEvent(client, message, extra = {}, level = "info") {
   try {
     await client?.app?.log?.({
@@ -214,7 +247,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_ingest_source: tool({
-        description: "摄取一份原始需求来源并返回可引用的 SourceEnvelope。",
+        description: "摄取一份原始需求来源并返回有界 SourceEnvelope receipt。只使用返回的 source_id/anchor；需要正文时调用 sdlc_query_source，绝不再读取项目外原路径。",
         args: {
           source_type: tool.schema.enum(["inline", "file", "url", "document"]),
           content: tool.schema.string().optional(),
@@ -225,7 +258,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_ingest_source")
-          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "publish", {
+          const result = await invoke(rootOf(context, fallbackRoot), "publish", {
             kind: "source",
             payload: {
               kind: args.source_type,
@@ -235,7 +268,8 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
               media_type: args.media_type,
               allow_external_copy: args.allow_external_copy,
             },
-          }, { signal: context.abort }))
+          }, { signal: context.abort })
+          return JSON.stringify(sourceReceipt(result))
         },
       }),
       sdlc_query_source: tool({

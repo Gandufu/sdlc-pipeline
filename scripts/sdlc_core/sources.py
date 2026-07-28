@@ -9,6 +9,7 @@ from .common import SdlcError, read_json, utc_now, write_json
 from .schema_validation import validate_schema_instance
 
 MAX_EXTERNAL_SOURCE_BYTES = 10 * 1024 * 1024
+MAX_SOURCE_SEGMENT_CHARS = 8_000
 
 
 def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
@@ -77,7 +78,7 @@ def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         source = uri or "inline"
     raw_segments = payload.get("segments")
     if raw_segments is None:
-        raw_segments = [{"anchor": "text:1", "text": content}]
+        raw_segments = _default_segments(content)
     if not isinstance(raw_segments, list) or not raw_segments:
         raise SdlcError("SourceEnvelope segments 必须是非空数组")
     segments = []
@@ -154,6 +155,28 @@ def source_index(sources: list[dict[str, Any]]) -> dict[str, set[str]]:
         item["source_id"]: {segment["anchor"] for segment in item["segments"]}
         for item in sources
     }
+
+
+def _default_segments(content: str) -> list[dict[str, str]]:
+    """Build bounded, line-aware query anchors for an unstructured text source."""
+    if len(content) <= MAX_SOURCE_SEGMENT_CHARS:
+        return [{"anchor": "text:1", "text": content}]
+    segments: list[dict[str, str]] = []
+    start = 0
+    while start < len(content):
+        end = min(start + MAX_SOURCE_SEGMENT_CHARS, len(content))
+        if end < len(content):
+            boundary = content.rfind("\n", start + 1, end + 1)
+            if boundary > start:
+                end = boundary + 1
+        if end <= start:
+            end = min(start + MAX_SOURCE_SEGMENT_CHARS, len(content))
+        segments.append({
+            "anchor": f"text:{len(segments) + 1}",
+            "text": content[start:end],
+        })
+        start = end
+    return segments
 
 
 def load_source(root: Path, source_id: str) -> dict[str, Any]:
