@@ -73,14 +73,17 @@ def create_remote_template(root: Path, template_id: str = "electron-scaffold") -
 
 
 class InstallerTests(unittest.TestCase):
-    def test_installs_only_opencode_surface_and_one_subagent(self) -> None:
+    def test_installs_opencode_surface_with_taskless_tester(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary)
             result = installer.install(target)
             self.assertTrue(result["ok"])
             self.assertEqual(result["host"], "opencode")
             agents = sorted(path.name for path in (target / ".opencode/agents").glob("*.md"))
-            self.assertEqual(agents, ["sdlc-coder.md", "sdlc-main.md"])
+            self.assertEqual(
+                agents,
+                ["sdlc-coder.md", "sdlc-main.md", "sdlc-tester.md"],
+            )
             commands = sorted(path.name for path in (target / ".opencode/commands").glob("*.md"))
             self.assertEqual(
                 commands,
@@ -493,14 +496,22 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("idempotency_key", text)
         self.assertNotIn("experimental.chat.messages.transform", text)
         self.assertNotIn("config.skills.paths", text)
-        self.assertNotIn("sdlc-tester", text)
+        self.assertIn("sdlc-tester", text)
 
     def test_agent_permission_matrix(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
         coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
+        tester = (REPO / ".opencode/agents/sdlc-tester.md").read_text(encoding="utf-8")
+        test_command = (REPO / ".opencode/commands/sdlc-test.md").read_text(encoding="utf-8")
+        plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         self.assertIn('"sdlc-coder": allow', main)
         self.assertIn("edit: allow", coder)
         self.assertIn("bash: deny", coder)
+        self.assertIn('"*": deny', tester)
+        self.assertNotIn('"sdlc-coder": allow', tester)
+        self.assertIn("sdlc_lifecycle: allow", tester)
+        self.assertIn("agent: sdlc-tester", test_command)
+        self.assertIn('"sdlc-tester": ["verify_delivery"]', plugin)
         self.assertFalse((REPO / ".opencode/agents/sdlc-executor.md").exists())
 
     def test_spec_details_have_one_reference_source_of_truth(self) -> None:
@@ -567,8 +578,9 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("output.args.prompt =", plugin)
         self.assertNotIn("output.args.prompt = `${output.args.prompt", plugin)
         self.assertIn('"write-check"', plugin)
-        self.assertIn("client.session.abort", plugin)
-        self.assertIn('"task-cancel"', plugin)
+        cancel_index = plugin.index('await invoke(fallbackRoot, "task-cancel"')
+        abort_index = plugin.index("await client.session.abort")
+        self.assertLess(cancel_index, abort_index)
 
     def test_spec_guidance_distinguishes_test_key_from_shell_command(self) -> None:
         text = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
@@ -586,7 +598,7 @@ class InstallerTests(unittest.TestCase):
             package["dependencies"]["@opencode-ai/plugin"],
             installer.OPENCODE_PLUGIN_VERSION,
         )
-        for name in ("sdlc-main", "sdlc-coder"):
+        for name in ("sdlc-main", "sdlc-coder", "sdlc-tester"):
             self.assertTrue((REPO / f".opencode/agents/{name}.md").exists())
 
     def test_init_is_parameterless_idempotent_and_user_selects_registry_template(

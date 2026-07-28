@@ -400,7 +400,8 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         async execute(args, context) {
           const options = args.options ? JSON.parse(args.options) : {}
           const allowed = {
-            "sdlc-main": ["init", "verify_delivery"],
+            "sdlc-main": ["init"],
+            "sdlc-tester": ["verify_delivery"],
           }
           if (!allowed[context?.agent]?.includes(args.action)) {
             throw new Error(`agent ${context?.agent || "unknown"} cannot run lifecycle ${args.action}`)
@@ -467,14 +468,19 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             session_id: input.sessionID,
             deadline_seconds: CODER_DEADLINE_SECONDS,
           }, "warn")
+          await invoke(fallbackRoot, "task-cancel", {
+            reason: `coder deadline exceeded after ${CODER_DEADLINE_SECONDS}s`,
+          })
+        } catch (error) {
+          await logPluginEvent(client, "coder.cancel_failed", {
+            session_id: input.sessionID,
+            error: String(error),
+          }, "error")
+        } finally {
           await client.session.abort({
             path: { id: input.sessionID },
             query: { directory: fallbackRoot },
           })
-        } finally {
-          await invoke(fallbackRoot, "task-cancel", {
-            reason: `coder deadline exceeded after ${CODER_DEADLINE_SECONDS}s`,
-          }).catch(() => undefined)
         }
       }, CODER_DEADLINE_SECONDS * 1000)
       deadline.unref()

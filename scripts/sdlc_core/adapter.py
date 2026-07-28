@@ -280,6 +280,10 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     before = read_json(root / ".sdlc-pipeline" / "runs" / "coder-before.json")
     diff = validate_diff(root, before.get("worktree", before.get("changed_paths", [])))
     actual = sorted(set(diff["changed_paths"]))
+    if not actual:
+        raise SdlcError(
+            "coder handoff 未产生允许的业务改动；请完成当前 Feature Slice 后再提交 handoff"
+        )
     value["changed_files"] = actual
     value["validated_at"] = utc_now()
     value["compiled_claim_ignored"] = True

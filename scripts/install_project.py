@@ -19,7 +19,7 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.14.0"
+VERSION = "0.14.1"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.7"
@@ -34,6 +34,7 @@ MANAGED = (
     (".opencode/plugins/sdlc-pipeline.js", ".opencode/plugins/sdlc-pipeline.js"),
     (".opencode/agents/sdlc-main.md", ".opencode/agents/sdlc-main.md"),
     (".opencode/agents/sdlc-coder.md", ".opencode/agents/sdlc-coder.md"),
+    (".opencode/agents/sdlc-tester.md", ".opencode/agents/sdlc-tester.md"),
     (".opencode/commands/sdlc-init.md", ".opencode/commands/sdlc-init.md"),
     (".opencode/commands/sdlc-spec.md", ".opencode/commands/sdlc-spec.md"),
     (".opencode/commands/sdlc-code.md", ".opencode/commands/sdlc-code.md"),

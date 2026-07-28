@@ -1,6 +1,6 @@
 ---
 description: 执行一次权威交付验证
-agent: sdlc-main
+agent: sdlc-tester
 subtask: false
 ---
 

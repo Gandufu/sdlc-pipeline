@@ -716,6 +716,50 @@ class ClosedLoopTests(unittest.TestCase):
         result = validate_coder_handoff(self.fixture.root, json.dumps(bad))
         self.assertEqual(result["handoff"]["changed_files"], ["src/feature.py"])
 
+    def test_coder_handoff_rejects_empty_change_set(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+        before_task(self.fixture.root, "coder")
+
+        with self.assertRaisesRegex(SdlcError, "未产生允许的业务改动"):
+            validate_coder_handoff(self.fixture.root, json.dumps({
+                "summary": "仅完成分析，尚未实现",
+                "open_issues": ["尚未开始编码"],
+            }))
+
+        self.assertFalse(
+            (self.fixture.root / ".sdlc-pipeline/runs/coder-handoff.json").exists()
+        )
+
+    def test_task_cancel_is_exposed_by_cli_and_aborts_coder_attempt(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+        execute(self.fixture.root, "task-before", {
+            "role": "coder",
+            "owner_pid": os.getpid(),
+            "deadline_seconds": 300,
+        })
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(REPO / "scripts/sdlc.py"),
+                "task-cancel",
+                "--root",
+                str(self.fixture.root),
+            ],
+            input=json.dumps({"reason": "regression cancellation"}),
+            text=True,
+            encoding="utf-8",
+            capture_output=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertTrue(payload["cancelled"])
+        self.assertEqual(journal_status(self.fixture.root)["running_attempts"], [])
+
     def test_test_gate_rejects_code_changed_after_compile(self) -> None:
         self._through_code()
         (self.fixture.root / "src" / "feature.py").write_text(

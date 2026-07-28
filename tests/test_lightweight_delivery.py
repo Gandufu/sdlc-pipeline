@@ -218,6 +218,7 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             REPO / "schemas/lifecycle.schema.json"
         ).read_text(encoding="utf-8")
         self.assertFalse((REPO / ".opencode/agents/sdlc-executor.md").exists())
+        self.assertTrue((REPO / ".opencode/agents/sdlc-tester.md").exists())
         self.assertNotIn("sdlc-executor", plugin + main)
         self.assertNotIn("sdlc_publish_contract", plugin + main)
         self.assertNotIn("idempotency_key", plugin)

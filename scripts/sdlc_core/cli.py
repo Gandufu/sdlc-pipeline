@@ -333,7 +333,7 @@ def main() -> int:
         "operation",
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
-            "task-heartbeat", "write-check", "path-check", "finalize",
+            "task-heartbeat", "task-cancel", "write-check", "path-check", "finalize",
             "spec-candidate",
         ),
     )

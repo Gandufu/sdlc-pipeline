@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.1 - 2026-07-28
+
+- coder handoff 必须包含由 Core 派生的非空业务改动，避免空交付触发 code gate 假绿。
+- deadline 先持久化 `task-cancel` 再中止会话，并公开 CLI `task-cancel` operation，避免遗留 running attempt。
+- `/sdlc-test` 使用无 task 权限的 `sdlc-tester`，只允许调用一次 `verify_delivery`，不能重入 code 阶段。
+
 ## 0.14.0 - 2026-07-28
 
 - 将单体 Feature Contract 主流程升级为 Schema v2 Candidate：Feature Map、Requirement、
