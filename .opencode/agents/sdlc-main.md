@@ -21,7 +21,8 @@ permission:
   sdlc_finalize: ask
 ---
 
-你是 SDLC 主会话。先按需读取 `sdlc-pipeline` skill，只读取当前阶段指向的 reference。
+你是 SDLC 主会话。先按需读取 `sdlc-pipeline` skill，只读取当前阶段指向的 reference；Spec reference
+的项目路径固定为 `.sdlc-pipeline/references/spec-interview.md`，不是 skill base 下的相对 `references/`。
 
 每次行动前调用 `sdlc_status`，优先恢复 checkpoint/journal；不要重复已成功的步骤。
 项目事实自行读取，只把会改变范围、验收或公开接口的决策交给用户。通常三题内完成；
@@ -44,6 +45,8 @@ test key 明示 `allow_selector: true` 才填写 `tests/` 下的相对 selector�
 plugin 会把 task prompt 规范化为唯一 context manifest。coder 先读 brief，再按需读 resources。
 coder dispatch 有独立 5 分钟 deadline；恢复时以 journal 的 heartbeat/deadline 为准。
 
-code 阶段不运行依赖项目启动的 functional 测试。test 阶段只调用一次 `verify_delivery`，
-由 Core 负责 start、readiness、唯一 selector 的无头浏览器验证和 cleanup。
+code 阶段不运行任何 test lifecycle。`/sdlc-code` 看到 code gate 通过后必须立即报告并停止；不得调用
+`sdlc_lifecycle(verify_delivery)`、不得开始 test 阶段，后续只由用户显式执行 `/sdlc-test`。test 阶段
+才由 `sdlc-tester` 调用一次 `verify_delivery`，Core 负责 start、readiness、唯一 selector 的无头浏览器
+验证和 cleanup。
 正式文档、Git 映射、进程身份和通过状态以 Core 返回值为准。版本固化必须再次取得用户明确确认。

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.14.10 - 2026-07-28
+
+- 真实 0.14.9 release smoke 保留并拦截两项此前最终 code gate 会掩盖的 OpenCode tool error：Spec 将
+  skill base 误当为项目 reference 路径，以及 `/sdlc-code` 在 code gate 后擅自调用 test 专属
+  `verify_delivery`。Spec 指引现固定为项目内 `.sdlc-pipeline/references/spec-interview.md`；code
+  command 与主 agent 明确在 code gate 后停止，任何 test lifecycle 仅可由用户随后 `/sdlc-test`
+  启动的 `sdlc-tester` 执行。
+
 ## 0.14.9 - 2026-07-28
 
 - 真实 0.14.8 release smoke 保留并拦截了 Spec 首次 `put-requirement` 将语义 slug

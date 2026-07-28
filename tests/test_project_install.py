@@ -561,10 +561,28 @@ class InstallerTests(unittest.TestCase):
         command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(encoding="utf-8")
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
-        self.assertIn("references/spec-interview.md", command)
+        skill = (REPO / ".opencode/skills/sdlc-pipeline/SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        for text in (command, main, skill):
+            self.assertIn(".sdlc-pipeline/references/spec-interview.md", text)
         self.assertNotIn("feature-contract.schema.json", command + main)
         self.assertIn("Schema v2", reference)
         self.assertIn("R/D/T/AC", reference)
+
+    def test_code_command_stops_before_test_lifecycle(self) -> None:
+        command = (REPO / ".opencode/commands/sdlc-code.md").read_text(
+            encoding="utf-8"
+        )
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("不得调用任何", command)
+        self.assertIn("sdlc_lifecycle", command)
+        self.assertIn("/sdlc-test", command)
+        self.assertIn("不得调用", main)
+        self.assertIn("sdlc-tester", main)
 
     def test_checkpoint_guidance_uses_the_schema_payload(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")

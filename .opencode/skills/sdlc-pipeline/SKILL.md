@@ -8,7 +8,7 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
 先调用 `sdlc_status`，只执行当前阶段：
 
 - init：读取 status 的模板元数据；需要选择时询问用户；调用一次 `lifecycle(init)`。
-- spec：读取 `references/spec-interview.md`；摄取来源、保存阻塞决策、分片构建 Candidate，
+- spec：读取项目根目录的 `.sdlc-pipeline/references/spec-interview.md`；摄取来源、保存阻塞决策、分片构建 Candidate，
   validate 后按用户确认的 ID/hash 发布。
 - code：派发 coder；plugin 只传唯一 progressive context manifest；Core 根据 Git diff 生成证据映射，
   再统一执行 compile/package/lint/typecheck code gate；不运行依赖项目启动的 functional 测试。
