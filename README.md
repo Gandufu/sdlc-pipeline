@@ -1,9 +1,11 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.14.6`。
+OpenCode-first、Windows 友好的轻量软件交付编排器。当前版本：`0.14.7`。
 
 它面向固定脚手架和给定需求完成一个可交付功能：需求澄清、设计、编码、确定性验证和版本固化。
-Python Core 保存机器真值与运行证据，OpenCode plugin 只负责薄适配和最小上下文编排。
+Python Core 保存机器真值与运行证据，OpenCode plugin 只负责薄适配和最小上下文编排。Python Core
+是可移植的确定性引擎，OpenCode JavaScript 只是当前宿主 adapter；未来支持其他宿主时应新增薄
+adapter，而不是复制状态机、审批或证据逻辑。
 
 ## 快速安装
 
@@ -45,7 +47,7 @@ spec
 code
   → 派发唯一 sdlc-coder
   → plugin 覆盖为唯一、最小 context manifest，不重复展开主会话 prompt
-  → coder 最多 8 个 agent steps，先读 Feature brief，再按需读取最多 10 个资源索引
+  → coder 最多 16 个 agent steps，先读 Feature brief，再按需读取最多 10 个资源索引
   → 实现业务代码与 functional 文件，但不启动项目、不运行浏览器
   → Core 校验 Git diff 与允许路径
   → Core 执行 compile/package/lint/typecheck code gate
@@ -66,7 +68,7 @@ deadline 到期后，下一次 status 会把 attempt/run 标为 aborted，不遗
 
 Context manifest 不嵌入源码、长需求或完整规则，只提供 brief、资源路径、hash、tier 和读取理由；
 资源总数硬限制为 10，业务实现候选最多 6 个，明确排除 `.sdlc-pipeline/scripts/**`。coder 不通过
-阅读 Core 源码理解流程。agent 固定 `temperature: 0.1` 和 `steps: 8`，避免预览模型无界读取。
+阅读 Core 源码理解流程。agent 固定 `temperature: 0.1` 和 `steps: 16`，避免预览模型无界读取。
 Delivery Memory 自动派生稳定项目事实、已确认决策以及“失败后成功”的指纹经验；它不保存聊天，
 并在 lifecycle、scaffold 或 spec hash 改变时失效。
 
@@ -180,6 +182,20 @@ git diff --check
 测试覆盖 Schema v2 Candidate revision、按 hash 审批、原子 bundle、post-code
 Delivery Trace、PID identity、Run Journal 恢复和熔断、权限矩阵、安装升级清理以及完整
 init → spec → code → verify → finalize Core 闭环。
+
+发布前还必须在全新安装的真实 OpenCode 项目执行 release smoke；它不属于默认单元测试，因为需要
+已安装的 OpenCode CLI 和已配置模型。脚本按 `init → spec → approve → code` 运行，保存每一步原始
+输出，且只有在原生日志确认派发目标为 `sdlc-coder`、不存在 OpenCode tool error 或 journal 中间失败、
+journal 的 task-before/task-after 闭环成功、handoff 含非空业务改动、code gate 全通过时才成功：
+
+```powershell
+python .sdlc-pipeline/scripts/run_opencode_release_smoke.py `
+  --target . `
+  --logs-dir ..\opencode-release-smoke-evidence
+```
+
+使用边界（包括为何不要在活动 Run 中手动切 agent 或使用 `@` 调用）见
+[团队运行边界](docs/operational-boundaries.md)。
 
 ## License
 

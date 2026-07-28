@@ -25,7 +25,9 @@
 大需求先建立 Feature Map，再拆成可独立验收的 Requirement。每个 R/D/T 作为独立 artifact
 立即保存，不在消息中组装单体 JSON。Requirement 包含目标、角色、范围、非范围、主流程、
 异常流程和带 source refs 的 AC；Design 只描述 module/seam/interface/data contract 与
-extension point，不预测实际代码文件；Verification 建立 AC 到 lifecycle 逻辑测试键 `test_key`
+extension point，不预测实际代码文件。写 Design 前必须读取 `.sdlc-pipeline/scaffold.json`；
+`extension_points` 只能逐字使用该文件已声明的 ID，不能编造 `feature` 等泛称。Verification 建立 AC
+到 lifecycle 逻辑测试键 `test_key`
 （如 `unit`、`integration`、`functional`）的映射，不能填写 `pnpm test` 等 shell command。
 `R/D/T/AC` ID 由 Core 分配或校验；尤其不得手填 AC id，Requirement 保存后按所属 R 与顺序
 使用 `AC-R-xxxx-yy`。仅当 lifecycle 中该 `test_key` 的 `allow_selector` 为 true 时才填写

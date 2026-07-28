@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.14.7 - 2026-07-28
+
+- 修复真实 spec 写入中 Design 可能猜测非脚手架 extension point、随后被 Candidate 校验拒绝的问题。
+  spec reference、主会话与 Design 工具均要求在写入前读取 `scaffold.json`，并逐字使用已声明的
+  `extension_points` ID；Core 继续保留未知 ID 拒绝。
+- 新增发布专用真实 OpenCode smoke：`init → spec → approve → code` 必须在原始 CLI 日志中确认
+  `sdlc-coder` task 目标，并检查 journal task-before/task-after、非空 coder handoff 与 code gate；
+  每一步输出和失败都会保存在证据目录，不允许用最终绿灯掩盖中间错误。
+- 对齐 README 的 coder 预算为实际 `steps: 16`；Schema v2 ADR 重编号为 ADR-0003。
+- plugin 可用 `SDLC_PYTHON` 或 `PYTHON` 指定 Python；未指定时 Windows 用 `python`、其他平台优先
+  `python3`。CLI 现为所有 `Exception` 产生含 `error_type` 的结构化 JSON。
+- 补充宿主 adapter 可移植边界与团队运行规范；保留 task 参数 `command` 的防御性清理。
+
 ## 0.14.6 - 2026-07-28
 
 - 修复 checkpoint 的 `source_refs` 与其他 OpenCode Spec 工具形态不一致造成的中间错误：Core 在

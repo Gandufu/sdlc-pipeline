@@ -34,6 +34,8 @@ validate 后展示 preview 路径、revision 与 hash。只有收到明确“确
 `stage`、`decisions` 或 `notes` 这类自定义字段。
 checkpoint 的 `source_refs` 使用 `SRC-XXXXXXXXXXXX#anchor` 字符串；若已持有 `{source_id, anchor}`
 对象也可直接传入，Core 会规范化，但不得杜撰来源。
+写 Design 前读取 `.sdlc-pipeline/scaffold.json`，其 `extension_points` 只能逐字使用已声明的 ID；
+不得以泛称或模块名替代 extension point。
 写 Requirement 时不手填 AC id（Core 固定派生 `AC-R-xxxx-yy`）；写 Verification 时只有 lifecycle
 test key 明示 `allow_selector: true` 才填写 `tests/` 下的相对 selector，否则传 `selector: null`。
 

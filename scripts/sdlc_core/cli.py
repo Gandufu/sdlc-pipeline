@@ -344,8 +344,17 @@ def main() -> int:
         result = execute(root, args.operation, _input())
         print(json.dumps(result, ensure_ascii=False))
         return 0
-    except (SdlcError, KeyError, ValueError, json.JSONDecodeError) as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False))
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+                ensure_ascii=False,
+            )
+        )
         return 2
 
 

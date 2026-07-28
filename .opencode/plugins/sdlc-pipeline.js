@@ -28,6 +28,12 @@ function coreScript(root) {
   throw new Error("sdlc-pipeline Python core is missing")
 }
 
+export function pythonExecutable(environment = process.env, platformName = process.platform) {
+  const configured = environment.SDLC_PYTHON || environment.PYTHON
+  if (typeof configured === "string" && configured.trim()) return configured.trim()
+  return platformName === "win32" ? "python" : "python3"
+}
+
 async function logPluginEvent(client, message, extra = {}, level = "info") {
   try {
     await client?.app?.log?.({
@@ -71,7 +77,7 @@ function stopProcessTree(child) {
 
 function invoke(root, operation, payload = {}, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn("python", [coreScript(root), operation, "--root", root], {
+    const child = spawn(pythonExecutable(), [coreScript(root), operation, "--root", root], {
     cwd: root,
     env: {
       ...process.env,
@@ -299,7 +305,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_put_design: tool({
-        description: "写入一个 Design artifact；只声明 module seam 和 extension point，不预测代码文件。",
+        description: "写入一个 Design artifact；只声明 module seam 和 extension point，不预测代码文件。extension_points 必须逐字来自 .sdlc-pipeline/scaffold.json 的已声明 ID，禁止编造泛称。",
         args: {
           candidate_id: tool.schema.string(),
           design: tool.schema.object({

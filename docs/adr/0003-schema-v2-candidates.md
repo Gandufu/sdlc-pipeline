@@ -1,4 +1,4 @@
-# ADR-0002：Schema v2 Candidate 与 post-code Delivery Trace
+# ADR-0003：Schema v2 Candidate 与 post-code Delivery Trace
 
 - 状态：Accepted
 - 日期：2026-07-28

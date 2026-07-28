@@ -1,3 +1,3 @@
 """OpenCode-first SDLC Pipeline deterministic core."""
 
-__version__ = "0.14.6"
+__version__ = "0.14.7"

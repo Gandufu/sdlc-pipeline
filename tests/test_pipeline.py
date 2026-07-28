@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import shutil
 import socket
@@ -919,6 +920,20 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(
             result["diff"]["fingerprints"][0]["sha256"], sha256_file(feature)
         )
+
+    def test_cli_unexpected_exception_uses_structured_error_envelope(self) -> None:
+        from sdlc_core import cli
+
+        with patch("sdlc_core.cli.execute", side_effect=RuntimeError("boom")), patch(
+            "sys.argv", ["sdlc.py", "status", "--root", str(self.fixture.root)]
+        ), patch("sys.stdin", io.StringIO("{}")), patch("sys.stdout", io.StringIO()) as stdout:
+            exit_code = cli.main()
+
+        response = json.loads(stdout.getvalue())
+        self.assertEqual(exit_code, 2)
+        self.assertEqual(response["ok"], False)
+        self.assertEqual(response["error_type"], "RuntimeError")
+        self.assertEqual(response["error"], "boom")
 
     def test_coder_retry_reuses_original_spec_baseline(self) -> None:
         init_project(self.fixture.root)

@@ -482,6 +482,49 @@ class InstallerTests(unittest.TestCase):
             (REPO / "README.md").read_text(encoding="utf-8"),
         )
 
+    def test_coder_budget_and_adr_sequence_are_documented_consistently(self) -> None:
+        readme = (REPO / "README.md").read_text(encoding="utf-8")
+        coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(
+            encoding="utf-8"
+        )
+        adr_names = sorted(path.name for path in (REPO / "docs/adr").glob("*.md"))
+
+        self.assertIn("最多 16 个 agent steps", readme)
+        self.assertIn("steps: 16", coder)
+        self.assertEqual(
+            adr_names,
+            [
+                "0001-opencode-first.md",
+                "0002-external-template-assets.md",
+                "0003-schema-v2-candidates.md",
+            ],
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_plugin_selects_configured_python_or_platform_default(self) -> None:
+        plugin = REPO / ".opencode/plugins/sdlc-pipeline.js"
+        script = (
+            "import(process.argv[1]).then(m => console.log(JSON.stringify(["
+            "m.pythonExecutable({SDLC_PYTHON: 'sdlc-python'}, 'linux'),"
+            "m.pythonExecutable({PYTHON: 'configured-python'}, 'linux'),"
+            "m.pythonExecutable({}, 'linux'),"
+            "m.pythonExecutable({}, 'win32')"
+            "])))"
+        )
+        result = subprocess.run(
+            ["node", "-e", script, plugin.as_uri()],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout),
+            ["sdlc-python", "configured-python", "python3", "python"],
+        )
+
     def test_plugin_has_narrow_tools_without_experimental_injection(self) -> None:
         text = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         for name in (
@@ -538,9 +581,34 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("rationale", reference)
         self.assertIn("SRC-XXXXXXXXXXXX#anchor", reference + plugin)
 
+    def test_design_guidance_binds_extension_points_to_scaffold(self) -> None:
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
+        plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+
+        for text in (main, reference, plugin):
+            self.assertIn("scaffold.json", text)
+            self.assertIn("extension_points", text)
+
     def test_spec_generation_requires_chinese_formal_documents(self) -> None:
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
         self.assertIn("默认中文", reference)
+
+    def test_team_boundary_and_adapter_portability_are_documented(self) -> None:
+        readme = (REPO / "README.md").read_text(encoding="utf-8")
+        adr = (REPO / "docs/adr/0001-opencode-first.md").read_text(
+            encoding="utf-8"
+        )
+        boundaries = (REPO / "docs/operational-boundaries.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("宿主 adapter", readme)
+        self.assertIn("宿主 adapter", adr)
+        self.assertIn("不要手动切换 agent", boundaries)
+        self.assertIn("@ 调用", boundaries)
 
     def test_spec_grilling_is_single_question_recommended_choice_workflow(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
