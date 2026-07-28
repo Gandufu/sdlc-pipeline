@@ -486,9 +486,11 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       deadline.unref()
       coderDeadlines.set(input.callID, deadline)
       const manifest = result.context_pack.paths[0]
-      output.args.command = "实现当前已发布的 Schema v2 Spec bundle"
+      const taskObjective = String(output.args?.description || "").trim()
+      delete output.args.command
       output.args.prompt = `[SDLC context pack] ${manifest}\n`
         + `${result.instruction}\n`
+        + (taskObjective ? `本次任务目标：${taskObjective}。\n` : "")
         + `Coder deadline: ${CODER_DEADLINE_SECONDS}s。`
         + "不要展开读取 Core 源码，不要在 code 阶段运行 functional；"
         + "完成实现后立即返回约定 JSON handoff。"

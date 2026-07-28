@@ -571,16 +571,68 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("focused_check", coder)
         self.assertNotIn('"sdlc-coder": ["focused_check"]', plugin)
         self.assertIn("code 阶段不运行依赖项目启动的 functional 测试", adapter)
-        self.assertIn("steps: 8", coder)
+        self.assertIn("steps: 16", coder)
         self.assertIn("temperature: 0.1", coder)
         self.assertIn('".sdlc-pipeline/scripts/**": deny', coder)
         self.assertIn("CODER_DEADLINE_SECONDS = 5 * 60", plugin)
         self.assertIn("output.args.prompt =", plugin)
         self.assertNotIn("output.args.prompt = `${output.args.prompt", plugin)
+        self.assertIn("第 4 次工具调用前", coder)
+        self.assertNotIn('output.args.command = "实现当前已发布', plugin)
         self.assertIn('"write-check"', plugin)
         cancel_index = plugin.index('await invoke(fallbackRoot, "task-cancel"')
         abort_index = plugin.index("await client.session.abort")
         self.assertLess(cancel_index, abort_index)
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_coder_task_hook_keeps_short_objective_without_generic_command(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary).resolve()
+            plugin_path = target / ".opencode" / "plugins" / "sdlc-pipeline.js"
+            plugin_path.parent.mkdir(parents=True)
+            shutil.copy2(REPO / ".opencode/plugins/sdlc-pipeline.js", plugin_path)
+            core = target / ".sdlc-pipeline" / "scripts" / "sdlc.py"
+            core.parent.mkdir(parents=True)
+            core.write_text(
+                "import json, sys\n"
+                "payload = json.load(sys.stdin)\n"
+                "if sys.argv[1] == 'task-before':\n"
+                "    print(json.dumps({'ok': True, 'context_pack': {'paths': ['.sdlc-pipeline/runs/context/coder-manifest.json'], 'characters': 1, 'resource_count': 1}, 'instruction': '只读取必要文件'}))\n"
+                "else:\n"
+                "    print(json.dumps({'ok': True}))\n",
+                encoding="utf-8",
+            )
+            sdk = target / ".opencode" / "node_modules" / "@opencode-ai" / "plugin"
+            sdk.mkdir(parents=True)
+            (sdk / "package.json").write_text(
+                json.dumps({"name": "@opencode-ai/plugin", "type": "module", "exports": "./index.js"}),
+                encoding="utf-8",
+            )
+            (sdk / "index.js").write_text(
+                "const schema = () => ({ optional() { return this }, describe() { return this } })\n"
+                "export const tool = (input) => input\n"
+                "tool.schema = { enum: schema, string: schema, boolean: schema, object: schema, array: schema }\n",
+                encoding="utf-8",
+            )
+            script = (
+                "import(process.argv[1]).then(async m => {"
+                "const plugin = await m.SdlcPipelinePlugin({directory: process.argv[2], worktree: '/'});"
+                "const output = {args: {description: '实现 R-0001 应用外壳', prompt: '调用方上下文不得复制', subagent_type: 'sdlc-coder'}};"
+                "await plugin['tool.execute.before']({tool: 'task', sessionID: 'ses-test', callID: 'call-test'}, output);"
+                "console.log(JSON.stringify(output.args));"
+                "}).catch(e => { console.error(e); process.exit(1) })"
+            )
+            result = subprocess.run(
+                ["node", "-e", script, plugin_path.as_uri(), str(target)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            args = json.loads(result.stdout)
+            self.assertNotIn("command", args)
+            self.assertIn("本次任务目标：实现 R-0001 应用外壳", args["prompt"])
+            self.assertNotIn("调用方上下文不得复制", args["prompt"])
 
     def test_spec_guidance_distinguishes_test_key_from_shell_command(self) -> None:
         text = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")

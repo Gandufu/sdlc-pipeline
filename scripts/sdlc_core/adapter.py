@@ -152,6 +152,21 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
     requirements = spec["requirements"]["items"]
     designs = spec["design"]["items"]
     tests = spec["test_plan"]["items"]
+    first_requirement = requirements[0] if requirements else None
+    first_requirement_id = first_requirement["id"] if first_requirement else None
+    first_delivery = None
+    if first_requirement_id:
+        first_delivery = {
+            "requirement_id": first_requirement_id,
+            "design_ids": [
+                item["id"] for item in designs
+                if first_requirement_id in item["requirement_ids"]
+            ],
+            "test_ids": [
+                item["id"] for item in tests
+                if first_requirement_id in item["requirement_ids"]
+            ],
+        }
     brief = {
         "requirement_ids": [item["id"] for item in requirements],
         "goals": [
@@ -167,6 +182,7 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
         }),
         "tooling_paths": TOOLING_CONFIG_PATHS,
         "test_ids": [item["id"] for item in tests],
+        "first_delivery": first_delivery,
         "verification": [
             {
                 "id": item["id"],
@@ -257,6 +273,9 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         source="context-pack",
     )
     role_instruction = (
+        "先以 brief.first_delivery 指定的 R/D/T 作为第一个纵向交付切片；"
+        "读取 manifest 后不得预读全部 resources 或枚举源码目录，"
+        "第 4 次工具调用前必须在 allowed_paths 内开始真实实现；"
         "coder 只实现当前 Feature Slice 和登记的 functional 文件；"
         "code 阶段不运行依赖项目启动的 functional 测试，"
         "禁止调用 compile/restart/health/test；验证统一由 Core 执行。"

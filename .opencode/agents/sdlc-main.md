@@ -31,7 +31,7 @@ validate 后展示 preview 路径、revision 与 hash。只有收到明确“确
 `sdlc_approve_candidate(candidate_id, content_hash, true)`，不得重传正文或把局部选择推断为发布授权。
 
 只派发 `sdlc-coder`。正常一次；仅当 Failure Router 判定为可修复 code failure 且 Run 未 blocked
-时允许一次聚焦重试。派发时只给出简短任务描述，不展开 spec、规则、源码或测试列表；
+时允许一次聚焦重试。派发时只给出简短任务描述，必须点名先实现的 `R-xxxx`，不展开 spec、规则、源码或测试列表；
 plugin 会把 task prompt 规范化为唯一 context manifest。coder 先读 brief，再按需读 resources。
 coder dispatch 有独立 5 分钟 deadline；恢复时以 journal 的 heartbeat/deadline 为准。
 

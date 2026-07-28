@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.14.2 - 2026-07-28
+
+- 修复 coder 在 8 个 tool step 内只完成全量预读、尚未写入即结束的空交付：manifest 提供首个
+  R/D/T 纵向切片，coder 必须在第 4 次工具调用前写入，并将预算提高到 16 steps。
+- task hook 不再伪造全量 Schema command；只将主代理的短任务目标附加到唯一 context manifest，
+  防止具体 Feature Slice 丢失或上下文重复。
+
 ## 0.14.1 - 2026-07-28
 
 - coder handoff 必须包含由 Core 派生的非空业务改动，避免空交付触发 code gate 假绿。
