@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.14.5 - 2026-07-28
+
+- 修复真实 OpenCode spec 回归中 checkpoint 工具因模型猜测 `stage/decisions/notes` 字段而失败的问题。
+  主会话、spec reference 与工具描述现在给出相同的 schema payload、`Q-xxxx` ID 与 `resolved`
+  状态约束；Core 仍严格拒绝未知字段，避免静默丢失决策。
+
 ## 0.14.4 - 2026-07-28
 
 - 修复 Schema v2 spec 写入会把 agent 提供的无效 AC id 直接送入 schema 校验的问题：AC id

@@ -375,7 +375,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_save_checkpoint: tool({
-        description: "保存 spec 恢复点；结构见 spec-checkpoint.schema.json。",
+        description: "保存 spec 恢复点。payload 仅可使用 state/question/source_refs/confirmed_facts/assumptions/risks；单个决策必须是 {\"state\":\"interviewing\",\"question\":{\"id\":\"Q-0001\",\"prompt\":\"...\",\"answer\":\"...\",\"status\":\"resolved\",\"rationale\":\"...\"}}，禁止 stage/decisions/notes。",
         args: {
           payload: tool.schema.string().describe("Checkpoint JSON object encoded as a string."),
         },

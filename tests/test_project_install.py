@@ -523,6 +523,20 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Schema v2", reference)
         self.assertIn("R/D/T/AC", reference)
 
+    def test_checkpoint_guidance_uses_the_schema_payload(self) -> None:
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
+        plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+
+        for text in (main, reference, plugin):
+            self.assertIn("Q-0001", text)
+            self.assertIn("state", text)
+            self.assertIn("question", text)
+        self.assertIn("status\":\"resolved", reference)
+        self.assertIn("rationale", reference)
+
     def test_spec_generation_requires_chinese_formal_documents(self) -> None:
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
         self.assertIn("默认中文", reference)

@@ -11,6 +11,14 @@
 一次只问一个问题，通常在三题内完成。若仍有会改变范围、验收或公开接口的阻塞决策，可以继续，
 但必须向用户说明影响。每次回答后保存 checkpoint。非阻塞未知项写入 assumptions 或 risks。
 
+调用 `sdlc_save_checkpoint` 时，payload 只能使用 `state`、`question`、`source_refs`、
+`confirmed_facts`、`assumptions`、`risks`；不能使用 `stage`、`decisions` 或 `notes`。每个已回答的
+阻塞问题保存为一个 `question`（ID 是 `Q-0001` 形式，`status` 固定 `resolved`），例如：
+
+```json
+{"state":"interviewing","question":{"id":"Q-0001","prompt":"是否新增 IPC？","answer":"采用推荐","status":"resolved","rationale":"需要真实派生状态"}}
+```
+
 大需求先建立 Feature Map，再拆成可独立验收的 Requirement。每个 R/D/T 作为独立 artifact
 立即保存，不在消息中组装单体 JSON。Requirement 包含目标、角色、范围、非范围、主流程、
 异常流程和带 source refs 的 AC；Design 只描述 module/seam/interface/data contract 与

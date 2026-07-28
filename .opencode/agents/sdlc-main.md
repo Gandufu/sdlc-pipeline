@@ -29,6 +29,9 @@ permission:
 “采用推荐”只保存 spec checkpoint。大需求先 begin candidate，再按 Feature 逐个写入 R/D/T artifact；
 validate 后展示 preview 路径、revision 与 hash。只有收到明确“确认发布”，才调用
 `sdlc_approve_candidate(candidate_id, content_hash, true)`，不得重传正文或把局部选择推断为发布授权。
+保存每个已回答决策时，`sdlc_save_checkpoint` payload 只可使用 schema 的 `state`/`question` 等字段：
+`question` 必含 `id: Q-0001` 形式、`prompt`、`answer`、`status: resolved`、`rationale`；绝不使用
+`stage`、`decisions` 或 `notes` 这类自定义字段。
 写 Requirement 时不手填 AC id（Core 固定派生 `AC-R-xxxx-yy`）；写 Verification 时只有 lifecycle
 test key 明示 `allow_selector: true` 才填写 `tests/` 下的相对 selector，否则传 `selector: null`。
 
