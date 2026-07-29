@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 当 OpenCode 丢失 tester 的最终 JSON 时，Core 只在独立验证到非空、受限测试 diff 且所有 Spec selector
+  存在后写入带 `output_recovery` 的透明 receipt，并继续唯一一次权威验证；缺少/越界改动仍 fail-closed。
 - 强化 tester 上下文与 handoff 契约：Verification 必须记录既有外部服务的固定值和错误情境；主会话
   不得丢弃这些断言，tester 必须维护 preflight 测试、使用确定性断言并只返回裸 JSON handoff。
 - Core 为每个实现指纹持久化单次 tester dispatch 边界；测试失败后 OpenCode 无法自动重复派发

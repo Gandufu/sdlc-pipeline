@@ -444,7 +444,23 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
 
 
 def validate_tester_handoff(root: Path, text: str) -> dict[str, Any]:
-    value = _extract_json(text)
+    recovery_reason: str | None = None
+    try:
+        value = _extract_json(text)
+    except SdlcError as error:
+        # Some OpenCode task transports can lose the tester's final JSON even
+        # after its constrained writes have completed.  Do not manufacture a
+        # claim on behalf of the agent: only recover a receipt after the same
+        # allowed-path and declared-selector checks below have independently
+        # proved that test sources were delivered.  The receipt remains
+        # explicitly marked so the release audit can distinguish it.
+        recovery_reason = str(error)
+        value = {
+            "summary": "Core 根据受限测试改动恢复 tester handoff 收据",
+            "open_issues": [],
+            "full_scan": False,
+            "full_scan_reason": "subagent JSON handoff 缺失；Core 将核验声明的测试文件和受限 diff",
+        }
     validate_schema_instance(root, "handoff.schema.json", value)
     before = read_work_record(root, "task/tester-before")
     diff = validate_diff(
@@ -463,15 +479,26 @@ def validate_tester_handoff(root: Path, text: str) -> dict[str, Any]:
     missing = sorted(path for path in declared if not (root / path).is_file())
     if missing:
         raise SdlcError(f"Spec 声明的测试脚本不存在: {missing}")
+    if recovery_reason is not None and not actual:
+        raise SdlcError(recovery_reason)
     value["changed_files"] = actual
     value["validated_at"] = utc_now()
     value["mapping_strategy"] = "post-test-delivery-trace"
+    if recovery_reason is not None:
+        value["output_recovery"] = {
+            "mode": "allowed-test-diff",
+            "reason": recovery_reason,
+            "observed_paths": actual,
+        }
     write_work_record(
         root,
         "tester-handoff",
         value,
         state="validated",
-        title="Tester handoff",
+        title=(
+            "Tester handoff (Core recovery)"
+            if recovery_reason is not None else "Tester handoff"
+        ),
     )
     return {"ok": True, "handoff": value, "diff": diff}
 

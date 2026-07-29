@@ -80,5 +80,7 @@ tester 只修改 Spec selector 指定的测试脚本及该 preflight 明确列�
 handoff；plugin 在 handoff 校验后调用一次 `verify_delivery`。主会话和 tester 都不得直接调用 test
 lifecycle；Core 先停止 coder 预览并确认端口释放，执行合同的 test_preflight，再只在已选测试套件
 需要 runtime 时启动并完成 readiness，随后运行 unit/functional 测试并复查 cleanup。Playwright MCP
-不属于权威 gate 的依赖。
+不属于权威 gate 的依赖。若 OpenCode 丢失 tester 的最终 JSON，但 Core 已独立确认发生了非空、受限的
+测试 diff 且所有 selector 文件存在，Core 只能写入带 `output_recovery` 标记的 tester receipt 并继续
+唯一一次 verify_delivery；无改动、越界改动或缺少 selector 时仍失败，绝不再派发 tester。
 正式文档、Git 映射、进程身份和通过状态以 Core 返回值为准。版本固化必须再次取得用户明确确认。

@@ -735,6 +735,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("task", test_command)
         self.assertIn("外部服务响应、错误情境与可观察结果", test_command)
         self.assertIn("Spec 缺口", test_command)
+        self.assertIn("output_recovery", test_command)
         self.assertIn('"sdlc-tester": "tester"', plugin)
         self.assertNotIn('"sdlc-tester": ["verify_delivery"]', plugin)
         self.assertFalse((REPO / ".opencode/agents/sdlc-executor.md").exists())

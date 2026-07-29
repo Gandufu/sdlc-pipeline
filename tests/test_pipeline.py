@@ -936,6 +936,36 @@ class ClosedLoopTests(unittest.TestCase):
             ["tests/functional/T-0001.functional.ts"],
         )
 
+    def test_tester_malformed_output_recovers_only_verified_test_diff(self) -> None:
+        self._through_code()
+        before_task(self.fixture.root, "tester")
+        self._author_tests()
+
+        handoff = after_task(
+            self.fixture.root,
+            "tester",
+            "tester final output was lost by the host",
+        )
+
+        self.assertEqual(
+            handoff["handoff"]["changed_files"],
+            ["tests/functional/T-0001.functional.ts"],
+        )
+        self.assertEqual(
+            handoff["handoff"]["output_recovery"]["mode"],
+            "allowed-test-diff",
+        )
+
+    def test_tester_malformed_output_without_test_diff_still_fails(self) -> None:
+        self._through_code()
+        before_task(self.fixture.root, "tester")
+
+        with self.assertRaisesRegex(
+            SdlcError,
+            "Spec 声明的测试脚本不存在",
+        ):
+            after_task(self.fixture.root, "tester", "host lost final output")
+
     def test_tester_dispatch_rejects_automatic_retry_for_same_implementation(self) -> None:
         self._through_code()
 

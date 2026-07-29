@@ -245,6 +245,7 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         self.assertIn("verify_delivery", plugin)
         self.assertIn("不得把\n当前用户消息中的具体断言静默丢弃", main)
         self.assertIn("preflight_unit_test_paths", main)
+        self.assertIn("output_recovery", main)
 
     def test_plugin_exposes_only_intent_level_lifecycle_actions(self) -> None:
         import re
