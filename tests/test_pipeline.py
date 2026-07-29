@@ -1476,6 +1476,42 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(current["state"], "running")
         self.assertEqual(current["last_failure"]["repeat_count"], 1)
 
+    def test_failed_test_run_requires_explicit_reason_for_spec_rework(self) -> None:
+        failed = begin_attempt(
+            self.fixture.root,
+            phase="test",
+            step="verify_delivery",
+            operation="lifecycle",
+            payload={"action": "verify_delivery"},
+        )
+        finish_attempt(
+            self.fixture.root,
+            failed,
+            state="failed",
+            error="published verification expects an invalid device envelope",
+        )
+
+        with self.assertRaisesRegex(SdlcError, "禁止通过切换阶段清除失败状态"):
+            begin_attempt(
+                self.fixture.root,
+                phase="spec",
+                step="source",
+                operation="publish",
+                payload={"kind": "source"},
+            )
+        with self.assertRaisesRegex(SdlcError, "spec-rework 必须携带非空 reason"):
+            execute(self.fixture.root, "spec-rework", {"reason": ""})
+
+        rework = execute(self.fixture.root, "spec-rework", {
+            "reason": "T-0001 与固定服务 envelope 不一致",
+        })
+
+        current = journal_status(self.fixture.root)
+        self.assertTrue(rework["ok"])
+        self.assertEqual(current["phase"], "spec")
+        self.assertEqual(current["state"], "running")
+        self.assertEqual(current["last_failure"]["repeat_count"], 1)
+
     def test_status_reconciles_abandoned_attempt_without_next_action(self) -> None:
         abandoned = begin_attempt(
             self.fixture.root,

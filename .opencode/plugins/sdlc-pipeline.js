@@ -498,6 +498,18 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           ))
         },
       }),
+      sdlc_rework_spec_after_test_failure: tool({
+        description: "受控规格返工：仅在 test 阶段失败且失败证据确认存在已发布 Spec 偏移时，带简短原因原子切回 spec。它保留失败证据，普通 spec 调用不能替代此入口。",
+        args: {
+          reason: tool.schema.string(),
+        },
+        async execute(args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_rework_spec_after_test_failure")
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-rework", {
+            reason: args.reason,
+          }, { signal: context.abort }))
+        },
+      }),
       sdlc_lifecycle: tool({
         description: "执行一个交付意图；内部生命周期由 Core 管理。",
         args: {

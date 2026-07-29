@@ -36,7 +36,12 @@ def active_run(root: Path) -> dict[str, Any] | None:
     )
 
 
-def ensure_run(root: Path, phase: str) -> dict[str, Any]:
+def ensure_run(
+    root: Path,
+    phase: str,
+    *,
+    spec_rework_reason: str | None = None,
+) -> dict[str, Any]:
     run = active_run(root)
     if run and run.get("state") not in {"succeeded", "aborted"}:
         if run.get("phase") != phase:
@@ -45,7 +50,18 @@ def ensure_run(root: Path, phase: str) -> dict[str, Any]:
                 and run.get("phase") == "test"
                 and phase == "code"
             )
-            if run.get("state") in {"failed", "blocked"} and not rework_from_failed_test:
+            rework_spec_from_failed_test = (
+                run.get("state") == "failed"
+                and run.get("phase") == "test"
+                and phase == "spec"
+                and isinstance(spec_rework_reason, str)
+                and bool(spec_rework_reason.strip())
+            )
+            if (
+                run.get("state") in {"failed", "blocked"}
+                and not rework_from_failed_test
+                and not rework_spec_from_failed_test
+            ):
                 raise SdlcError(
                     f"Run {run['run_id']} 在 {run['phase']} 阶段失败；"
                     "禁止通过切换阶段清除失败状态"
@@ -59,12 +75,25 @@ def ensure_run(root: Path, phase: str) -> dict[str, Any]:
             append_event(
                 root,
                 run["run_id"],
-                "run.rework_started" if rework_from_failed_test else "run.phase_changed",
+                (
+                    "run.rework_started"
+                    if rework_from_failed_test
+                    else (
+                        "run.spec_rework_started"
+                        if rework_spec_from_failed_test
+                        else "run.phase_changed"
+                    )
+                ),
                 phase=phase,
                 data={
                     "previous_phase": previous,
                     "previous_state": previous_state,
                     "phase": phase,
+                    **(
+                        {"reason": spec_rework_reason.strip()}
+                        if rework_spec_from_failed_test
+                        else {}
+                    ),
                 },
             )
         return run
@@ -98,8 +127,9 @@ def begin_attempt(
     payload: dict[str, Any],
     idempotency_key: str | None = None,
     owner_pid: int | None = None,
+    spec_rework_reason: str | None = None,
 ) -> dict[str, Any]:
-    run = ensure_run(root, phase)
+    run = ensure_run(root, phase, spec_rework_reason=spec_rework_reason)
     if run.get("state") == "blocked":
         raise SdlcError(
             "Run 已进入 BLOCKED；请处理最近失败后显式开始新 Run"

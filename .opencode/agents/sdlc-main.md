@@ -13,6 +13,7 @@ permission:
   sdlc_ingest_source: allow
   sdlc_save_spec_work: allow
   sdlc_query_spec_work: allow
+  sdlc_rework_spec_after_test_failure: allow
   sdlc_begin_candidate: allow
   sdlc_put_requirement: allow
   sdlc_put_design: allow
@@ -69,6 +70,10 @@ code 阶段；唯一例外是 journal 明确为 `state=failed, phase=test`，且
 `repeat_count=1` 时，必须派发一次聚焦 coder 修复 failure evidence 指向的业务代码；同 phase retry 不受
 `journal.recoverable` 影响。Core 会保留失败 evidence 并创建下一 code attempt；第二次相同失败或 blocked
 必须停止报告。
+当 journal 明确为 `state=failed, phase=test`，且失败证据确认已发布的 Spec 与固定来源发生偏移、当前用户
+明确要求受控规格修订时，只能先调用一次 `sdlc_rework_spec_after_test_failure(reason)`；reason 必须指向具体
+evidence。该工具会原子记录 `run.spec_rework_started` 并保留失败证据，随后才可按正常 Candidate 流程修订和
+发布新基线。不得用它修复普通测试失败、跳过失败报告或重复进入 spec；任何其他 test 失败仍按 code 返工或停止。
 不得调用
 `sdlc_lifecycle(verify_delivery)`、不得开始 test 阶段，后续只由用户显式执行 `/sdlc-test`。
 test 阶段只派发一次 `sdlc-tester` 子 agent。派发前必须逐项核对已发布 Verification 的 `expected`：

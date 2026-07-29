@@ -788,6 +788,18 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("state=failed, phase=test", main)
         self.assertIn("完整 code gate", main)
 
+    def test_spec_command_requires_controlled_rework_after_failed_test(self) -> None:
+        command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(
+            encoding="utf-8"
+        )
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("sdlc_rework_spec_after_test_failure", command)
+        self.assertIn("run.spec_rework_started", main)
+        self.assertIn('"spec-rework"', plugin)
+
     def test_code_command_allows_one_failed_code_gate_retry(self) -> None:
         command = (REPO / ".opencode/commands/sdlc-code.md").read_text(
             encoding="utf-8"

@@ -66,6 +66,11 @@ def _input() -> dict[str, Any]:
 
 def _validate_request(operation: str, payload: dict[str, Any]) -> None:
     """Reject structurally incomplete requests before they can affect a Run."""
+    if operation == "spec-rework":
+        reason = payload.get("reason")
+        if not isinstance(reason, str) or not reason.strip():
+            raise SdlcError("spec-rework 必须携带非空 reason")
+        return
     if operation != "spec-candidate" or payload.get("action") != "approve":
         return
     missing = [
@@ -88,6 +93,8 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
         return query_source(root, payload["source_id"], payload["anchor"])
     if operation == "spec-work-query":
         return query_spec_work(root)
+    if operation == "spec-rework":
+        return {"ok": True, "reason": payload["reason"].strip()}
     if operation == "spec-candidate":
         action = payload.get("action")
         if action == "begin":
@@ -259,6 +266,8 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
 
 
 def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
+    if operation == "spec-rework":
+        return "spec", "spec-rework"
     if operation == "spec-candidate":
         return "spec", str(payload.get("action", "candidate"))
     if operation == "publish":
@@ -346,6 +355,11 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         operation=operation,
         payload=effective_payload,
         idempotency_key=idempotency_key,
+        spec_rework_reason=(
+            effective_payload["reason"]
+            if operation == "spec-rework"
+            else None
+        ),
     )
     if attempt.get("cached"):
         return attempt["result"]
@@ -375,7 +389,7 @@ def main() -> int:
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
             "task-heartbeat", "task-cancel", "write-check", "path-check", "finalize",
-            "spec-candidate", "source-query", "spec-work-query",
+            "spec-candidate", "spec-rework", "source-query", "spec-work-query",
         ),
     )
     parser.add_argument("--root", help="项目根目录")
