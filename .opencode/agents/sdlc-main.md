@@ -65,6 +65,10 @@ coder 只实现业务代码，不读取或修改测试脚本。handoff 后 Core 
 code 阶段；唯一例外是 journal 明确为 `state=failed, phase=test`，且当前用户消息明确要求“返工”或
 “修复代码”：先读取 failure evidence，确认是业务代码问题后可派发一次聚焦 coder。Core 会把该 task
 原子切回 code phase 并重跑完整 code gate；不得用它绕过测试失败、修改测试或重做正常已通过 code。
+当 code gate 尚未通过且 journal 为 `state=failed, phase=code`、Failure Router 为 `class=code` 且
+`repeat_count=1` 时，必须派发一次聚焦 coder 修复 failure evidence 指向的业务代码；同 phase retry 不受
+`journal.recoverable` 影响。Core 会保留失败 evidence 并创建下一 code attempt；第二次相同失败或 blocked
+必须停止报告。
 不得调用
 `sdlc_lifecycle(verify_delivery)`、不得开始 test 阶段，后续只由用户显式执行 `/sdlc-test`。
 test 阶段只派发一次 `sdlc-tester` 子 agent；它只修改 Spec selector 指定的测试脚本并返回 JSON

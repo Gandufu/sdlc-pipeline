@@ -779,6 +779,20 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("state=failed, phase=test", main)
         self.assertIn("完整 code gate", main)
 
+    def test_code_command_allows_one_failed_code_gate_retry(self) -> None:
+        command = (REPO / ".opencode/commands/sdlc-code.md").read_text(
+            encoding="utf-8"
+        )
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+
+        self.assertIn("last_failure.class=code", command)
+        self.assertIn("last_failure.repeat_count=1", command)
+        self.assertIn("journal.recoverable", command)
+        self.assertIn("同一 code phase", command)
+        self.assertIn("state=failed, phase=code", main)
+        self.assertIn("repeat_count=1", main)
+        self.assertIn("第二次相同失败", main)
+
     def test_spec_work_guidance_uses_structured_arguments(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
