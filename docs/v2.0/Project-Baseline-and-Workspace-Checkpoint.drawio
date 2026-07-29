@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-07-29T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="workspace-project-baseline" name="完整流程">
+    <mxGraphModel dx="1800" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title" value="SDLC Pipeline：Workspace Checkpoint 与 Project Baseline 全流程" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=26;fontStyle=1;fontColor=#172B4D;" vertex="1" parent="1">
+          <mxGeometry x="260" y="20" width="1280" height="42" as="geometry"/>
+        </mxCell>
+        <mxCell id="rule" value="仅两个核心产物：Workspace Checkpoint 负责阶段恢复与追溯；Project Baseline 负责项目当前权威事实。TASK 只是递增关联 ID。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F5F7;strokeColor=#7A869A;fontSize=14;fontStyle=1;fontColor=#172B4D;" vertex="1" parent="1">
+          <mxGeometry x="280" y="74" width="1240" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="laneSession" value="A. Session 临时区&#xa;.sdlc-pipeline/work" style="swimlane;horizontal=0;startSize=38;rounded=0;html=1;fillColor=#FFF7E6;swimlaneFillColor=#FFF3D6;strokeColor=#FF991F;dashed=1;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="30" y="145" width="1740" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="laneCheckpoint" value="B. Workspace Checkpoint&#xa;docs/sdlc/checkpoints" style="swimlane;horizontal=0;startSize=38;rounded=0;html=1;fillColor=#F3F0FF;swimlaneFillColor=#EAE6FF;strokeColor=#6554C0;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="30" y="345" width="1740" height="245" as="geometry"/>
+        </mxCell>
+        <mxCell id="laneMerge" value="C. 合入与冲突控制" style="swimlane;horizontal=0;startSize=38;rounded=0;html=1;fillColor=#FFFFFF;swimlaneFillColor=#F4F5F7;strokeColor=#7A869A;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="30" y="610" width="1740" height="175" as="geometry"/>
+        </mxCell>
+        <mxCell id="laneProject" value="D. Project Baseline&#xa;docs/sdlc/project" style="swimlane;horizontal=0;startSize=38;rounded=0;html=1;fillColor=#E9F2FF;swimlaneFillColor=#DEEBFF;strokeColor=#0065FF;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="30" y="805" width="1740" height="270" as="geometry"/>
+        </mxCell>
+        <mxCell id="laneState" value="E. Task 阶段推进" style="swimlane;horizontal=0;startSize=38;rounded=0;html=1;fillColor=#E3FCEF;swimlaneFillColor=#DFF7EB;strokeColor=#00875A;fontStyle=1;fontSize=15;" vertex="1" parent="1">
+          <mxGeometry x="30" y="1095" width="1740" height="255" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="task" value="创建或恢复 TASK-xxxx&#xa;一个 Task 可跨多个 Session" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7E6;strokeColor=#FF991F;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="110" y="200" width="240" height="72" as="geometry"/>
+        </mxCell>
+        <mxCell id="context" value="读取当前 Project Baseline&#xa;+ 相关未完成 Checkpoint" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7E6;strokeColor=#FF991F;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="430" y="200" width="250" height="72" as="geometry"/>
+        </mxCell>
+        <mxCell id="temp" value="阶段临时文件&#xa;用户输入、模型草稿、未采用内容&#xa;不进入正式产物" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7E6;strokeColor=#FF991F;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="760" y="190" width="280" height="92" as="geometry"/>
+        </mxCell>
+        <mxCell id="stageGate" value="阶段门禁&#xa;SPEC：人工确认&#xa;CODE / TEST：确定性结果" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF7E6;strokeColor=#FF991F;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="190" width="260" height="92" as="geometry"/>
+        </mxCell>
+        <mxCell id="cleanupTemp" value="Checkpoint 写入成功后&#xa;删除对应 Session 临时文件" style="shape=note;whiteSpace=wrap;html=1;fillColor=#FFEBE6;strokeColor=#DE350B;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1460" y="190" width="250" height="92" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="checkpointFolder" value="TASK-xxxx/&#xa;spec.md&#xa;code.md&#xa;test.md&#xa;index.json" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAE6FF;strokeColor=#6554C0;fontSize=14;fontStyle=1;align=left;spacingLeft=16;" vertex="1" parent="1">
+          <mxGeometry x="110" y="395" width="210" height="145" as="geometry"/>
+        </mxCell>
+        <mxCell id="spec" value="SPEC Checkpoint&#xa;需求 / 设计 / 外部接口 / 测试计划&#xa;必须人工确认&#xa;状态：specified" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAE6FF;strokeColor=#6554C0;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="390" y="390" width="290" height="155" as="geometry"/>
+        </mxCell>
+        <mxCell id="code" value="CODE Checkpoint&#xa;改动文件 / 静态检查 / 单元测试&#xa;正常自动生成&#xa;状态：implemented" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAE6FF;strokeColor=#6554C0;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="750" y="390" width="290" height="155" as="geometry"/>
+        </mxCell>
+        <mxCell id="test" value="TEST Checkpoint&#xa;环境绑定 / Runtime / Playwright&#xa;测试轮次追加在同一 test.md&#xa;状态：blocked 或 verified" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAE6FF;strokeColor=#6554C0;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="390" width="300" height="155" as="geometry"/>
+        </mxCell>
+        <mxCell id="checkpointRule" value="一个 Task 只有一套三个 Checkpoint&#xa;不单独编号；Task 进行中可原子更新&#xa;Task 完成后冻结并长期保留" style="shape=note;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6554C0;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1480" y="400" width="240" height="135" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="compare" value="比较基础文档哈希&#xa;+ 受影响 R / D / E / T ID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F5F7;strokeColor=#7A869A;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="660" width="270" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="conflict" value="影响对象冲突？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#7A869A;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="620" y="646" width="175" height="104" as="geometry"/>
+        </mxCell>
+        <mxCell id="manual" value="是：停止自动合入&#xa;标记 conflict&#xa;请求人工确认" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBE6;strokeColor=#DE350B;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="870" y="650" width="220" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="merge" value="否：确定性增量合入&#xa;不覆盖其他 Task 内容&#xa;更新文档哈希与状态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1190" y="650" width="250" height="96" as="geometry"/>
+        </mxCell>
+        <mxCell id="parallel" value="允许多个未完成 Task 并存&#xa;blocked Task 不妨碍新 Task&#xa;恢复时仍使用原 TASK ID" style="shape=note;whiteSpace=wrap;html=1;fillColor=#FFF7E6;strokeColor=#FF991F;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1510" y="650" width="230" height="96" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="projectDocs" value="唯一项目主线&#xa;requirements.md&#xa;design.md&#xa;external-interfaces.md&#xa;test.md&#xa;CHANGELOG.md" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0065FF;fontSize=14;fontStyle=1;align=left;spacingLeft=16;" vertex="1" parent="1">
+          <mxGeometry x="110" y="855" width="260" height="170" as="geometry"/>
+        </mxCell>
+        <mxCell id="globalIds" value="项目全局稳定 ID&#xa;R-xxxx / D-xxxx / E-xxxx / T-xxxx&#xa;不按 Task 重置&#xa;废止 ID 不复用" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0065FF;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="440" y="865" width="260" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="statuses" value="Task 当前状态&#xa;specified&#xa;implemented&#xa;blocked&#xa;verified" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0065FF;fontSize=13;fontStyle=1;align=left;spacingLeft=18;" vertex="1" parent="1">
+          <mxGeometry x="770" y="865" width="210" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="changelog" value="CHANGELOG.md 只追加&#xa;日期 + TASK ID + 简写需求 + 状态&#xa;不复制需求、设计、测试或会话正文" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0065FF;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="865" width="300" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="currentIndex" value="current.json（仅索引）&#xa;文档路径 / 锚点 / 哈希&#xa;last_task_id / Task 状态&#xa;不存正文和敏感值" style="shape=document;whiteSpace=wrap;html=1;boundedLbl=1;fillColor=#F4F5F7;strokeColor=#7A869A;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1420" y="860" width="280" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="noSnapshot" value="不建快照目录 · 不绑定 Git · 不设 Baseline 编号 · Release 本轮不考虑" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0065FF;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="470" y="1028" width="850" height="35" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="specified" value="SPEC 确认&#xa;specified" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="120" y="1160" width="190" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="implemented" value="CODE 门禁通过&#xa;implemented" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="390" y="1160" width="210" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="environment" value="外部环境可用？&#xa;只检查变量是否提供&#xa;不区分真机或 Mock" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="690" y="1145" width="210" height="106" as="geometry"/>
+        </mxCell>
+        <mxCell id="blocked" value="否：blocked&#xa;记录原因和缺少的变量名&#xa;停止测试，可开始下一 Task" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBE6;strokeColor=#DE350B;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="1128" width="250" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="functional" value="是：接口验证 + Runtime&#xa;+ Playwright&#xa;失败则同一 test.md 追加 Round" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="980" y="1240" width="250" height="92" as="geometry"/>
+        </mxCell>
+        <mxCell id="verified" value="验证通过&#xa;verified" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="1248" width="190" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="resume" value="外部条件恢复&#xa;继续原 TASK-xxxx&#xa;不创建新 Checkpoint ID" style="shape=note;whiteSpace=wrap;html=1;fillColor=#FFF7E6;strokeColor=#FF991F;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1450" y="1118" width="250" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#172B4D;" edge="1" parent="1" source="task" target="context"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#172B4D;" edge="1" parent="1" source="context" target="temp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#172B4D;" edge="1" parent="1" source="temp" target="stageGate"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6554C0;" edge="1" parent="1" source="stageGate" target="spec"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6554C0;" edge="1" parent="1" source="spec" target="code"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6554C0;" edge="1" parent="1" source="code" target="test"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#DE350B;" edge="1" parent="1" source="test" target="cleanupTemp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#7A869A;" edge="1" parent="1" source="checkpointFolder" target="compare"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#7A869A;" edge="1" parent="1" source="compare" target="conflict"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#DE350B;fontStyle=1;" edge="1" parent="1" source="conflict" target="manual"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#00875A;fontStyle=1;" edge="1" parent="1" source="conflict" target="merge"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#0065FF;" edge="1" parent="1" source="merge" target="projectDocs"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#00875A;" edge="1" parent="1" source="specified" target="implemented"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#00875A;" edge="1" parent="1" source="implemented" target="environment"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e15" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#DE350B;fontStyle=1;" edge="1" parent="1" source="environment" target="blocked"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e16" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#00875A;fontStyle=1;" edge="1" parent="1" source="environment" target="functional"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e17" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#00875A;" edge="1" parent="1" source="functional" target="verified"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e18" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#FF991F;dashed=1;" edge="1" parent="1" source="blocked" target="resume"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e19" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#FF991F;dashed=1;" edge="1" parent="1" source="resume" target="environment"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1575" y="1080"/><mxPoint x="795" y="1080"/></Array></mxGeometry></mxCell>
+        <mxCell id="e20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#6554C0;dashed=1;" edge="1" parent="1" source="checkpointFolder" target="spec"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
