@@ -154,6 +154,49 @@ class StorageLayoutV3Tests(unittest.TestCase):
                 self.assertNotIn("```json", document.read_text(encoding="utf-8"))
                 self.assertEqual(item["sha256"], markdown_file_sha256(document))
 
+    def test_verification_selector_is_generated_and_normalized(self) -> None:
+        cases = [
+            (None, "tests/functional/T-0001.functional.ts"),
+            ("", "tests/functional/T-0001.functional.ts"),
+            (
+                r"tests\functional\system-info.functional.ts",
+                "tests/functional/system-info.functional.ts",
+            ),
+        ]
+        for supplied, expected in cases:
+            created = begin_candidate(
+                self.fixture.root,
+                title="设备管理",
+                source_refs=[self.source_ref],
+            )
+            verification = {
+                "requirement_ids": ["R-0001"],
+                "design_ids": ["D-0001"],
+                "acceptance_criteria_ids": ["AC-R-0001-01"],
+                "level": "functional",
+                "test_key": "functional",
+                "preconditions": "项目可编译",
+                "expected": "断言系统信息可见",
+                "mandatory": True,
+            }
+            if supplied is not None:
+                verification["selector"] = supplied
+
+            written = put_verification(
+                self.fixture.root,
+                created["candidate_id"],
+                verification,
+            )
+            revision = load_candidate_revision(
+                self.fixture.root,
+                created["candidate_id"],
+                written["revision"],
+            )
+            self.assertEqual(
+                revision["verification"][0]["selector"],
+                expected,
+            )
+
     def test_approval_freezes_self_contained_markdown_baseline(self) -> None:
         candidate_id, ready = self._ready_candidate()
         published = approve_and_promote(

@@ -408,7 +408,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_put_verification: tool({
-        description: "写入一个 Verification artifact，并用 R/D/AC ID 建立验收关系。",
+        description: "写入一个 Verification artifact，并用 R/D/AC ID 建立验收关系。selector 默认省略，由 Core 按 T-id 生成 tests/functional/T-xxxx.functional.ts。",
         args: {
           candidate_id: tool.schema.string(),
           verification: tool.schema.object({
@@ -418,7 +418,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             acceptance_criteria_ids: tool.schema.array(tool.schema.string()),
             level: tool.schema.enum(["functional"]),
             test_key: tool.schema.string(),
-            selector: tool.schema.string(),
+            selector: tool.schema.string().optional(),
             preconditions: tool.schema.string(),
             expected: tool.schema.string(),
             mandatory: tool.schema.boolean(),

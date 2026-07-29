@@ -138,6 +138,8 @@ docs/sdlc/
 测试键。start 产生的后台进程由 Core 记录 PID 与创建身份并统一停止，模板不重复实现 stop/restart
 脚本。code gate 执行 compile/package、lint、typecheck、启动与 readiness，并保持预览运行；
 test 阶段由 Core 清理预览端口，再执行 tester 编写的 Playwright functional 脚本。
+spec 写入 Verification 时可省略 selector，Core 会按最终 T-id 确定性生成
+`tests/functional/T-xxxx.functional.ts`；只有多个 T-id 共享一个脚本时才显式指定 selector。
 `scaffold.json` 声明关键文件 fingerprint、protected paths、allowed paths 与 extension points。
 Design 只能引用已声明 extension point；实际代码文件由 code 后的 Git diff 推导。
 

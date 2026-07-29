@@ -224,6 +224,10 @@ def put_verification(
         and test_definition.get("allow_selector") is not True
     ):
         normalized["selector"] = None
+    elif not isinstance(normalized.get("selector"), str) or not normalized["selector"].strip():
+        normalized["selector"] = f"tests/functional/{identifier}.functional.ts"
+    else:
+        normalized["selector"] = normalized["selector"].strip().replace("\\", "/")
     validate_schema_instance(root, "artifacts/verification.schema.json", normalized)
     selector = normalized.get("selector")
     path = Path(selector)

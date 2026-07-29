@@ -45,8 +45,10 @@ validate 后展示 preview 路径、revision 与 hash。只有收到明确“确
 对象也可直接传入，Core 会规范化，但不得杜撰来源。
 写 Design 前读取 `.sdlc-pipeline/contracts/scaffold.json`，其 `extension_points` 只能逐字使用已声明的 ID；
 不得以泛称或模块名替代 extension point。
-写 Requirement 时不手填 AC id（Core 固定派生 `AC-R-xxxx-yy`）；写 Verification 时只有 lifecycle
-test key 明示 `allow_selector: true` 才填写 `tests/` 下的相对 selector，否则传 `selector: null`。
+写 Requirement 时不手填 AC id（Core 固定派生 `AC-R-xxxx-yy`）；写 Verification 时默认省略
+`selector`，Core 按最终 T-id 生成 `tests/functional/T-xxxx.functional.ts`。只有多个 T-id 确需复用
+同一脚本时才显式填写完整 POSIX 相对路径；不得传空字符串、反斜杠路径或省略 `.functional.ts`
+后缀。当前 `functional` test key 已声明 `allow_selector: true`。
 R/D/T 的 `id` 同样由 Core 分配：优先省略它；如历史调用带来非规范语义名，Core 会分配规范 ID，
 不得因格式猜测重试或绕过 Candidate。
 
