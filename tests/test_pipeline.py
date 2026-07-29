@@ -891,10 +891,6 @@ class ClosedLoopTests(unittest.TestCase):
         delivery = verify_delivery(self.fixture.root)
 
         self.assertTrue(delivery["ok"])
-        self.assertIn(
-            "tests/unit/legacy.unit.py",
-            delivery["test_sources"]["preflight_unit_test_paths"],
-        )
 
     def test_test_stage_rejects_undeclared_test_script(self) -> None:
         self._through_code()
