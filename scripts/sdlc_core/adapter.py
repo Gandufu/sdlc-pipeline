@@ -26,6 +26,20 @@ from .schema_validation import validate_schema_instance
 
 MAX_CONTEXT_RESOURCES = 10
 MAX_IMPLEMENTATION_RESOURCES = 6
+CODER_DEADLINE_BASE_SECONDS = 5 * 60
+CODER_DEADLINE_PER_ADDITIONAL_REQUIREMENT_SECONDS = 2 * 60
+CODER_DEADLINE_MAX_SECONDS = 15 * 60
+
+
+def coder_deadline_seconds(root: Path) -> int:
+    """Derive a bounded coder deadline from the published requirement count."""
+    requirement_count = len(load_current_spec(root)["requirements"]["items"])
+    additional = max(0, requirement_count - 1)
+    return min(
+        CODER_DEADLINE_MAX_SECONDS,
+        CODER_DEADLINE_BASE_SECONDS
+        + additional * CODER_DEADLINE_PER_ADDITIONAL_REQUIREMENT_SECONDS,
+    )
 
 
 def validate_write_path(root: Path, path_value: str) -> dict[str, Any]:
@@ -276,6 +290,7 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
             "worktree": before,
         }, state="captured", title=f"{role} task before snapshot")
     context = build_context_pack(root, role)
+    requirement_count = len(load_current_spec(root)["requirements"]["items"])
     from .runs import record_tokens
 
     record_tokens(
@@ -297,6 +312,8 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
     return {
         "ok": True,
         "role": role,
+        "deadline_seconds": coder_deadline_seconds(root),
+        "requirement_count": requirement_count,
         "baseline": "reused" if reuse_baseline else "created",
         "context_pack": context,
         "instruction": (

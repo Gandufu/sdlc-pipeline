@@ -6,7 +6,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .adapter import after_task, before_task, validate_write_path
+from .adapter import (
+    after_task,
+    before_task,
+    coder_deadline_seconds,
+    validate_write_path,
+)
 from .bootstrap import bootstrap
 from .common import SdlcError, project_root
 from .layout import contracts_root
@@ -33,7 +38,9 @@ from .journal import (
     close_run,
     finish_attempt,
     heartbeat_attempt,
-    record_spec_checkpoint,
+    discard_spec_work,
+    query_spec_work,
+    record_spec_work,
     running_attempt,
 )
 from .status import status
@@ -59,11 +66,30 @@ def _input() -> dict[str, Any]:
     return value
 
 
+def _validate_request(operation: str, payload: dict[str, Any]) -> None:
+    """Reject structurally incomplete requests before they can affect a Run."""
+    if operation != "spec-candidate" or payload.get("action") != "approve":
+        return
+    missing = [
+        field
+        for field in ("candidate_id", "content_hash")
+        if not isinstance(payload.get(field), str) or not payload[field].strip()
+    ]
+    if payload.get("confirmed") is not True:
+        missing.append("confirmed=true")
+    if missing:
+        raise SdlcError(
+            "spec-candidate approve 缺少必填字段: " + ", ".join(missing)
+        )
+
+
 def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
     if operation == "status":
         return status(root)
     if operation == "source-query":
         return query_source(root, payload["source_id"], payload["anchor"])
+    if operation == "spec-work-query":
+        return query_spec_work(root)
     if operation == "spec-candidate":
         action = payload.get("action")
         if action == "begin":
@@ -96,8 +122,8 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
         kind = payload.get("kind")
         if kind == "tokens":
             return record_tokens(root, **payload["payload"])
-        if kind == "checkpoint":
-            return record_spec_checkpoint(root, payload["payload"])
+        if kind == "spec-work":
+            return record_spec_work(root, payload["payload"])
         if kind == "source":
             return ingest_source(root, payload["payload"])
         raise SdlcError(f"不支持的 publish kind: {kind}")
@@ -248,9 +274,13 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
 
 
 def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
+    _validate_request(operation, payload)
     if operation in {"task-heartbeat", "task-cancel"}:
         return _execute(root, operation, payload)
     if operation == "task-before":
+        payload = dict(payload)
+        if payload.get("role") == "coder":
+            payload["deadline_seconds"] = coder_deadline_seconds(root)
         phase, step = _phase_step(operation, payload)
         attempt = begin_attempt(
             root,
@@ -283,8 +313,10 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             raise
         finish_attempt(root, attempt, state="succeeded", result=result)
         return result
-    if operation in {"status", "source-query", "path-check", "write-check"} or (
-        operation == "publish" and payload.get("kind") in {"tokens", "checkpoint"}
+    if operation in {
+        "status", "source-query", "spec-work-query", "path-check", "write-check",
+    } or (
+        operation == "publish" and payload.get("kind") in {"tokens", "spec-work"}
     ):
         return _execute(root, operation, payload)
     effective_payload = dict(payload)
@@ -318,7 +350,7 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         operation == "spec-candidate"
         and effective_payload.get("action") == "approve"
     ):
-        record_spec_checkpoint(root, {"state": "published"})
+        result = {**result, "spec_work_cleanup": discard_spec_work(root)}
     if operation == "finalize":
         close_run(root, "succeeded")
     return result
@@ -335,7 +367,7 @@ def main() -> int:
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
             "task-heartbeat", "task-cancel", "write-check", "path-check", "finalize",
-            "spec-candidate", "source-query",
+            "spec-candidate", "source-query", "spec-work-query",
         ),
     )
     parser.add_argument("--root", help="项目根目录")

@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1136,6 +1137,21 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(current["state"], "failed")
         self.assertIn("functional assertion failed", current["last_error"])
 
+    def test_incomplete_candidate_approval_does_not_create_or_block_attempt(self) -> None:
+        init_project(self.fixture.root)
+        before = journal_status(self.fixture.root)
+
+        with self.assertRaisesRegex(SdlcError, "approve 缺少必填字段: content_hash"):
+            execute(self.fixture.root, "spec-candidate", {
+                "action": "approve",
+                "candidate_id": "SC-000001",
+                "confirmed": True,
+            })
+
+        after = journal_status(self.fixture.root)
+        self.assertEqual(after.get("attempt_count", 0), before.get("attempt_count", 0))
+        self.assertNotEqual(after.get("state"), "blocked")
+
     def test_coder_dispatch_has_deadline_heartbeat_and_terminal_handoff(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
@@ -1170,6 +1186,32 @@ class ReliabilityTests(unittest.TestCase):
 
         self.assertEqual(journal_status(self.fixture.root)["running_attempts"], [])
 
+    def test_coder_deadline_scales_with_published_requirement_count(self) -> None:
+        init_project(self.fixture.root)
+        blueprint = spec_payload()
+        requirement = blueprint["requirements"]["items"][0]
+        design = blueprint["design"]["items"][0]
+        verification = blueprint["test_plan"]["items"][0]
+        for number in range(2, 7):
+            requirement_copy = deepcopy(requirement)
+            requirement_copy["id"] = f"R-{number:04d}"
+            requirement_copy["title"] = f"功能切片 {number}"
+            blueprint["requirements"]["items"].append(requirement_copy)
+            design["requirement_ids"].append(requirement_copy["id"])
+            verification["requirement_ids"].append(requirement_copy["id"])
+        publish_spec(self.fixture.root, blueprint)
+
+        started = execute(self.fixture.root, "task-before", {
+            "role": "coder",
+            "owner_pid": os.getpid(),
+        })
+
+        self.assertEqual(started["deadline_seconds"], 900)
+        self.assertEqual(
+            journal_status(self.fixture.root)["running_attempts"][0]["deadline_at"],
+            started["deadline_at"],
+        )
+
     def test_handoff_ignores_agent_authored_mapping_fields(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
@@ -1203,6 +1245,27 @@ class ReliabilityTests(unittest.TestCase):
 
         self.assertEqual(loaded["requirements"]["items"][0]["id"], "R-0001")
         self.assertFalse(mirror.exists())
+
+    def test_external_binary_source_uses_controlled_metadata_extractor(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            external = Path(temporary) / "system-info.png"
+            external.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
+
+            ingested = ingest_source(self.fixture.root, {
+                "kind": "file",
+                "uri": str(external),
+                "media_type": "image/png",
+                "allow_external_copy": True,
+            })
+
+        self.assertEqual(ingested["extractor"]["name"], "sdlc-binary-metadata")
+        self.assertIn("blob_ref", ingested["asset"])
+        metadata = query_source(
+            self.fixture.root,
+            ingested["source_id"],
+            ingested["anchors"][0]["anchor"],
+        )
+        self.assertIn("不包含视觉语义", metadata["text"])
 
     def test_external_text_source_is_ingested_once_as_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1308,7 +1371,7 @@ class ReliabilityTests(unittest.TestCase):
         time.sleep(0.2)
         self.assertFalse(pid_alive(child_pid))
 
-    def test_journal_idempotency_and_spec_checkpoint_resume(self) -> None:
+    def test_journal_idempotency_and_spec_work_resume(self) -> None:
         payload = {
             "action": "probe",
             "idempotency_key": "probe-tools-0001",
@@ -1319,9 +1382,8 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(journal_status(self.fixture.root)["attempt_count"], 1)
 
         execute(self.fixture.root, "publish", {
-            "kind": "checkpoint",
+            "kind": "spec-work",
             "payload": {
-                "state": "interviewing",
                 "question": {
                     "id": "Q-0001",
                     "prompt": "是否需要离线支持？",
@@ -1332,12 +1394,13 @@ class ReliabilityTests(unittest.TestCase):
             },
         })
         current = status(self.fixture.root)
-        self.assertEqual(
-            current["spec_checkpoint"]["decisions"][0]["answer"], "需要"
-        )
+        self.assertTrue(current["spec_work"]["active"])
+        self.assertNotIn("answer", json.dumps(current["spec_work"], ensure_ascii=False))
+        recovered = execute(self.fixture.root, "spec-work-query", {})
+        self.assertEqual(recovered["work"]["decisions"][0]["answer"], "需要")
         self.assertEqual(journal_status(self.fixture.root)["phase"], "spec")
 
-    def test_checkpoint_normalizes_tool_style_source_reference(self) -> None:
+    def test_spec_work_normalizes_tool_style_source_reference(self) -> None:
         source = ingest_source(self.fixture.root, {
             "kind": "inline",
             "source": "用户需求",
@@ -1349,9 +1412,8 @@ class ReliabilityTests(unittest.TestCase):
         })
 
         execute(self.fixture.root, "publish", {
-            "kind": "checkpoint",
+            "kind": "spec-work",
             "payload": {
-                "state": "interviewing",
                 "question": {
                     "id": "Q-0001",
                     "prompt": "是否需要离线支持？",
@@ -1366,9 +1428,9 @@ class ReliabilityTests(unittest.TestCase):
             },
         })
 
-        checkpoint = status(self.fixture.root)["spec_checkpoint"]
+        spec_work = status(self.fixture.root)["spec_work"]
         self.assertEqual(
-            checkpoint["source_refs"],
+            spec_work["source_refs"],
             [f"{source['source_id']}#requirement:offline"],
         )
 

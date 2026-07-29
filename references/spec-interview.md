@@ -9,15 +9,20 @@
 3. 会改变公开接口、数据来源或错误语义。
 
 一次只问一个问题，通常在三题内完成。若仍有会改变范围、验收或公开接口的阻塞决策，可以继续，
-但必须向用户说明影响。每次回答后保存 checkpoint。非阻塞未知项写入 assumptions 或 risks。
+但必须向用户说明影响。每次回答后保存临时 spec work。非阻塞未知项写入 assumptions 或 risks。
 
-调用 `sdlc_save_checkpoint` 时，payload 只能使用 `state`、`question`、`source_refs`、
-`confirmed_facts`、`assumptions`、`risks`；不能使用 `stage`、`decisions` 或 `notes`。每个已回答的
-阻塞问题保存为一个 `question`（ID 是 `Q-0001` 形式，`status` 固定 `resolved`），例如：
+调用 `sdlc_save_spec_work` 时，直接传结构化字段 `question`、`source_refs`、
+`confirmed_facts`、`assumptions`、`risks`；不要把它们再嵌套为 JSON 字符串，也不要传 `state`、
+`decisions` 或 `notes`。每个已回答的阻塞问题保存为一个 `question`（ID 是 `Q-0001` 形式，
+`status` 固定 `resolved`），例如：
 
 ```json
-{"state":"interviewing","question":{"id":"Q-0001","prompt":"是否新增 IPC？","answer":"采用推荐","status":"resolved","rationale":"需要真实派生状态"}}
+{"question":{"id":"Q-0001","prompt":"是否新增 IPC？","answer":"采用推荐","status":"resolved","rationale":"需要真实派生状态"}}
 ```
+
+完整的访谈内容只写入 `work/runs/<RUN>/spec-work.md`；`state/runs/<RUN>/spec-work.json`
+仅保存 `content_ref`、hash、ID、状态和 source refs。`sdlc_status.spec_work` 也只返回该索引；
+中断后需恢复内容时，调用 `sdlc_query_spec_work`。不要把会话正文、问题或答案写入 JSON 索引。
 
 若附带 `source_refs`，持久化格式是字符串数组，例如 `["SRC-XXXXXXXXXXXX#anchor"]`；也可传
 `sdlc_ingest_source` / Candidate 工具返回的 `{source_id, anchor}` 对象，Core 会无损规范化为该字符串。
@@ -38,7 +43,7 @@ test key 必须传 `selector: null`，不要填测试文件名。
 
 推荐方案与正式发布是两个独立动作：
 
-1. 用户说“采用推荐”时，只把选项和理由保存到 checkpoint，继续生成候选；
+1. 用户说“采用推荐”时，只把选项和理由保存到临时 spec work，继续生成候选；
 2. 调用 `sdlc_validate_candidate`，展示 preview 路径、revision、content hash、source refs、
    范围、AC、接口与验证映射；
 3. 只有用户明确说“确认发布”时，才调用
@@ -48,5 +53,10 @@ test key 必须传 `selector: null`，不要填测试文件名。
 重发 candidate 正文。Core 负责分片 Schema、跨引用、来源 anchor、revision/hash 校验，
 并在批准后原子发布自包含的 Markdown baseline。
 
-中断恢复时读取 `sdlc_status.spec_candidate`：draft 从当前 revision 继续 put；ready 直接展示
-原 preview/hash 等待确认；published 不重复生成。
+Candidate 成功发布后，Core 才删除对应的临时 spec work Markdown 和索引；若清理失败，发布仍然
+有效，索引会标记为 `cleanup_pending` 以供后续重试。发布或显式丢弃前，临时 work 始终保留，
+因此流程可中断恢复并可追溯。
+
+中断恢复时先读取 `sdlc_status.spec_work`，若 `active` 为 true 则调用 `sdlc_query_spec_work`；再读取
+`sdlc_status.spec_candidate`：draft 从当前 revision 继续 put；ready 直接展示原 preview/hash 等待确认；
+published 不重复生成。

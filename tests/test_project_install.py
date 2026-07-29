@@ -204,6 +204,8 @@ class InstallerTests(unittest.TestCase):
                 / ".sdlc-pipeline/runtime/schemas/feature-contract.schema.json",
                 target / ".sdlc-pipeline/runtime/schemas/spec.schema.json",
                 target
+                / ".sdlc-pipeline/runtime/schemas/interactions/spec-checkpoint.schema.json",
+                target
                 / ".sdlc-pipeline/runtime/scripts/sdlc_core/feature_contracts.py",
             ]
             for path in obsolete:
@@ -213,6 +215,9 @@ class InstallerTests(unittest.TestCase):
             installer.install(target, force=True)
 
             self.assertTrue(all(not path.exists() for path in obsolete))
+            self.assertTrue(
+                (target / ".sdlc-pipeline/runtime/schemas/interactions/spec-work.schema.json").is_file()
+            )
             self.assertTrue(installer.install(target, force=True)["ok"])
 
     def test_installed_runtime_can_install_another_project(self) -> None:
@@ -607,10 +612,35 @@ class InstallerTests(unittest.TestCase):
             "allow_external_copy": True,
         })
 
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_plugin_rejects_incomplete_approval_before_core_invocation(self) -> None:
+        plugin = REPO / ".opencode/plugins/sdlc-pipeline.js"
+        script = (
+            "import(process.argv[1]).then(m => console.log(JSON.stringify("
+            "m.approvalPayload({candidate_id:'SC-000001',confirmed:true}))))"
+        )
+        result = subprocess.run(
+            ["node", "-e", script, plugin.as_uri()],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout)
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["code"], "invalid_approval_arguments")
+        self.assertIn("content_hash", payload["error"])
+        plugin_text = plugin.read_text(encoding="utf-8")
+        self.assertIn("const approval = approvalPayload(args)", plugin_text)
+        self.assertIn("if (!approval.ok)", plugin_text)
+
     def test_plugin_has_narrow_tools_without_experimental_injection(self) -> None:
         text = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         for name in (
-            "sdlc_status", "sdlc_ingest_source", "sdlc_save_checkpoint",
+            "sdlc_status", "sdlc_ingest_source", "sdlc_save_spec_work",
+            "sdlc_query_spec_work",
             "sdlc_begin_candidate", "sdlc_put_requirement", "sdlc_put_design",
             "sdlc_put_verification", "sdlc_validate_candidate",
             "sdlc_approve_candidate",
@@ -671,20 +701,23 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("不得调用", main)
         self.assertIn("sdlc-tester", main)
 
-    def test_checkpoint_guidance_uses_the_schema_payload(self) -> None:
+    def test_spec_work_guidance_uses_structured_arguments(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
         plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(
             encoding="utf-8"
         )
 
-        for text in (main, reference, plugin):
+        for text in (main, reference):
             self.assertIn("Q-0001", text)
-            self.assertIn("state", text)
             self.assertIn("question", text)
+        self.assertIn("specQuestion", plugin)
+        self.assertIn("question", plugin)
         self.assertIn("status\":\"resolved", reference)
         self.assertIn("rationale", reference)
         self.assertIn("SRC-XXXXXXXXXXXX#anchor", reference + plugin)
+        self.assertIn("sdlc_save_spec_work", plugin)
+        self.assertNotIn("JSON.parse(args.payload)", plugin)
 
     def test_design_guidance_binds_extension_points_to_scaffold(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
@@ -764,7 +797,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(
             '".sdlc-pipeline/runtime/scripts/**": deny', coder
         )
-        self.assertIn("CODER_DEADLINE_SECONDS = 5 * 60", plugin)
+        self.assertIn("coderDeadlineSeconds = Number(result.deadline_seconds)", plugin)
         self.assertIn("output.args.prompt =", plugin)
         self.assertNotIn("output.args.prompt = `${output.args.prompt", plugin)
         self.assertIn("第 4 次工具调用前", coder)
@@ -795,7 +828,7 @@ class InstallerTests(unittest.TestCase):
                 "import json, sys\n"
                 "payload = json.load(sys.stdin)\n"
                 "if sys.argv[1] == 'task-before':\n"
-                "    print(json.dumps({'ok': True, 'context_pack': {'paths': ['.sdlc-pipeline/work/records/context/coder.md'], 'characters': 1, 'resource_count': 1}, 'instruction': '只读取必要文件'}))\n"
+                "    print(json.dumps({'ok': True, 'deadline_seconds': 600, 'context_pack': {'paths': ['.sdlc-pipeline/work/records/context/coder.md'], 'characters': 1, 'resource_count': 1}, 'instruction': '只读取必要文件'}))\n"
                 "else:\n"
                 "    print(json.dumps({'ok': True}))\n",
                 encoding="utf-8",
@@ -813,11 +846,17 @@ class InstallerTests(unittest.TestCase):
                 encoding="utf-8",
             )
             script = (
+                "const originalSetTimeout = global.setTimeout;"
+                "const delays = [];"
+                "global.setTimeout = (callback, milliseconds, ...args) => {"
+                "delays.push(milliseconds);"
+                "return originalSetTimeout(callback, 60000, ...args);"
+                "};"
                 "import(process.argv[1]).then(async m => {"
                 "const plugin = await m.SdlcPipelinePlugin({directory: process.argv[2], worktree: '/'});"
                 "const output = {args: {description: '实现 R-0001 应用外壳', prompt: '调用方上下文不得复制', subagent_type: 'sdlc-coder'}};"
                 "await plugin['tool.execute.before']({tool: 'task', sessionID: 'ses-test', callID: 'call-test'}, output);"
-                "console.log(JSON.stringify(output.args));"
+                "console.log(JSON.stringify({args: output.args, delays}));"
                 "}).catch(e => { console.error(e); process.exit(1) })"
             )
             result = subprocess.run(
@@ -828,10 +867,12 @@ class InstallerTests(unittest.TestCase):
                 encoding="utf-8",
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            args = json.loads(result.stdout)
+            output = json.loads(result.stdout)
+            args = output["args"]
             self.assertNotIn("command", args)
             self.assertIn("本次任务目标：实现 R-0001 应用外壳", args["prompt"])
             self.assertNotIn("调用方上下文不得复制", args["prompt"])
+            self.assertIn(600_000, output["delays"])
 
     def test_evidence_collector_keeps_early_failure_summary(self) -> None:
         collector_spec = importlib.util.spec_from_file_location(

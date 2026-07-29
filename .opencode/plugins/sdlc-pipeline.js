@@ -6,7 +6,6 @@ import path from "node:path"
 const AGENTS = {
   "sdlc-coder": "coder",
 }
-const CODER_DEADLINE_SECONDS = 5 * 60
 const coderDeadlines = new Map()
 const coderWriteSessions = new Set()
 const PLUGIN_PROJECT_ROOT = path.resolve(
@@ -65,6 +64,7 @@ export function sourceReceipt(result) {
       sha256: envelope.asset.sha256,
       size: envelope.asset.size,
     } : undefined,
+    extractor: envelope.extractor,
     next_action: "Use only source_id/anchor above. Query sdlc_query_source for bounded text; do not read the original external path.",
   }
 }
@@ -79,6 +79,34 @@ export function sourcePayload(args) {
     uri: args.uri || (sourceIsFilePath ? args.source : undefined),
     media_type: args.media_type,
     allow_external_copy: args.allow_external_copy,
+  }
+}
+
+export function approvalPayload(args) {
+  const candidateId = typeof args?.candidate_id === "string"
+    ? args.candidate_id.trim()
+    : ""
+  const contentHash = typeof args?.content_hash === "string"
+    ? args.content_hash.trim()
+    : ""
+  const missing = [
+    ...(candidateId ? [] : ["candidate_id"]),
+    ...(contentHash ? [] : ["content_hash"]),
+    ...(args?.confirmed === true ? [] : ["confirmed=true"]),
+  ]
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      code: "invalid_approval_arguments",
+      error: `批准 Candidate 的参数不完整：缺少 ${missing.join(", ")}。不要调用 Core 或重建候选；使用 validate 返回的 candidate_id + content_hash + confirmed=true 原样重试。`,
+      retryable: true,
+    }
+  }
+  return {
+    ok: true,
+    candidate_id: candidateId,
+    content_hash: contentHash,
+    confirmed: true,
   }
 }
 
@@ -229,6 +257,13 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
     source_id: tool.schema.string(),
     anchor: tool.schema.string(),
   })
+  const specQuestion = tool.schema.object({
+    id: tool.schema.string(),
+    prompt: tool.schema.string(),
+    answer: tool.schema.string(),
+    status: tool.schema.enum(["resolved"]),
+    rationale: tool.schema.string(),
+  })
   const moduleSpec = tool.schema.object({
     name: tool.schema.string(),
     responsibility: tool.schema.string(),
@@ -262,7 +297,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_ingest_source: tool({
-        description: "摄取一份原始需求来源为 Source Markdown，并返回有界 receipt。file 必须提供 uri；source 中的 file 路径会安全规范化为 uri。只使用返回的 source_id/anchor；需要正文时调用 sdlc_query_source，绝不再读取项目外原路径。",
+        description: "摄取一份原始需求来源为 Source Markdown，并返回有界 receipt。file 必须提供 uri；source 中的 file 路径会安全规范化为 uri。图片等二进制文件默认保存受控元数据和原件，不伪造视觉语义。只使用返回的 source_id/anchor；需要正文时调用 sdlc_query_source，绝不再读取项目外原路径。",
         args: {
           source_type: tool.schema.enum(["inline", "file", "url", "document"]),
           content: tool.schema.string().optional(),
@@ -408,7 +443,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_approve_candidate: tool({
-        description: "批准用户看到的精确 Candidate；只传 ID/hash/confirmed，不重传契约正文。",
+        description: "批准用户看到的精确 Candidate；只传 ID/hash/confirmed，不重传契约正文。三个字段必须在同一次调用中完整传入；字段不完整时只返回可重试错误，不会调用 Core 或写入 journal。",
         args: {
           candidate_id: tool.schema.string(),
           content_hash: tool.schema.string(),
@@ -416,23 +451,44 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_approve_candidate")
+          const approval = approvalPayload(args)
+          if (!approval.ok) return JSON.stringify(approval)
           return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-candidate", {
             action: "approve",
-            ...args,
+            candidate_id: approval.candidate_id,
+            content_hash: approval.content_hash,
+            confirmed: approval.confirmed,
           }, { signal: context.abort }))
         },
       }),
-      sdlc_save_checkpoint: tool({
-        description: "保存 spec 恢复点。payload 仅可使用 state/question/source_refs/confirmed_facts/assumptions/risks；单个决策必须是 {\"state\":\"interviewing\",\"question\":{\"id\":\"Q-0001\",\"prompt\":\"...\",\"answer\":\"...\",\"status\":\"resolved\",\"rationale\":\"...\"}}，禁止 stage/decisions/notes。source_refs 可用 [\"SRC-XXXXXXXXXXXX#anchor\"] 或 {source_id,anchor} 对象。",
+      sdlc_save_spec_work: tool({
+        description: "保存可恢复的临时 spec 工作内容。内容只写入临时 Markdown，JSON 仅保存索引和 hash；不要传 state、decisions 或 notes。字段是结构化参数，不要嵌套为 JSON 字符串。Candidate 发布成功后 Core 自动清理该临时内容。",
         args: {
-          payload: tool.schema.string().describe("Checkpoint JSON object encoded as a string."),
+          question: specQuestion.optional(),
+          source_refs: tool.schema.array(sourceRef).optional(),
+          confirmed_facts: tool.schema.array(tool.schema.string()).optional(),
+          assumptions: tool.schema.array(tool.schema.string()).optional(),
+          risks: tool.schema.array(tool.schema.string()).optional(),
         },
         async execute(args, context) {
-          requireAgent(context, ["sdlc-main"], "sdlc_save_checkpoint")
+          requireAgent(context, ["sdlc-main"], "sdlc_save_spec_work")
           return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "publish", {
-            kind: "checkpoint",
-            payload: JSON.parse(args.payload),
+            kind: "spec-work",
+            payload: args,
           }, { signal: context.abort }))
+        },
+      }),
+      sdlc_query_spec_work: tool({
+        description: "读取受控的临时 spec 工作内容，用于中断恢复。status 只返回索引摘要，不返回这些内容。",
+        args: {},
+        async execute(_args, context) {
+          requireAgent(context, ["sdlc-main"], "sdlc_query_spec_work")
+          return JSON.stringify(await invoke(
+            rootOf(context, fallbackRoot),
+            "spec-work-query",
+            {},
+            { signal: context.abort },
+          ))
         },
       }),
       sdlc_lifecycle: tool({
@@ -502,11 +558,15 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       const result = await invoke(fallbackRoot, "task-before", {
         role,
         owner_pid: process.pid,
-        deadline_seconds: CODER_DEADLINE_SECONDS,
       })
+      const coderDeadlineSeconds = Number(result.deadline_seconds)
+      if (!Number.isInteger(coderDeadlineSeconds) || coderDeadlineSeconds <= 0) {
+        throw new Error("Core 未返回有效的 coder deadline")
+      }
       await logPluginEvent(client, "coder.dispatched", {
         session_id: input.sessionID,
-        deadline_seconds: CODER_DEADLINE_SECONDS,
+        deadline_seconds: coderDeadlineSeconds,
+        requirement_count: result.requirement_count,
         context_characters: result.context_pack.characters,
         context_resources: result.context_pack.resource_count,
       })
@@ -514,10 +574,10 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         try {
           await logPluginEvent(client, "coder.deadline_exceeded", {
             session_id: input.sessionID,
-            deadline_seconds: CODER_DEADLINE_SECONDS,
+            deadline_seconds: coderDeadlineSeconds,
           }, "warn")
           await invoke(fallbackRoot, "task-cancel", {
-            reason: `coder deadline exceeded after ${CODER_DEADLINE_SECONDS}s`,
+            reason: `coder deadline exceeded after ${coderDeadlineSeconds}s`,
           })
         } catch (error) {
           await logPluginEvent(client, "coder.cancel_failed", {
@@ -530,7 +590,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             query: { directory: fallbackRoot },
           })
         }
-      }, CODER_DEADLINE_SECONDS * 1000)
+      }, coderDeadlineSeconds * 1000)
       deadline.unref()
       coderDeadlines.set(input.callID, deadline)
       const manifest = result.context_pack.paths[0]
@@ -539,7 +599,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       output.args.prompt = `[SDLC context pack] ${manifest}\n`
         + `${result.instruction}\n`
         + (taskObjective ? `本次任务目标：${taskObjective}。\n` : "")
-        + `Coder deadline: ${CODER_DEADLINE_SECONDS}s。`
+        + `Coder deadline: ${coderDeadlineSeconds}s。`
         + "不要展开读取 Core 源码，不要在 code 阶段运行 functional；"
         + "完成实现后立即返回约定 JSON handoff。"
     },

@@ -165,6 +165,35 @@ class StorageLayoutV3Tests(unittest.TestCase):
         loaded = load_current_spec(self.fixture.root)
         self.assertEqual(loaded["requirements"]["items"][0]["id"], "R-0001")
 
+    def test_candidate_publication_removes_temporary_spec_work(self) -> None:
+        from sdlc_core.cli import execute
+
+        execute(self.fixture.root, "publish", {
+            "kind": "spec-work",
+            "payload": {
+                "question": {
+                    "id": "Q-0001",
+                    "prompt": "系统信息是否自动刷新？",
+                    "answer": "需要",
+                    "status": "resolved",
+                    "rationale": "用户需看到当前设备状态",
+                },
+            },
+        })
+        candidate_id, ready = self._ready_candidate()
+
+        published = execute(self.fixture.root, "spec-candidate", {
+            "action": "approve",
+            "candidate_id": candidate_id,
+            "content_hash": ready["content_hash"],
+            "confirmed": True,
+        })
+
+        self.assertTrue(published["spec_work_cleanup"]["deleted"])
+        self.assertFalse(any(
+            (self.fixture.root / ".sdlc-pipeline/work/runs").glob("*/spec-work.md")
+        ))
+
     def test_source_index_contains_only_offsets_hashes_and_references(self) -> None:
         source_root = next(
             (self.fixture.root / ".sdlc-pipeline/work/sources").iterdir()

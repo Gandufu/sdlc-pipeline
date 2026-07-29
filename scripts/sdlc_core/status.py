@@ -13,7 +13,7 @@ from .bootstrap import template_registry
 from .common import read_json
 from .common import sha256_file
 from .layout import contracts_root, lifecycle_path, runtime_root
-from .journal import journal_status, spec_checkpoint as load_spec_checkpoint
+from .journal import journal_status, spec_work_index
 from .memory import memory_summary
 from .runs import active_identity_matches, pid_alive, read_active
 from .trace import verify_scaffold
@@ -179,7 +179,10 @@ def status(root: Path) -> dict[str, Any]:
         "template_registry_error": template_error,
         "can_enter_next": prerequisites[stage],
         "journal": journal_status(root),
-        "spec_checkpoint": load_spec_checkpoint(root),
+        "spec_work": {
+            "active": (spec_work := spec_work_index(root)) is not None,
+            **(spec_work or {}),
+        },
         "spec_candidate": candidate_status(root),
         "memory": memory_summary(root),
         "diagnostics": diagnostics,

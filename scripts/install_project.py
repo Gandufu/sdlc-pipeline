@@ -19,7 +19,7 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.15.1"
+VERSION = "0.15.4"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.7"
@@ -58,7 +58,7 @@ OBSOLETE_MANAGED = (
     ".sdlc-pipeline/runtime/schemas/feature-contract.schema.json",
     ".sdlc-pipeline/runtime/schemas/spec.schema.json",
     ".sdlc-pipeline/runtime/schemas/source-envelope.schema.json",
-    ".sdlc-pipeline/runtime/schemas/spec-checkpoint.schema.json",
+    ".sdlc-pipeline/runtime/schemas/interactions/spec-checkpoint.schema.json",
     ".sdlc-pipeline/runtime/schemas/v2",
     ".sdlc-pipeline/runtime/scripts/sdlc_core/feature_contracts.py",
 )

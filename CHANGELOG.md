@@ -1,8 +1,27 @@
 # Changelog
 
+## 0.15.4 - 2026-07-28
+
+### Fixed
+
+- 将多 Requirement coder deadline 的增量从每项 1 分钟调整为 2 分钟，仍上限 15 分钟；真实 6 Requirement 设备管理任务在 10 分钟内持续有进度但未能交付 handoff，现获得完整的有界预算。
+
+## 0.15.3 - 2026-07-28
+
+### Fixed
+
+- 审批工具在调用 Core 前拒绝不完整的 `candidate_id`、`content_hash` 或 `confirmed=true`，避免 OpenCode 漏参将 Spec Run 熔断为 `BLOCKED`。
+- Core 对 Spec 审批请求在创建 journal 尝试前做结构校验，错误参数不再污染生命周期状态。
+
+## 0.15.2 - 2026-07-28
+
+- coder dispatch 的 deadline 改由 Core 按已发布 Requirement 数确定性派生：基础 5 分钟、每个额外
+  Requirement 增加 1 分钟，最多 15 分钟；journal、host timer 和 coder prompt 绑定同一个值。
+- 补充 6 个 Requirement 的 Core/host 回归，防止固定 300 秒取消已经开始真实交付的单一 coder。
+
 ## 0.15.1 - 2026-07-28
 
-- 删除泛化 OpenCode smoke runner 及其测试、文档和临时项目。真实验收只在目标功能项目中执行，
+- 删除泛化 OpenCode 回归 runner 及其测试、文档和临时项目。真实验收只在目标功能项目中执行，
   并按阶段审查原始 JSONL、journal、Git diff、规则和 Markdown/JSON 产物。
 - 强化 `/sdlc-init` 和 `sdlc-main` 的跨消息边界：没有合同的新项目必须先展示模板并停止，只有
   后续明确的用户选择才可执行 init，单一候选、命令参数和模型推断均不能替代确认。
@@ -154,7 +173,7 @@
 - focused check 改为 T-id 与受控文件 selector，成功和失败均按源码/spec 指纹复用。
 - code gate 负责 compile/package 与 lint/typecheck policy；test gate 只执行
   start、readiness、无头浏览器 functional case 和 cleanup。
-- 删除活动 E2E/smoke/installer 测试契约，新增 Playwright functional 文件约定。
+- 删除活动 E2E/installer 测试契约，新增 Playwright functional 文件约定。
 - Python 与 OpenCode adapter 改为异步、可取消的进程树执行；deadline 会 abort session
   并清理子进程。
 - `result.ok=false` 在 journal 中记录为 failed；新增 source anchor query 窄接口。

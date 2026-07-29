@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -20,6 +21,7 @@ from .sources import load_source
 
 
 TERMINAL_STATES = {"succeeded", "failed", "blocked", "aborted"}
+MAX_SPEC_WORK_BYTES = 32 * 1024
 
 
 def journal_root(root: Path) -> Path:
@@ -361,21 +363,22 @@ def close_run(root: Path, state: str = "succeeded") -> None:
     append_event(root, run["run_id"], f"run.{state}", phase=run.get("phase"))
 
 
-def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    payload = _normalize_checkpoint_source_refs(payload)
+def record_spec_work(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _normalize_spec_work_source_refs(payload)
     validate_schema_instance(
-        root, "interactions/spec-checkpoint.schema.json", payload
+        root, "interactions/spec-work.schema.json", payload
     )
+    if not payload:
+        raise SdlcError("spec work 至少需要一个已确认的临时字段")
     for reference in payload.get("source_refs", []):
         source_id, anchor = reference.split("#", 1)
         source = load_source(root, source_id)
         if anchor not in {item["anchor"] for item in source["segments"]}:
             raise SdlcError(f"未知来源 anchor: {reference}")
     run = ensure_run(root, "spec")
-    current = spec_checkpoint(root) or {
+    current = _load_spec_work(root, run) or {
         "schema_version": "3.0",
         "run_id": run["run_id"],
-        "state": "interviewing",
         "source_refs": [],
         "decisions": [],
         "confirmed_facts": [],
@@ -386,7 +389,7 @@ def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any
     question = payload.get("question")
     if question:
         if not isinstance(question, dict) or not question.get("id"):
-            raise SdlcError("spec checkpoint question 必须包含 id")
+            raise SdlcError("spec work question 必须包含 id")
         decisions = [
             item for item in current["decisions"]
             if item.get("id") != question["id"]
@@ -396,30 +399,26 @@ def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any
     for name in ("source_refs", "confirmed_facts", "assumptions", "risks"):
         if name in payload:
             if not isinstance(payload[name], list):
-                raise SdlcError(f"spec checkpoint {name} 必须是数组")
+                raise SdlcError(f"spec work {name} 必须是数组")
             current[name] = payload[name]
-    if "state" in payload:
-        if payload["state"] not in {"interviewing", "ready", "confirmed", "published"}:
-            raise SdlcError("非法 spec checkpoint state")
-        current["state"] = payload["state"]
     current["updated_at"] = utc_now()
+    _assert_spec_work_size(current)
     content_path = (
-        work_root(root) / "runs" / run["run_id"] / "checkpoints" / "spec.md"
+        work_root(root) / "runs" / run["run_id"] / "spec-work.md"
     )
     write_markdown_record(
         content_path,
         current,
-        title=f"Spec checkpoint {run['run_id']}",
+        title=f"Temporary spec work {run['run_id']}",
         summary_lines=[
-            f"- State: `{current['state']}`",
             f"- Decisions: `{len(current['decisions'])}`",
         ],
     )
     index = {
         "schema_version": "3.0",
         "run_id": run["run_id"],
-        "checkpoint_id": "spec",
-        "state": current["state"],
+        "work_id": "spec",
+        "state": "active",
         "source_refs": current["source_refs"],
         "decision_ids": [item["id"] for item in current["decisions"]],
         "content_ref": relative_to_project(root, content_path),
@@ -427,24 +426,23 @@ def record_spec_checkpoint(root: Path, payload: dict[str, Any]) -> dict[str, Any
         "updated_at": current["updated_at"],
     }
     write_compact_index(
-        _run_dir(root, run["run_id"]) / "checkpoints" / "spec.json", index
+        _run_dir(root, run["run_id"]) / "spec-work.json", index
     )
     append_event(
         root,
         run["run_id"],
-        "spec.checkpoint",
+        "spec.work.updated",
         phase="spec",
         step="grilling",
         data={
             "question_id": (question or {}).get("id"),
-            "state": current["state"],
             "decision_count": len(current["decisions"]),
         },
     )
-    return {"ok": True, "checkpoint": current}
+    return {"ok": True, "spec_work": index}
 
 
-def _normalize_checkpoint_source_refs(payload: dict[str, Any]) -> dict[str, Any]:
+def _normalize_spec_work_source_refs(payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(payload)
     references = normalized.get("source_refs")
     if not isinstance(references, list):
@@ -462,20 +460,89 @@ def _normalize_checkpoint_source_refs(payload: dict[str, Any]) -> dict[str, Any]
     return normalized
 
 
-def spec_checkpoint(root: Path) -> dict[str, Any] | None:
+def spec_work_index(root: Path) -> dict[str, Any] | None:
     run = active_run(root)
     if not run:
         return None
     index = read_compact_index(
-        _run_dir(root, run["run_id"]) / "checkpoints" / "spec.json",
+        _run_dir(root, run["run_id"]) / "spec-work.json",
         required=False,
     )
     if not index:
         return None
-    value = read_markdown_record(root / index["content_ref"])
-    if sha256_json(value) != index["content_hash"]:
-        raise SdlcError("spec checkpoint Markdown 与索引 hash 不匹配")
+    _load_spec_work(root, run, index=index)
+    return index
+
+
+def query_spec_work(root: Path) -> dict[str, Any]:
+    run = active_run(root)
+    if not run:
+        return {"ok": True, "available": False}
+    index = spec_work_index(root)
+    if not index:
+        return {"ok": True, "available": False}
+    work = _load_spec_work(root, run, index=index)
+    if work is None:
+        return {"ok": True, "available": False}
+    return {
+        "ok": True,
+        "available": True,
+        "work": work,
+        "content_hash": index["content_hash"],
+    }
+
+
+def discard_spec_work(root: Path) -> dict[str, Any]:
+    run = active_run(root)
+    if not run:
+        return {"deleted": False, "reason": "no_active_run"}
+    index_path = _run_dir(root, run["run_id"]) / "spec-work.json"
+    index = read_compact_index(index_path, required=False)
+    if not index:
+        return {"deleted": False, "reason": "no_spec_work"}
+    content_path = root / index["content_ref"]
+    try:
+        content_path.unlink(missing_ok=True)
+        index_path.unlink(missing_ok=True)
+    except OSError:
+        pending = {**index, "state": "cleanup_pending", "updated_at": utc_now()}
+        write_compact_index(index_path, pending)
+        return {"deleted": False, "cleanup_pending": True}
+    append_event(
+        root,
+        run["run_id"],
+        "spec.work.discarded",
+        phase="spec",
+        step="publish",
+        data={"work_id": "spec"},
+    )
+    return {"deleted": True}
+
+
+def _load_spec_work(
+    root: Path,
+    run: dict[str, Any],
+    *,
+    index: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    indexed = index or read_compact_index(
+        _run_dir(root, run["run_id"]) / "spec-work.json",
+        required=False,
+    )
+    if not indexed:
+        return None
+    value = read_markdown_record(root / indexed["content_ref"])
+    if sha256_json(value) != indexed["content_hash"]:
+        raise SdlcError("temporary spec work Markdown 与索引 hash 不匹配")
     return value
+
+
+def _assert_spec_work_size(value: dict[str, Any]) -> None:
+    size = len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+    if size > MAX_SPEC_WORK_BYTES:
+        raise SdlcError(
+            f"temporary spec work 超过 {MAX_SPEC_WORK_BYTES} bytes"
+        )
 
 
 def journal_status(root: Path) -> dict[str, Any]:

@@ -19,7 +19,8 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
 
 - `sdlc_ingest_source`：保存原始来源；
 - `sdlc_query_source`：按 source_id + anchor 查询受限原文片段；
-- `sdlc_save_checkpoint`：保存可恢复决策；
+- `sdlc_save_spec_work`：保存可恢复的临时决策内容；
+- `sdlc_query_spec_work`：按需恢复临时决策内容；
 - `sdlc_begin_candidate`：创建可恢复候选；
 - `sdlc_put_requirement|design|verification`：逐个写入小 artifact；
 - `sdlc_validate_candidate`：生成 diagnostics、preview 和冻结 hash；

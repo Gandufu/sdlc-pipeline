@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.15.1`。
+OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.15.4`。
 
 插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
 状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
@@ -33,7 +33,7 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
    install → compile → start → health → artifact → stop。init 只写 evidence，不创建 `docs/sdlc`。
 2. `/sdlc-spec`
    摄取原型、协议和需求为 Source Markdown；一次只处理阻塞决策；按 R/D/T 分片构建 Candidate。
-   “采用推荐”只保存 checkpoint；validate 后展示 revision/hash；只有“确认发布”才按
+   “采用推荐”只保存临时 spec work；validate 后展示 revision/hash；只有“确认发布”才按
    `candidate_id + content_hash` 发布不可变 baseline。
 3. `/sdlc-code`
    原生 task 只派发 `sdlc-coder`。coder 最多 16 个 agent steps，读取一个渐进式 context manifest，
@@ -58,7 +58,7 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
 
 - `sdlc_status`
 - `sdlc_ingest_source` / `sdlc_query_source`
-- `sdlc_save_checkpoint`
+- `sdlc_save_spec_work` / `sdlc_query_spec_work`
 - `sdlc_begin_candidate`
 - `sdlc_put_requirement` / `sdlc_put_design` / `sdlc_put_verification`
 - `sdlc_validate_candidate` / `sdlc_approve_candidate`
@@ -89,7 +89,7 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
     scaffold.json             # protected/allowed/extension points
     active-rules.json         # 本项目启用规则的 hash 索引
   state/                      # 仅 compact JSON 索引、ID、hash、引用和流转状态
-  work/                       # Source/Candidate/checkpoint/context/handoff Markdown
+  work/                       # Source/Candidate/temporary spec work/context/handoff Markdown
   evidence/                   # init/code/test/error/log 等 Markdown 证据
 
 docs/sdlc/

@@ -1,9 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://sdlc-pipeline.local/schemas/interactions/spec-checkpoint.schema.json",
+  "$id": "https://sdlc-pipeline.local/schemas/interactions/spec-work.schema.json",
   "type": "object",
   "properties": {
-    "state": {"enum": ["interviewing", "ready", "confirmed", "published"]},
     "question": {
       "type": "object",
       "required": ["id", "prompt", "answer", "status", "rationale"],

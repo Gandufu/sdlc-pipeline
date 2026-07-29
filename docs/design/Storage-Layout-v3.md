@@ -32,7 +32,8 @@ Store Module 是 Core 的持久化 seam：
 
 来源正文只在 `work/sources/<SRC>/content.md` 保存一次。`index.json` 保存 anchor 的
 `start/end/sha256`，查询时按 offset 提取并复核 hash。外部文本不会再额外复制一份 blob；二进制原件
-只有在受控 extractor 提供文本时才进入 evidence blob。
+以受控二进制元数据 extractor 摄取并保存原始 evidence blob。它不声称包含视觉语义或文档正文；需要
+OCR、版面或视觉理解时必须由单独、可审计的 extractor 提供。
 
 Candidate artifact 各自追加 Markdown revision。Candidate revision JSON 只引用 artifact revision，
 不执行 `copytree`，因此一次局部修改不会复制完整候选。validate 生成 validation/preview Markdown
@@ -46,13 +47,16 @@ Candidate artifact 各自追加 Markdown revision。Candidate revision JSON 只�
 
 ## Journal 与错误可观测性
 
-Run、Attempt 和 checkpoint 索引位于 `state/runs`。Attempt 的成功结果写
-`work/runs/.../<attempt>-result.md`，失败写 `evidence/errors/.../<attempt>.md`。状态索引只保存
-`result_ref/error_ref`。真实目标项目的阶段审计必须同时检查宿主 JSONL tool error 和全部 Core
-attempt，不允许最终 gate 掩盖中间失败。
+Run、Attempt 和临时 spec work 索引位于 `state/runs`。临时访谈内容写
+`work/runs/<RUN>/spec-work.md`；其 JSON 只保存 `content_ref/content_hash`、问题 ID、source refs 和
+短状态，`status` 不返回正文。Attempt 的成功结果写 `work/runs/.../<attempt>-result.md`，失败写
+`evidence/errors/.../<attempt>.md`。状态索引只保存 `result_ref/error_ref`。真实目标项目的阶段审计
+必须同时检查宿主 JSONL tool error 和全部 Core attempt，不允许最终 gate 掩盖中间失败。
 
 ## 清理与保留
 
+- Candidate 成功发布后自动删除对应的临时 spec work Markdown 和索引；清理失败只记录
+  `cleanup_pending`，不得回滚已发布 baseline；
 - 可清理：`state/`、`work/`、`evidence/`，但活动 Run 不应清理；
 - 长期保留：`docs/sdlc/baselines`、`test-results`、`versions`；
 - 外部 raw OpenCode 日志：保存在项目同级 evidence 目录；

@@ -63,10 +63,6 @@ def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
             not in {".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".tsv", ".html", ".css"}
         )
         if binary:
-            if not isinstance(content, str) or not content.strip():
-                raise SdlcError(
-                    "二进制文档必须由受控 extractor 提供 content/segments"
-                )
             blob_sha = sha256_file(candidate)
             blob = evidence_root(root) / "blobs" / f"{blob_sha}{candidate.suffix.lower()}"
             blob.parent.mkdir(parents=True, exist_ok=True)
@@ -78,6 +74,17 @@ def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
                 "sha256": blob_sha,
                 "size": size,
             }
+            if not isinstance(content, str) or not content.strip():
+                extractor = {
+                    "name": "sdlc-binary-metadata",
+                    "version": "1.0",
+                }
+                content = _binary_asset_metadata(
+                    candidate,
+                    media_type=media_type,
+                    sha256=blob_sha,
+                    size=size,
+                )
         else:
             content = candidate.read_text(encoding="utf-8", errors="replace")
             asset = {
@@ -245,11 +252,29 @@ def _source_receipt(
         ),
         "content_ref": index["content_ref"],
         "asset": index.get("asset"),
+        "extractor": index["extractor"],
         "next_action": (
             "Use only source_id/anchor. Query sdlc_query_source for bounded text; "
             "do not read the original external path."
         ),
     }
+
+
+def _binary_asset_metadata(
+    candidate: Path,
+    *,
+    media_type: str,
+    sha256: str,
+    size: int,
+) -> str:
+    return (
+        "受控二进制资产元数据\n"
+        f"- 文件名: {candidate.name}\n"
+        f"- 媒体类型: {media_type}\n"
+        f"- SHA-256: {sha256}\n"
+        f"- 字节数: {size}\n"
+        "- 说明: 此来源只记录受控元数据，不包含视觉语义或文档正文。"
+    )
 
 
 def _default_segment_spans(content: str) -> list[dict[str, Any]]:
