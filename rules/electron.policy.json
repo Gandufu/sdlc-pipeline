@@ -9,6 +9,13 @@
       "paths": ["**/*.ts", "**/*.js"],
       "pattern": "(nodeIntegration\\s*:\\s*true|contextIsolation\\s*:\\s*false)",
       "max_bytes": 500000
+    },
+    {
+      "id": "no-global-tls-disable",
+      "kind": "forbidden_regex",
+      "paths": ["**/*.ts", "**/*.js"],
+      "pattern": "NODE_TLS_REJECT_UNAUTHORIZED\\s*=\\s*['\\\"]?0",
+      "max_bytes": 500000
     }
   ],
   "executable_verifiers": []

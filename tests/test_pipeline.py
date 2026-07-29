@@ -1805,6 +1805,44 @@ class ReliabilityTests(unittest.TestCase):
         self.assertFalse(report["ok"])
         self.assertEqual(report["violations"][0]["policy"], "typescript:no-explicit-any")
 
+    def test_electron_policy_rejects_global_tls_disable(self) -> None:
+        rules = self.fixture.root / ".sdlc-pipeline/runtime/rules"
+        rules.mkdir(exist_ok=True)
+        shutil.copy2(REPO / "rules/electron.md", rules / "electron.md")
+        shutil.copy2(
+            REPO / "rules/electron.policy.json",
+            rules / "electron.policy.json",
+        )
+        write_json(
+            self.fixture.root
+            / ".sdlc-pipeline/contracts/active-rules.json",
+            {
+                "schema_version": "1.0",
+                "template_id": "fixture",
+                "source": "test",
+                "rules": [{
+                    "id": "electron",
+                    "path": ".sdlc-pipeline/runtime/rules/electron.md",
+                    "sha256": sha256_file(rules / "electron.md"),
+                    "policy_path": ".sdlc-pipeline/runtime/rules/electron.policy.json",
+                    "policy_sha256": sha256_file(rules / "electron.policy.json"),
+                    "classification": ["guidance", "hard", "executable"],
+                }],
+            },
+        )
+        (self.fixture.root / "src/unsafe.ts").write_text(
+            "process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'\n",
+            encoding="utf-8",
+        )
+
+        report = evaluate_hard_policies(self.fixture.root)
+
+        self.assertFalse(report["ok"])
+        self.assertEqual(
+            report["violations"][0]["policy"],
+            "electron:no-global-tls-disable",
+        )
+
     def test_pid_identity_mismatch_refuses_to_kill(self) -> None:
         path = self.fixture.root / ".sdlc-pipeline/state/process.json"
         write_json(path, {
