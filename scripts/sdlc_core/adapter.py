@@ -329,6 +329,7 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         require_code_ready(load_current_spec(root))
     verify_extension_points(root)
     spec_pointer = read_json(root / "docs" / "sdlc" / "current.json", required=False) or {}
+    implementation: dict[str, Any] | None = None
     if role == "tester":
         implementation = implementation_fingerprint(root)
         previous_dispatch = read_work_record(
@@ -361,16 +362,29 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
     reuse_baseline = (
         previous is not None
         and previous.get("baseline_id") == spec_pointer.get("baseline_id")
+        and (
+            role != "tester"
+            or previous.get("implementation_fingerprint") == implementation["sha256"]
+        )
         and not current["gates"]["test" if role == "tester" else "code"]
     )
     if not reuse_baseline:
         before = changed_path_fingerprints(root)
-        write_work_record(root, f"task/{role}-before", {
+        before_record = {
             "created_at": utc_now(),
             "baseline_id": spec_pointer.get("baseline_id"),
             "changed_paths": [item["path"] for item in before["entries"]],
             "worktree": before,
-        }, state="captured", title=f"{role} task before snapshot")
+        }
+        if implementation is not None:
+            before_record["implementation_fingerprint"] = implementation["sha256"]
+        write_work_record(
+            root,
+            f"task/{role}-before",
+            before_record,
+            state="captured",
+            title=f"{role} task before snapshot",
+        )
     context = build_context_pack(root, role)
     requirement_count = len(load_current_spec(root)["requirements"]["items"])
     from .runs import record_tokens

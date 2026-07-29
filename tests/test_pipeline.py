@@ -989,6 +989,10 @@ class ClosedLoopTests(unittest.TestCase):
     def test_tester_dispatch_allows_test_after_code_rework_changes_implementation(self) -> None:
         self._through_code()
         before_task(self.fixture.root, "tester")
+        first_snapshot = read_work_record(
+            self.fixture.root,
+            "task/tester-before",
+        )
 
         before_task(self.fixture.root, "coder")
         feature = self.fixture.root / "src" / "feature.py"
@@ -1003,6 +1007,26 @@ class ClosedLoopTests(unittest.TestCase):
 
         dispatched = before_task(self.fixture.root, "tester")
         self.assertEqual(dispatched["role"], "tester")
+        second_snapshot = read_work_record(
+            self.fixture.root,
+            "task/tester-before",
+        )
+        self.assertNotEqual(
+            first_snapshot["implementation_fingerprint"],
+            second_snapshot["implementation_fingerprint"],
+        )
+
+        self._author_tests()
+        handoff = after_task(
+            self.fixture.root,
+            "tester",
+            json.dumps({"summary": "测试脚本已准备", "open_issues": []}),
+        )
+
+        self.assertEqual(
+            handoff["handoff"]["changed_files"],
+            ["tests/functional/T-0001.functional.ts"],
+        )
 
     def test_tester_write_guard_rejects_business_source(self) -> None:
         self._through_code()
