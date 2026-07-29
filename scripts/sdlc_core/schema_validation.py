@@ -24,6 +24,7 @@ _SUPPORTED = _ANNOTATIONS | {
     "properties",
     "additionalProperties",
     "propertyNames",
+    "minProperties",
     "items",
     "minItems",
     "maxItems",
@@ -243,6 +244,8 @@ def _validate(instance: Any, schema: Any, root: dict[str, Any], location: str) -
         raise SdlcError(f"{location} 类型必须是 {schema['type']!r}")
 
     if isinstance(instance, dict):
+        if len(instance) < int(schema.get("minProperties", 0)):
+            raise SdlcError(f"{location} 至少需要 {schema['minProperties']} 个字段")
         required = schema.get("required", [])
         missing = [name for name in required if name not in instance]
         if missing:

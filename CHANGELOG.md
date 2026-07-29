@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 修复 lifecycle Schema 的 `minProperties` 与 fail-closed 运行时校验器不一致，避免 v1.1
+  测试套件项目在 init 读取合约时被错误阻断。
 - coder 退出所有测试源码读写；code gate 在 handoff 后统一完成 compile/package/lint/typecheck、
   启动、readiness 和停止。
 - `sdlc-tester` 成为唯一测试编写入口，仅可修改 Spec selector 声明的 `tests/**`/`test/**`

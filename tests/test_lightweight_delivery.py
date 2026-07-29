@@ -280,10 +280,9 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         lifecycle_schema = json.loads(
             (REPO / "schemas/lifecycle.schema.json").read_text(encoding="utf-8")
         )
-        self.assertEqual(
-            lifecycle_schema["properties"]["tests"]["required"],
-            ["functional"],
-        )
+        tests_schema = lifecycle_schema["properties"]["tests"]
+        self.assertEqual(tests_schema["minProperties"], 1)
+        self.assertNotIn("required", tests_schema)
         self.assertIn(
             "lint",
             lifecycle_schema["properties"]["commands"]["properties"],
