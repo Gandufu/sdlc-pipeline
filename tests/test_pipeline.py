@@ -930,6 +930,52 @@ class ClosedLoopTests(unittest.TestCase):
                 "owner_pid": os.getpid(),
             })
 
+    def test_tester_can_maintain_existing_unit_test_required_by_preflight(self) -> None:
+        self.fixture.use_lifecycle_v11()
+        legacy_test = self.fixture.root / "tests" / "unit" / "legacy.unit.py"
+        legacy_test.write_text("assert True\n", encoding="utf-8")
+        run("git", "add", "-A", cwd=self.fixture.root)
+        run("git", "commit", "-qm", "add legacy unit test", cwd=self.fixture.root)
+
+        self._through_code()
+        dispatched = before_task(self.fixture.root, "tester")
+        manifest = read_markdown_record(
+            self.fixture.root / dispatched["context_pack"]["paths"][0]
+        )
+        self.assertEqual(
+            manifest["brief"]["preflight_unit_test_paths"],
+            ["tests/unit/legacy.unit.py"],
+        )
+        self.assertEqual(
+            manifest["brief"]["allowed_paths"],
+            [
+                "tests/functional/T-0001.functional.ts",
+                "tests/unit/legacy.unit.py",
+            ],
+        )
+        checked = validate_write_path(
+            self.fixture.root,
+            "tests/unit/legacy.unit.py",
+            role="tester",
+        )
+        self.assertTrue(checked["ok"])
+        legacy_test.write_text("assert 1 + 1 == 2\n", encoding="utf-8")
+        self._author_tests()
+
+        handoff = after_task(
+            self.fixture.root,
+            "tester",
+            json.dumps({"summary": "维护预检单元测试", "open_issues": []}),
+        )
+
+        self.assertEqual(
+            handoff["handoff"]["changed_files"],
+            [
+                "tests/functional/T-0001.functional.ts",
+                "tests/unit/legacy.unit.py",
+            ],
+        )
+
     def test_coder_handoff_changed_files_are_derived_from_git_diff(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())

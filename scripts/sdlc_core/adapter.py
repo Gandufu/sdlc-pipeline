@@ -46,14 +46,10 @@ def validate_write_path(
     if role == "coder" and _is_test_path(relative):
         raise SdlcError(f"coder 禁止修改测试脚本: {relative}")
     if role == "tester":
-        declared = {
-            item["selector"].replace("\\", "/")
-            for item in load_current_spec(root)["test_plan"]["items"]
-            if item.get("selector")
-        }
-        if relative not in declared:
+        if relative not in _tester_writable_paths(root):
             raise SdlcError(
-                f"tester 只能修改 Spec 声明的测试脚本: {relative}"
+                "tester 只能修改 Spec 声明的测试脚本或"
+                f"预检必需的既有单元测试: {relative}"
             )
     contract = scaffold(root)
     if matches_path(relative, contract["protected_paths"]):
@@ -67,6 +63,47 @@ def validate_write_path(
 def _is_test_path(path: str) -> bool:
     normalized = path.replace("\\", "/")
     return normalized.startswith(("tests/", "test/"))
+
+
+def _declared_test_paths(root: Path) -> set[str]:
+    return {
+        item["selector"].replace("\\", "/")
+        for item in load_current_spec(root)["test_plan"]["items"]
+        if item.get("selector")
+    }
+
+
+def _preflight_unit_test_paths(root: Path) -> set[str]:
+    """Return existing unit tests which the contract-owned preflight may run.
+
+    Test preflight is executed after tester handoff.  When it invokes the
+    template's full unit suite, stale scaffold unit tests must be maintainable
+    by the tester even if the published Spec only declares functional tests.
+    Restrict the exception to already-existing files under the contract's unit
+    selector patterns; the tester still cannot create arbitrary test sources.
+    """
+    from .lifecycle import load_contract
+
+    contract = load_contract(root)
+    unit = contract.get("tests", {}).get("unit", {})
+    patterns = unit.get("selector_patterns", [])
+    if not isinstance(patterns, list):
+        return set()
+    paths: set[str] = set()
+    for pattern in patterns:
+        if not isinstance(pattern, str):
+            continue
+        for candidate in root.glob(pattern):
+            if not candidate.is_file():
+                continue
+            relative = candidate.relative_to(root).as_posix()
+            if _is_test_path(relative):
+                paths.add(relative)
+    return paths
+
+
+def _tester_writable_paths(root: Path) -> set[str]:
+    return _declared_test_paths(root) | _preflight_unit_test_paths(root)
 
 
 def _extract_json(text: str) -> dict[str, Any]:
@@ -247,11 +284,8 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
     if role == "tester":
         brief.update({
             "test_ids": [item["id"] for item in tests],
-            "allowed_paths": sorted({
-                item["selector"].replace("\\", "/")
-                for item in tests
-                if item.get("selector")
-            }),
+            "allowed_paths": sorted(_tester_writable_paths(root)),
+            "preflight_unit_test_paths": sorted(_preflight_unit_test_paths(root)),
             "verification": [
                 {
                     "id": item["id"],
@@ -404,15 +438,13 @@ def validate_tester_handoff(root: Path, text: str) -> dict[str, Any]:
         before.get("worktree", before.get("changed_paths", [])),
     )
     actual = sorted(set(diff["changed_paths"]))
-    declared = {
-        item["selector"].replace("\\", "/")
-        for item in load_current_spec(root)["test_plan"]["items"]
-        if item.get("selector")
-    }
-    outside = [path for path in actual if path not in declared]
+    declared = _declared_test_paths(root)
+    allowed = _tester_writable_paths(root)
+    outside = [path for path in actual if path not in allowed]
     if outside:
         raise SdlcError(
-            f"tester handoff 只能包含 Spec 声明的测试脚本: {outside}"
+            "tester handoff 只能包含 Spec 声明的测试脚本或"
+            f"预检必需的既有单元测试: {outside}"
         )
     missing = sorted(path for path in declared if not (root / path).is_file())
     if missing:
