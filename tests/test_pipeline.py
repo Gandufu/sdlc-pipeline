@@ -407,6 +407,16 @@ class SchemaAndTraceTests(unittest.TestCase):
             self.assertTrue((bundle / "requirements/R-0001.md").is_file())
             self.assertTrue((bundle / "designs/D-0001.md").is_file())
             self.assertTrue((bundle / "verification/T-0001.md").is_file())
+            if os.name == "nt":
+                acl = subprocess.run(
+                    ["icacls", str(bundle)],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                )
+                self.assertEqual(acl.returncode, 0, acl.stderr)
+                self.assertIn("(I)", acl.stdout)
             for obsolete in (
                 "feature-contract.json", "requirements.json",
                 "design.json", "test-plan.json",
@@ -901,7 +911,6 @@ class ClosedLoopTests(unittest.TestCase):
         execute(self.fixture.root, "task-before", {
             "role": "coder",
             "owner_pid": os.getpid(),
-            "deadline_seconds": 300,
         })
 
         result = subprocess.run(
@@ -1195,30 +1204,20 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(current["state"], "aborted")
         self.assertEqual(current["running_attempts"], [])
 
-    def test_status_aborts_alive_owner_after_attempt_deadline(self) -> None:
+    def test_attempt_has_no_wall_clock_deadline(self) -> None:
         attempt = begin_attempt(
             self.fixture.root,
             phase="code",
             step="coder-dispatch",
             operation="task-before",
             payload={"role": "coder"},
-            deadline_seconds=540,
         )
-        path = (
-            self.fixture.root
-            / ".sdlc-pipeline/state/runs"
-            / attempt["run_id"]
-            / "attempts/code"
-            / f"{attempt['attempt_id']}.json"
-        )
-        value = json.loads(path.read_text(encoding="utf-8"))
-        value["deadline_at"] = "2000-01-01T00:00:00+00:00"
-        write_json(path, value)
 
         current = journal_status(self.fixture.root)
 
-        self.assertEqual(current["state"], "aborted")
-        self.assertIn("deadline expired", current["last_error"])
+        self.assertNotIn("deadline_at", attempt)
+        self.assertEqual(current["state"], "running")
+        self.assertNotIn("deadline_at", current["running_attempts"][0])
 
     def test_tooling_configs_are_predeclared_non_business_changes(self) -> None:
         init_project(self.fixture.root)
@@ -1286,14 +1285,13 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(after.get("attempt_count", 0), before.get("attempt_count", 0))
         self.assertNotEqual(after.get("state"), "blocked")
 
-    def test_coder_dispatch_has_deadline_heartbeat_and_terminal_handoff(self) -> None:
+    def test_coder_dispatch_has_heartbeat_and_terminal_handoff(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
 
         started = execute(self.fixture.root, "task-before", {
             "role": "coder",
             "owner_pid": os.getpid(),
-            "deadline_seconds": 300,
         })
         running = journal_status(self.fixture.root)
         write_check = execute(self.fixture.root, "write-check", {
@@ -1301,10 +1299,12 @@ class ReliabilityTests(unittest.TestCase):
             "owner_pid": os.getpid(),
         })
 
-        self.assertEqual(started["deadline_seconds"], 300)
+        self.assertNotIn("deadline_seconds", started)
+        self.assertNotIn("deadline_at", started)
         self.assertEqual(len(running["running_attempts"]), 1)
-        self.assertTrue(running["running_attempts"][0]["deadline_at"])
+        self.assertNotIn("deadline_at", running["running_attempts"][0])
         self.assertTrue(write_check["heartbeat"]["ok"])
+        self.assertIn("last_heartbeat_at", write_check["heartbeat"])
         self.assertEqual(write_check["path"], "src/feature.py")
 
         (self.fixture.root / "src/feature.py").write_text(
@@ -1317,7 +1317,7 @@ class ReliabilityTests(unittest.TestCase):
 
         self.assertEqual(journal_status(self.fixture.root)["running_attempts"], [])
 
-    def test_coder_deadline_scales_with_published_requirement_count(self) -> None:
+    def test_coder_dispatch_has_no_requirement_count_time_budget(self) -> None:
         init_project(self.fixture.root)
         blueprint = spec_payload()
         requirement = blueprint["requirements"]["items"][0]
@@ -1337,10 +1337,11 @@ class ReliabilityTests(unittest.TestCase):
             "owner_pid": os.getpid(),
         })
 
-        self.assertEqual(started["deadline_seconds"], 900)
-        self.assertEqual(
-            journal_status(self.fixture.root)["running_attempts"][0]["deadline_at"],
-            started["deadline_at"],
+        self.assertNotIn("deadline_seconds", started)
+        self.assertNotIn("deadline_at", started)
+        self.assertNotIn(
+            "deadline_at",
+            journal_status(self.fixture.root)["running_attempts"][0],
         )
 
     def test_handoff_ignores_agent_authored_mapping_fields(self) -> None:

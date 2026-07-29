@@ -7,7 +7,6 @@ const AGENTS = {
   "sdlc-coder": "coder",
   "sdlc-tester": "tester",
 }
-const taskDeadlines = new Map()
 const taskWriteSessions = new Set()
 const PLUGIN_PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", ".."
@@ -567,47 +566,18 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         role,
         owner_pid: process.pid,
       })
-      const deadlineSeconds = Number(result.deadline_seconds)
-      if (!Number.isInteger(deadlineSeconds) || deadlineSeconds <= 0) {
-        throw new Error(`Core 未返回有效的 ${role} deadline`)
-      }
       await logPluginEvent(client, `${role}.dispatched`, {
         session_id: input.sessionID,
-        deadline_seconds: deadlineSeconds,
         requirement_count: result.requirement_count,
         context_characters: result.context_pack.characters,
         context_resources: result.context_pack.resource_count,
       })
-      const deadline = setTimeout(async () => {
-        try {
-          await logPluginEvent(client, `${role}.deadline_exceeded`, {
-            session_id: input.sessionID,
-            deadline_seconds: deadlineSeconds,
-          }, "warn")
-          await invoke(fallbackRoot, "task-cancel", {
-            reason: `${role} deadline exceeded after ${deadlineSeconds}s`,
-          })
-        } catch (error) {
-          await logPluginEvent(client, `${role}.cancel_failed`, {
-            session_id: input.sessionID,
-            error: String(error),
-          }, "error")
-        } finally {
-          await client.session.abort({
-            path: { id: input.sessionID },
-            query: { directory: fallbackRoot },
-          })
-        }
-      }, deadlineSeconds * 1000)
-      deadline.unref()
-      taskDeadlines.set(input.callID, deadline)
       const manifest = result.context_pack.paths[0]
       const taskObjective = String(output.args?.description || "").trim()
       delete output.args.command
       output.args.prompt = `[SDLC context pack] ${manifest}\n`
         + `${result.instruction}\n`
         + (taskObjective ? `本次任务目标：${taskObjective}。\n` : "")
-        + `${role} deadline: ${deadlineSeconds}s。`
         + (role === "coder"
           ? "只实现业务代码；禁止读取、创建或修改任何测试脚本；"
           : "只编写声明的测试脚本；禁止修改业务源码或直接运行 lifecycle；")
@@ -619,9 +589,6 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       if (input.tool !== "task") return
       const role = AGENTS[input.args?.subagent_type]
       if (!role) return
-      const deadline = taskDeadlines.get(input.callID)
-      if (deadline) clearTimeout(deadline)
-      taskDeadlines.delete(input.callID)
       await invoke(fallbackRoot, "task-after", {
         role,
         output: output.output || "",

@@ -2,7 +2,6 @@
 description: 根据 Feature brief 只实现业务代码，按需读取资源
 mode: subagent
 temperature: 0.1
-steps: 16
 permission:
   read:
     "*": allow

@@ -37,7 +37,7 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
    “采用推荐”只保存临时 spec work；validate 后展示 revision/hash；只有“确认发布”才按
    `candidate_id + content_hash` 发布不可变 baseline。
 3. `/sdlc-code`
-   原生 task 只派发 `sdlc-coder`。coder 最多 16 个 agent steps，读取一个渐进式 context manifest，
+   原生 task 只派发 `sdlc-coder`。coder 不使用固定秒数或 agent 轮次上限，读取一个渐进式 context manifest，
    在 allowed paths 内只实现业务代码，禁止读取或修改测试脚本。task-after 校验真实 Git diff 和
    handoff，Core 再执行 compile/package/lint/typecheck、启动与 readiness，并保留预览进程，
    返回模板声明的访问地址供用户检查当前页面。

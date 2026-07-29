@@ -166,6 +166,22 @@ def _contract_self_check(target: Path) -> dict[str, object]:
     return {"ok": True, "checked": checked}
 
 
+def _refresh_active_rules(target: Path) -> dict[str, object] | None:
+    contracts = target / ".sdlc-pipeline" / "contracts"
+    if not all(
+        (contracts / name).is_file()
+        for name in ("lifecycle.json", "scaffold.json")
+    ):
+        return None
+    runtime_scripts = target / ".sdlc-pipeline" / "runtime" / "scripts"
+    runtime_text = str(runtime_scripts)
+    if runtime_text not in sys.path:
+        sys.path.insert(0, runtime_text)
+    from sdlc_core.lifecycle import activate_template_rules
+
+    return activate_template_rules(target)
+
+
 def _source(name: str) -> Path:
     direct = PLUGIN_ROOT / name
     if direct.exists():
@@ -275,6 +291,7 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
             elif obsolete.is_dir():
                 shutil.rmtree(obsolete)
     contract_self_check = _contract_self_check(target)
+    active_rules = _refresh_active_rules(target)
     _ensure_opencode_dependencies(target)
     config_path = target / "opencode.json"
     config = {}
@@ -302,6 +319,7 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
         "target": str(target),
         **value,
         "contract_self_check": contract_self_check,
+        "active_rules": active_rules,
         "tooling_ignore": tooling_ignore,
     }
 

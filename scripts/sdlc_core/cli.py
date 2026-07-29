@@ -9,7 +9,6 @@ from typing import Any
 from .adapter import (
     after_task,
     before_task,
-    task_deadline_seconds,
     validate_write_path,
 )
 from .bootstrap import bootstrap
@@ -243,7 +242,7 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
             **cancel_running_attempt(
                 root,
                 operation="task-before",
-                reason=str(payload.get("reason", "coder deadline cancelled")),
+                reason=str(payload.get("reason", "subagent cancelled")),
             ),
             "process_cleanup": stop,
         }
@@ -292,11 +291,6 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         return _execute(root, operation, payload)
     if operation == "task-before":
         payload = dict(payload)
-        if payload.get("role") in {"coder", "tester"}:
-            payload["deadline_seconds"] = task_deadline_seconds(
-                root,
-                str(payload["role"]),
-            )
         phase, step = _phase_step(operation, payload)
         attempt = begin_attempt(
             root,
@@ -305,7 +299,6 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
             operation=operation,
             payload=payload,
             owner_pid=payload.get("owner_pid"),
-            deadline_seconds=payload.get("deadline_seconds"),
         )
         try:
             result = _execute(root, operation, payload)
@@ -315,13 +308,11 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         return {
             **result,
             "attempt_id": attempt["attempt_id"],
-            "deadline_seconds": payload.get("deadline_seconds"),
-            "deadline_at": attempt.get("deadline_at"),
         }
     if operation == "task-after":
         attempt = running_attempt(root, operation="task-before")
         if not attempt:
-            raise SdlcError("subagent dispatch 不存在、已超时或已回收")
+            raise SdlcError("subagent dispatch 不存在或已回收")
         expected_step = f"task-before:{payload.get('role')}"
         if attempt.get("step") != expected_step:
             raise SdlcError(

@@ -163,6 +163,45 @@ class InstallerTests(unittest.TestCase):
                 self.assertIn(".opencode/**", text)
                 self.assertIn(".sdlc-pipeline/**", text)
 
+    def test_force_upgrade_refreshes_active_rule_hashes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary)
+            installer.install(target)
+            contracts = target / ".sdlc-pipeline" / "contracts"
+            contracts.mkdir(parents=True)
+            (contracts / "lifecycle.json").write_text("{}\n", encoding="utf-8")
+            (contracts / "scaffold.json").write_text(
+                json.dumps({"template_id": "sdlc-electron-scaffold"}) + "\n",
+                encoding="utf-8",
+            )
+            (contracts / "active-rules.json").write_text(
+                json.dumps({
+                    "schema_version": "1.0",
+                    "template_id": "sdlc-electron-scaffold",
+                    "source": "stale",
+                    "rules": [{
+                        "id": "typescript",
+                        "path": ".sdlc-pipeline/runtime/rules/typescript.md",
+                        "sha256": "0" * 64,
+                        "classification": ["guidance"],
+                    }],
+                }) + "\n",
+                encoding="utf-8",
+            )
+
+            result = installer.install(target, force=True)
+
+            self.assertIsNotNone(result["active_rules"])
+            active = json.loads(
+                (contracts / "active-rules.json").read_text(encoding="utf-8")
+            )
+            for rule in active["rules"]:
+                rule_path = target / rule["path"]
+                self.assertEqual(
+                    rule["sha256"],
+                    hashlib.sha256(rule_path.read_bytes()).hexdigest(),
+                )
+
     def test_install_adds_plugin_sdk_dependency_and_preserves_existing_dependencies(
         self,
     ) -> None:
@@ -532,15 +571,15 @@ class InstallerTests(unittest.TestCase):
             (REPO / "README.md").read_text(encoding="utf-8"),
         )
 
-    def test_coder_budget_and_adr_sequence_are_documented_consistently(self) -> None:
+    def test_agent_lifetime_and_adr_sequence_are_documented_consistently(self) -> None:
         readme = (REPO / "README.md").read_text(encoding="utf-8")
         coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(
             encoding="utf-8"
         )
         adr_names = sorted(path.name for path in (REPO / "docs/adr").glob("*.md"))
 
-        self.assertIn("最多 16 个 agent steps", readme)
-        self.assertIn("steps: 16", coder)
+        self.assertIn("不使用固定秒数或 agent 轮次上限", readme)
+        self.assertNotIn("steps:", coder)
         self.assertEqual(
             adr_names,
             [
@@ -815,12 +854,14 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn('"sdlc-coder": ["focused_check"]', plugin)
         self.assertIn("coder 只实现业务代码", adapter)
         self.assertNotIn("登记的 functional 文件", adapter)
-        self.assertIn("steps: 16", coder)
+        self.assertNotIn("steps:", coder)
         self.assertIn("temperature: 0.1", coder)
         self.assertIn(
             '".sdlc-pipeline/runtime/scripts/**": deny', coder
         )
-        self.assertIn("deadlineSeconds = Number(result.deadline_seconds)", plugin)
+        self.assertNotIn("deadlineSeconds", plugin)
+        self.assertNotIn("taskDeadlines", plugin)
+        self.assertNotIn("client.session.abort", plugin)
         self.assertIn("output.args.prompt =", plugin)
         self.assertNotIn("output.args.prompt = `${output.args.prompt", plugin)
         self.assertIn("第 4 次工具调用前", coder)
@@ -829,9 +870,7 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("@playwright/mcp", plugin)
         self.assertNotIn('output.args.command = "实现当前已发布', plugin)
         self.assertIn('"write-check"', plugin)
-        cancel_index = plugin.index('await invoke(fallbackRoot, "task-cancel"')
-        abort_index = plugin.index("await client.session.abort")
-        self.assertLess(cancel_index, abort_index)
+        self.assertNotIn('await invoke(fallbackRoot, "task-cancel"', plugin)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_coder_task_hook_keeps_short_objective_without_generic_command(self) -> None:
@@ -852,7 +891,7 @@ class InstallerTests(unittest.TestCase):
                 "import json, sys\n"
                 "payload = json.load(sys.stdin)\n"
                 "if sys.argv[1] == 'task-before':\n"
-                "    print(json.dumps({'ok': True, 'deadline_seconds': 600, 'context_pack': {'paths': ['.sdlc-pipeline/work/records/context/coder.md'], 'characters': 1, 'resource_count': 1}, 'instruction': '只读取必要文件'}))\n"
+                "    print(json.dumps({'ok': True, 'context_pack': {'paths': ['.sdlc-pipeline/work/records/context/coder.md'], 'characters': 1, 'resource_count': 1}, 'instruction': '只读取必要文件'}))\n"
                 "else:\n"
                 "    print(json.dumps({'ok': True}))\n",
                 encoding="utf-8",
@@ -896,7 +935,7 @@ class InstallerTests(unittest.TestCase):
             self.assertNotIn("command", args)
             self.assertIn("本次任务目标：实现 R-0001 应用外壳", args["prompt"])
             self.assertNotIn("调用方上下文不得复制", args["prompt"])
-            self.assertIn(600_000, output["delays"])
+            self.assertNotIn(600_000, output["delays"])
 
     def test_evidence_collector_keeps_early_failure_summary(self) -> None:
         collector_spec = importlib.util.spec_from_file_location(

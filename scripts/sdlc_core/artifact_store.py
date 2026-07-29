@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
-import tempfile
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -30,7 +30,8 @@ def publish_baseline(
     final = base / baseline_id
     base.mkdir(parents=True, exist_ok=True)
     if not final.is_dir():
-        temporary = Path(tempfile.mkdtemp(prefix=".publishing-", dir=base))
+        temporary = base / f".publishing-{uuid.uuid4().hex}"
+        temporary.mkdir()
         try:
             candidate_record = candidate["candidate"]
             candidate_source = root / candidate_record["content_ref"]

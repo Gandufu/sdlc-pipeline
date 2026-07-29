@@ -26,42 +26,6 @@ from .schema_validation import validate_schema_instance
 
 MAX_CONTEXT_RESOURCES = 10
 MAX_IMPLEMENTATION_RESOURCES = 6
-CODER_DEADLINE_BASE_SECONDS = 5 * 60
-CODER_DEADLINE_PER_ADDITIONAL_REQUIREMENT_SECONDS = 2 * 60
-CODER_DEADLINE_MAX_SECONDS = 15 * 60
-TESTER_DEADLINE_BASE_SECONDS = 5 * 60
-TESTER_DEADLINE_PER_ADDITIONAL_VERIFICATION_SECONDS = 2 * 60
-TESTER_DEADLINE_MAX_SECONDS = 15 * 60
-
-
-def coder_deadline_seconds(root: Path) -> int:
-    """Derive a bounded coder deadline from the published requirement count."""
-    requirement_count = len(load_current_spec(root)["requirements"]["items"])
-    additional = max(0, requirement_count - 1)
-    return min(
-        CODER_DEADLINE_MAX_SECONDS,
-        CODER_DEADLINE_BASE_SECONDS
-        + additional * CODER_DEADLINE_PER_ADDITIONAL_REQUIREMENT_SECONDS,
-    )
-
-
-def tester_deadline_seconds(root: Path) -> int:
-    """Derive a bounded tester deadline from the published verification count."""
-    verification_count = len(load_current_spec(root)["test_plan"]["items"])
-    additional = max(0, verification_count - 1)
-    return min(
-        TESTER_DEADLINE_MAX_SECONDS,
-        TESTER_DEADLINE_BASE_SECONDS
-        + additional * TESTER_DEADLINE_PER_ADDITIONAL_VERIFICATION_SECONDS,
-    )
-
-
-def task_deadline_seconds(root: Path, role: str) -> int:
-    if role == "coder":
-        return coder_deadline_seconds(root)
-    if role == "tester":
-        return tester_deadline_seconds(root)
-    raise SdlcError(f"不允许的 subagent: {role}")
 
 
 def validate_write_path(
@@ -216,11 +180,18 @@ def _context_resources(root: Path, role: str) -> list[dict[str, Any]]:
     )[:MAX_CONTEXT_RESOURCES]:
         path = root / name
         if not path.is_file():
+            if tier == 1:
+                raise SdlcError(f"权威 context resource 缺失或不可读: {name}")
             continue
+        try:
+            digest = sha256_file(path)
+            size = path.stat().st_size
+        except OSError as exc:
+            raise SdlcError(f"context resource 不可读: {name}: {exc}") from exc
         resources.append({
             "path": name,
-            "sha256": sha256_file(path),
-            "size": path.stat().st_size,
+            "sha256": digest,
+            "size": size,
             "tier": tier,
             "reason": reason,
         })
@@ -384,7 +355,6 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
     return {
         "ok": True,
         "role": role,
-        "deadline_seconds": task_deadline_seconds(root, role),
         "requirement_count": requirement_count,
         "baseline": "reused" if reuse_baseline else "created",
         "context_pack": context,

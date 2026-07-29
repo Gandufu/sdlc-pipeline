@@ -55,8 +55,9 @@ R/D/T 的 `id` 同样由 Core 分配：优先省略它；如历史调用带来�
 code 阶段只派发 `sdlc-coder`。正常一次；仅当 Failure Router 判定为可修复 code failure 且 Run 未 blocked
 时允许一次聚焦重试。派发时只给出简短任务描述，必须点名先实现的 `R-xxxx`，不展开 spec、规则、源码或测试列表；
 plugin 会把 task prompt 规范化为唯一 context manifest。coder 先读 brief，再按需读 resources。
-coder dispatch 的 deadline 由 Core 根据已发布 Requirement 数量派生（5 分钟基础、每个额外 Requirement
-增加 2 分钟、最多 15 分钟）；恢复时以 journal 的 heartbeat/deadline 为准。
+coder/tester 不使用固定秒数或 agent 轮次终止任务；journal heartbeat 只记录活动状态，不作为超时依据。
+任务仅由用户显式取消、宿主中止、owner 进程退出或确定性门禁失败而终止。compile、package、start、
+Playwright 等外部命令仍使用模板 lifecycle 合约声明的命令超时。
 
 coder 只实现业务代码，不读取或修改测试脚本。handoff 后 Core 统一执行 compile/package/lint/typecheck、
 启动与 readiness，并保留预览进程。`/sdlc-code` 看到 code gate 通过后必须报告访问地址并结束

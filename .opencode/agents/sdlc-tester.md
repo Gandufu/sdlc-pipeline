@@ -2,7 +2,6 @@
 description: 编写 Spec 声明的 Playwright 脚本并返回测试 handoff
 mode: subagent
 temperature: 0.1
-steps: 16
 permission:
   read: allow
   edit:
