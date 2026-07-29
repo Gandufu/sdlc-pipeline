@@ -800,6 +800,19 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("run.spec_rework_started", main)
         self.assertIn('"spec-rework"', plugin)
 
+    def test_spec_guidance_requires_complete_acceptance_criteria_payload(self) -> None:
+        command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(
+            encoding="utf-8"
+        )
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("acceptance_criteria", command)
+        self.assertIn("given", command)
+        self.assertIn("`acceptance_criteria` 是**必填且非空**数组", main)
+        self.assertIn("不可省略整个数组", plugin)
+
     def test_code_command_allows_one_failed_code_gate_retry(self) -> None:
         command = (REPO / ".opencode/commands/sdlc-code.md").read_text(
             encoding="utf-8"

@@ -46,7 +46,10 @@ validate 后展示 preview 路径、revision 与 hash。只有收到明确“确
 对象也可直接传入，Core 会规范化，但不得杜撰来源。
 写 Design 前读取 `.sdlc-pipeline/contracts/scaffold.json`，其 `extension_points` 只能逐字使用已声明的 ID；
 不得以泛称或模块名替代 extension point。
-写 Requirement 时不手填 AC id（Core 固定派生 `AC-R-xxxx-yy`）；写 Verification 前先读取
+写 Requirement 时，`acceptance_criteria` 是**必填且非空**数组；每条都必须携带 `given`、`when`、`then`
+和非空 `source_refs`。只是不手填每条 AC 的 `id`（Core 固定派生 `AC-R-xxxx-yy`），绝不能省略整个
+`acceptance_criteria` 字段。每次 `sdlc_put_requirement` 前先逐项核对此四字段，缺少信息时根据已确认
+事实补全后一次调用，不得发送缺字段请求并触发可避免的 Run 失败。写 Verification 前先读取
 `.sdlc-pipeline/contracts/lifecycle.json`。`test_key` 必须是合同已声明的逻辑键，不能填写 shell
 命令；`selector` 必须匹配该测试套件的 `selector_patterns`。v1.0 的 `functional` 可省略 selector，
 Core 按 T-id 生成默认路径；v1.1 的测试套件必须显式填写 POSIX 项目内路径。不得传空字符串、反斜杠

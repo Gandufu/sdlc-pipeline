@@ -346,7 +346,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_put_requirement: tool({
-        description: "写入一个独立 Requirement artifact；R/Feature/AC ID 均由 Core 分配或规范化，feature_id 可传语义 hint，禁止为格式猜测而重试。",
+        description: "写入一个独立 Requirement artifact。acceptance_criteria 必须是非空数组，每项必须含 given/when/then/source_refs；只省略 AC id（Core 分配），不可省略整个数组。R/Feature/AC ID 均由 Core 分配或规范化，feature_id 可传语义 hint，禁止为格式猜测而重试。",
         args: {
           candidate_id: tool.schema.string(),
           requirement: tool.schema.object({

@@ -13,6 +13,9 @@ subtask: false
 先查事实，只询问真正阻塞的产品决策。“采用推荐”只保存决策，不发布。大需求按 Feature 和
 可独立验收 Requirement 分片持久化；validate 后展示 preview/revision/hash，只有用户明确
 “确认发布”才按 candidate ID/hash 批准。
+每个 `sdlc_put_requirement` 都必须在同一次请求中带非空 `acceptance_criteria`：每条包含
+`given`、`when`、`then`、`source_refs`，但不手填其 `id`。候选中已经确认的事实不足以填写 AC 时先补充
+spec work，禁止发送缺失 `acceptance_criteria` 的请求；这种可预防的 schema 错误会消耗 Run 的失败上限。
 
 本次命令参数是用户提供的需求或确认文本，必须在不放宽上述阶段与门禁约束的前提下处理，
 不得丢弃；没有参数时再按访谈规则继续：
