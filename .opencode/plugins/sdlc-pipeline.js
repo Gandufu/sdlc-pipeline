@@ -416,7 +416,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             requirement_ids: tool.schema.array(tool.schema.string()),
             design_ids: tool.schema.array(tool.schema.string()),
             acceptance_criteria_ids: tool.schema.array(tool.schema.string()),
-            level: tool.schema.enum(["unit", "integration", "functional"]),
+            level: tool.schema.enum(["functional"]),
             test_key: tool.schema.string(),
             selector: tool.schema.string(),
             preconditions: tool.schema.string(),

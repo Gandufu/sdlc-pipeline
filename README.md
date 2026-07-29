@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.16.0`。
+OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.17.0`。
 
 插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
 状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
@@ -131,7 +131,9 @@ docs/sdlc/
 
 ## 合同与门禁
 
-`lifecycle.json` 用 argv 数组声明工具、install/compile/start/stop/health/artifact 和逻辑测试键。
+`lifecycle.json` 用 argv 数组声明工具、工程命令、start/stop/health/artifact 和 functional 测试键。
+code gate 从 `commands` 执行 compile/package、lint、typecheck、启动与 readiness；test 阶段只由
+tester 编写 selector 指定的 Playwright functional 脚本，并由 Core 执行与清理。
 `scaffold.json` 声明关键文件 fingerprint、protected paths、allowed paths 与 extension points。
 Design 只能引用已声明 extension point；实际代码文件由 code 后的 Git diff 推导。
 

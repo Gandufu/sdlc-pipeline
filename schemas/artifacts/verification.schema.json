@@ -28,9 +28,12 @@
       "uniqueItems": true,
       "items": {"type": "string", "pattern": "^AC-R-[0-9]{4}-[0-9]{2}$"}
     },
-    "level": {"enum": ["unit", "integration", "functional"]},
+    "level": {"const": "functional"},
     "test_key": {"type": "string", "minLength": 1},
-    "selector": {"type": ["string", "null"]},
+    "selector": {
+      "type": "string",
+      "pattern": "^tests/functional/.+\\.functional\\.ts$"
+    },
     "preconditions": {"type": "string", "minLength": 1},
     "expected": {"type": "string", "minLength": 1},
     "mandatory": {"type": "boolean"},

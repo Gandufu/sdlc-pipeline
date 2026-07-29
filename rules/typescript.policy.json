@@ -12,7 +12,7 @@
     }
   ],
   "executable_verifiers": [
-    {"id": "lint", "phase": "code", "test_key": "lint"},
-    {"id": "static-analysis", "phase": "code", "test_key": "static_analysis"}
+    {"id": "lint", "phase": "code", "command_key": "lint"},
+    {"id": "typecheck", "phase": "code", "command_key": "typecheck"}
   ]
 }

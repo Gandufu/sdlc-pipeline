@@ -226,14 +226,16 @@ def put_verification(
         normalized["selector"] = None
     validate_schema_instance(root, "artifacts/verification.schema.json", normalized)
     selector = normalized.get("selector")
-    if selector is not None:
-        path = Path(selector)
-        if (
-            path.is_absolute()
-            or ".." in path.parts
-            or not path.as_posix().startswith("tests/")
-        ):
-            raise SdlcError(f"{identifier} selector 必须是 tests/ 下的项目内路径")
+    path = Path(selector)
+    if (
+        path.is_absolute()
+        or ".." in path.parts
+        or not path.as_posix().startswith("tests/functional/")
+        or not path.name.endswith(".functional.ts")
+    ):
+        raise SdlcError(
+            f"{identifier} selector 必须是 tests/functional/ 下的 .functional.ts 项目内路径"
+        )
     existing = _load_artifacts(root, previous, "verification").get(identifier)
     if existing == normalized:
         return _idempotent_result(pointer, identifier)

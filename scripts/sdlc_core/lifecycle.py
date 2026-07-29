@@ -108,8 +108,8 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
         "",
         *(test_lines or ["- 当前 lifecycle 合约未声明测试命令。"]),
         "",
-        "- `test_plan.items[].command` 填写冒号左侧逻辑键（如 `unit`），"
-        "不能填写 `pnpm test` 等右侧 shell 命令。",
+        "- Verification frontmatter 的 `test_key` 填写冒号左侧逻辑键（当前为 `functional`），",
+        "不能填写 `pnpm functional` 等右侧 shell 命令。",
         "",
         "## SDLC 规则",
         "",
@@ -311,14 +311,14 @@ def execute_command(
 
 def run_policy_gate(root: Path, phase: str) -> dict[str, Any]:
     hard = evaluate_hard_policies(root)
-    commands = load_contract(root)["tests"]
+    commands = load_contract(root)["commands"]
     results = []
     for verifier in executable_verifiers(root, phase):
-        key = verifier["test_key"]
+        key = verifier["command_key"]
         if key not in commands:
             raise SdlcError(
                 f"policy {verifier['rule_id']}:{verifier['id']} "
-                f"引用未知 lifecycle test key: {key}"
+                f"引用未知 lifecycle command key: {key}"
             )
         result = execute_command(
             root,

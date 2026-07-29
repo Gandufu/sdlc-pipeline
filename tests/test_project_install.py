@@ -548,6 +548,7 @@ class InstallerTests(unittest.TestCase):
                 "0002-external-template-assets.md",
                 "0003-storage-layout-v3.md",
                 "0004-native-markdown-artifacts.md",
+                "0005-separate-code-controls-from-functional-tests.md",
             ],
         )
 
@@ -966,9 +967,9 @@ class InstallerTests(unittest.TestCase):
 
     def test_spec_guidance_distinguishes_test_key_from_shell_command(self) -> None:
         text = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
-        self.assertIn("逻辑测试键", text)
-        self.assertIn("unit", text)
-        self.assertIn("integration", text)
+        self.assertIn("functional 测试键", text)
+        self.assertIn("functional", text)
+        self.assertNotIn("unit/integration", text)
 
     def test_desktop_project_assets_are_discoverable(self) -> None:
         self.assertTrue((REPO / ".opencode/plugins/sdlc-pipeline.js").exists())

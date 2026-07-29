@@ -34,11 +34,11 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "phase", "test_key"],
+        "required": ["id", "phase", "command_key"],
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "phase": {"enum": ["code", "test"]},
-          "test_key": {"type": "string", "minLength": 1}
+          "command_key": {"type": "string", "minLength": 1}
         },
         "additionalProperties": false
       }

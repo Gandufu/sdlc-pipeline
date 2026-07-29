@@ -131,13 +131,13 @@ def spec_payload() -> dict:
             "title": "功能测试",
             "requirement_ids": ["R-0001"],
             "design_ids": ["D-0001"],
-            "level": "unit",
+            "level": "functional",
             "preconditions": "已编译并运行",
-            "input": "执行 unit",
+            "input": "执行 functional",
             "expected": "退出码为 0",
             "mandatory": True,
-            "command": "unit",
-            "selector": "tests/test_feature.py",
+            "command": "functional",
+            "selector": "tests/functional/T-0001.functional.ts",
         }]},
     }
 
@@ -268,6 +268,7 @@ class ProjectFixture:
         )
         (self.root / "src").mkdir()
         (self.root / "tests").mkdir()
+        (self.root / "tests" / "functional").mkdir()
         (self.root / ".sdlc-pipeline" / ".gitignore").write_text(
             "state/\nwork/\nevidence/\n", encoding="utf-8"
         )
@@ -318,6 +319,8 @@ class ProjectFixture:
                 },
                 "stop": command("print('runner stop')"),
                 "restart": command("print('runner restart')"),
+                "lint": command("print('lint pass')"),
+                "typecheck": command("print('typecheck pass')"),
             },
             "health": [
                 {"type": "process", "timeout_seconds": 5},
@@ -331,13 +334,6 @@ class ProjectFixture:
             ],
             "artifacts": ["dist/artifact.txt"],
             "tests": {
-                "unit": {
-                    **command("print('unit pass')"),
-                    "allow_selector": True,
-                },
-                "integration": command("print('integration pass')"),
-                "lint": command("print('lint pass')"),
-                "static_analysis": command("print('static pass')"),
                 "functional": {
                     **command("print('functional pass')"),
                     "allow_selector": True,
@@ -771,7 +767,7 @@ class ClosedLoopTests(unittest.TestCase):
         compile_restart_verify(self.fixture.root)
 
     def _author_tests(self) -> None:
-        (self.fixture.root / "tests" / "test_feature.py").write_text(
+        (self.fixture.root / "tests" / "functional" / "T-0001.functional.ts").write_text(
             "from src.feature import feature\nassert feature() == 'ok'\n",
             encoding="utf-8",
         )
@@ -822,7 +818,7 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertEqual(manifest["brief"]["test_ids"], ["T-0001"])
         self.assertEqual(
             manifest["brief"]["allowed_paths"],
-            ["tests/test_feature.py"],
+            ["tests/functional/T-0001.functional.ts"],
         )
         self._author_tests()
 
@@ -834,7 +830,7 @@ class ClosedLoopTests(unittest.TestCase):
 
         self.assertEqual(
             handoff["handoff"]["changed_files"],
-            ["tests/test_feature.py"],
+            ["tests/functional/T-0001.functional.ts"],
         )
 
     def test_tester_write_guard_rejects_business_source(self) -> None:
@@ -845,7 +841,7 @@ class ClosedLoopTests(unittest.TestCase):
         })
 
         checked = execute(self.fixture.root, "write-check", {
-            "path": "tests/test_feature.py",
+            "path": "tests/functional/T-0001.functional.ts",
             "owner_pid": os.getpid(),
         })
         self.assertEqual(checked["role"], "tester")
@@ -954,7 +950,7 @@ class ClosedLoopTests(unittest.TestCase):
             json.dumps({"summary": "fixture", "open_issues": []}),
         )
         compile_restart_verify(self.fixture.root)
-        (self.fixture.root / "tests" / "test_feature.py").write_text(
+        (self.fixture.root / "tests" / "functional" / "T-0001.functional.ts").write_text(
             "from src.feature import feature\nassert feature() == 'ok'\n",
             encoding="utf-8",
         )
@@ -981,11 +977,11 @@ class ClosedLoopTests(unittest.TestCase):
         current = status(self.fixture.root)
         self.assertEqual(
             current["lifecycle_tests"]["available"],
-            ["functional", "integration", "lint", "static_analysis", "unit"],
+            ["functional"],
         )
         self.assertEqual(
-            current["lifecycle_tests"]["commands"]["unit"]["argv"][-1],
-            "print('unit pass')",
+            current["lifecycle_tests"]["commands"]["functional"]["argv"][-1],
+            "print('functional pass')",
         )
         self.assertTrue(current["gates"]["test"])
 
@@ -1058,7 +1054,7 @@ class ReliabilityTests(unittest.TestCase):
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
         feature = self.fixture.root / "src/feature.py"
-        test_file = self.fixture.root / "tests/test_feature.py"
+        test_file = self.fixture.root / "tests/functional/T-0001.functional.ts"
         feature.write_text("value = 'before'\n", encoding="utf-8")
         test_file.write_text("def test_feature(): assert True\n", encoding="utf-8")
         before_task(self.fixture.root, "coder")
@@ -1336,14 +1332,14 @@ class ReliabilityTests(unittest.TestCase):
         publish_spec(self.fixture.root, spec_payload())
         before_task(self.fixture.root, "coder")
         feature = self.fixture.root / "src/feature.py"
-        test_file = self.fixture.root / "tests/test_feature.py"
+        test_file = self.fixture.root / "tests/functional/T-0001.functional.ts"
         feature.write_text("value = 1\n", encoding="utf-8")
         test_file.write_text("def test_feature(): assert True\n", encoding="utf-8")
         handoff = {
             "summary": "fixture implementation",
             "design_to_code": {"D-0001": ["src/fake.py"]},
-            "test_to_files": {"T-0001": ["tests/test_feature.py"]},
-            "changed_files": ["src/feature.py", "tests/test_feature.py"],
+            "test_to_files": {"T-0001": ["tests/functional/T-0001.functional.ts"]},
+            "changed_files": ["src/feature.py", "tests/functional/T-0001.functional.ts"],
             "open_issues": [],
         }
         with self.assertRaisesRegex(SdlcError, "不允许的字段"):

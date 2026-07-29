@@ -8,7 +8,7 @@ design_ids: ["D-0001"]
 acceptance_criteria_ids: ["AC-R-0001-01"]
 level: "functional"
 test_key: "functional"
-selector: "tests/functional/example.spec.ts"
+selector: "tests/functional/example.functional.ts"
 mandatory: true
 test_basis: "acceptance"
 ---

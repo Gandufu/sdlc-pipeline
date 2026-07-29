@@ -70,7 +70,7 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             init_project(fixture.root)
             publish_spec(fixture.root, spec_payload())
 
-            (fixture.root / "tests/test_feature.py").write_text(
+            (fixture.root / "tests/functional/T-0001.functional.ts").write_text(
                 "def test_feature(): assert True\n",
                 encoding="utf-8",
             )
@@ -103,7 +103,7 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             second["id"] = "T-0002"
             payload["test_plan"]["items"].append(second)
             publish_spec(fixture.root, payload)
-            (fixture.root / "tests/test_feature.py").write_text(
+            (fixture.root / "tests/functional/T-0001.functional.ts").write_text(
                 "def test_feature(): assert True\n",
                 encoding="utf-8",
             )
@@ -277,6 +277,21 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         self.assertNotIn("test_to_files", properties)
 
     def test_policy_controls_are_not_required_feature_tests(self) -> None:
+        lifecycle_schema = json.loads(
+            (REPO / "schemas/lifecycle.schema.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            lifecycle_schema["properties"]["tests"]["required"],
+            ["functional"],
+        )
+        self.assertIn(
+            "lint",
+            lifecycle_schema["properties"]["commands"]["properties"],
+        )
+        self.assertIn(
+            "typecheck",
+            lifecycle_schema["properties"]["commands"]["properties"],
+        )
         policy_schema = json.loads(
             (REPO / "schemas/rule-policy.schema.json").read_text(encoding="utf-8")
         )
@@ -290,6 +305,14 @@ class LightweightDeliveryContractTests(unittest.TestCase):
         )
         self.assertNotIn("required_test_keys", typescript)
         self.assertNotIn("required_test_keys", react)
+        self.assertEqual(
+            [item["command_key"] for item in typescript["executable_verifiers"]],
+            ["lint", "typecheck"],
+        )
+        self.assertNotIn(
+            "test_key",
+            policy_schema["properties"]["executable_verifiers"]["items"]["properties"],
+        )
 
     def test_repeated_identical_failure_is_bounded(self) -> None:
         from sdlc_core.common import SdlcError

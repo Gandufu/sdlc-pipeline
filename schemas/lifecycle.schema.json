@@ -31,7 +31,9 @@
         "compile": {"$ref": "#/$defs/command"},
         "start": {"$ref": "#/$defs/command"},
         "stop": {"$ref": "#/$defs/command"},
-        "restart": {"$ref": "#/$defs/command"}
+        "restart": {"$ref": "#/$defs/command"},
+        "lint": {"$ref": "#/$defs/command"},
+        "typecheck": {"$ref": "#/$defs/command"}
       },
       "additionalProperties": false
     },
@@ -57,7 +59,7 @@
     "artifacts": {"type": "array", "minItems": 1, "items": {"type": "string"}},
     "tests": {
       "type": "object",
-      "required": ["unit", "integration", "lint", "static_analysis"],
+      "required": ["functional"],
       "additionalProperties": {"$ref": "#/$defs/command"}
     }
   },
