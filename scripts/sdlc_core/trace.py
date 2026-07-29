@@ -127,7 +127,45 @@ def changed_path_fingerprints(root: Path) -> dict[str, Any]:
 
 
 def worktree_fingerprint(root: Path) -> dict[str, Any]:
+    entries = _delivery_entries(root)
+    return {"sha256": sha256_json(entries), "entries": entries}
+
+
+def implementation_fingerprint(root: Path) -> dict[str, Any]:
+    """Fingerprint production/tooling changes while excluding test sources."""
     entries = [
+        item for item in _delivery_entries(root)
+        if not item["path"].startswith(("tests/", "test/"))
+    ]
+    return {"sha256": sha256_json(entries), "entries": entries}
+
+
+def test_source_fingerprint(root: Path) -> dict[str, Any]:
+    """Fingerprint the complete project test tree independently of code evidence."""
+    entries: list[dict[str, Any]] = []
+    for folder in ("tests", "test"):
+        directory = root / folder
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.rglob("*")):
+            if (
+                not path.is_file()
+                or any(
+                    part in {"node_modules", "__pycache__", ".cache"}
+                    for part in path.parts
+                )
+                or path.suffix == ".pyc"
+            ):
+                continue
+            entries.append({
+                "path": path.relative_to(root).as_posix(),
+                "sha256": sha256_file(path),
+            })
+    return {"sha256": sha256_json(entries), "entries": entries}
+
+
+def _delivery_entries(root: Path) -> list[dict[str, Any]]:
+    return [
         item for item in changed_path_fingerprints(root)["entries"]
         if not item["path"].startswith("docs/sdlc/test-results/")
         and not item["path"].startswith("docs/sdlc/baselines/")
@@ -136,7 +174,6 @@ def worktree_fingerprint(root: Path) -> dict[str, Any]:
         and not item["path"].startswith(".sdlc-pipeline/work/")
         and not item["path"].startswith(".sdlc-pipeline/evidence/")
     ]
-    return {"sha256": sha256_json(entries), "entries": entries}
 
 
 def matches_path(path: str, patterns: list[str]) -> bool:

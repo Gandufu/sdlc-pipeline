@@ -45,7 +45,13 @@ from .stores import (
     write_evidence_record,
     write_work_record,
 )
-from .trace import verify_scaffold, worktree_fingerprint
+from .trace import (
+    changed_path_fingerprints,
+    implementation_fingerprint,
+    test_source_fingerprint,
+    verify_scaffold,
+    worktree_fingerprint,
+)
 from .schema_validation import validate_schema_instance
 from .tooling import ensure_tooling_ignores
 
@@ -113,7 +119,8 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
         "",
         "- 正式需求、设计、测试计划使用中文；原始输入、代码标识、命令和协议字段保持原样。",
         "- 通过 `/sdlc-spec`、`/sdlc-code`、`/sdlc-test` 依次推进，不直接编辑 `docs/sdlc` 正式产物。",
-        "- coder 完成后由主会话只触发一次 verify_delivery；Core 负责完整生命周期与测试证据。",
+        "- code 阶段派发 coder 子 agent；test 阶段派发 tester 子 agent。",
+        "- tester handoff 后由 plugin 只触发一次 verify_delivery；Core 负责测试生命周期与证据。",
         "",
     ]
     atomic_write(path, "\n".join(lines))
@@ -544,13 +551,27 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
     artifacts = artifact_evidence(root)
     if not artifacts["ok"]:
         raise SdlcError("code 阶段 artifact 验证未通过")
+    started: dict[str, Any] = {}
+    health: dict[str, Any] = {}
+    stopped: dict[str, Any] = {"stopped": False}
+    try:
+        started = start(root)
+        health = verify_health(root)
+        if not health["ok"]:
+            raise SdlcError("code 阶段 readiness 未通过")
+    finally:
+        stopped = stop_active(root)
     evidence = {
         "ok": True,
         "compiled_at": utc_now(),
         "compile": compile_result,
+        "start": started,
+        "health": health,
+        "stop": stopped,
         "artifact_evidence": artifacts,
         "policy": policy,
-        "source_fingerprint": worktree_fingerprint(root),
+        "source_fingerprint": implementation_fingerprint(root),
+        "worktree": worktree_fingerprint(root),
         "spec_hashes": current_spec_hashes(root),
     }
     write_evidence_record(
@@ -630,6 +651,53 @@ def _write_init_report(root: Path, report: dict[str, Any]) -> None:
     )
 
 
+def _validate_test_sources(
+    root: Path,
+    code_evidence: dict[str, Any],
+) -> dict[str, Any]:
+    spec = load_current_spec(root)
+    declared = {
+        item["selector"].replace("\\", "/")
+        for item in spec["test_plan"]["items"]
+        if item.get("selector")
+    }
+    missing = sorted(path for path in declared if not (root / path).is_file())
+    if missing:
+        raise SdlcError(f"Spec 声明的测试脚本不存在: {missing}")
+
+    before = {
+        item["path"]: item
+        for item in code_evidence.get("worktree", {}).get("entries", [])
+    }
+    current = {
+        item["path"]: item
+        for item in changed_path_fingerprints(root)["entries"]
+    }
+    changed = sorted(
+        path for path in set(before) | set(current)
+        if before.get(path) != current.get(path)
+    )
+    outside = [
+        path for path in changed
+        if path not in declared
+        and not path.startswith("docs/sdlc/test-results/")
+        and not path.startswith("docs/sdlc/baselines/")
+        and path != "docs/sdlc/current.json"
+        and not path.startswith(".sdlc-pipeline/state/")
+        and not path.startswith(".sdlc-pipeline/work/")
+        and not path.startswith(".sdlc-pipeline/evidence/")
+    ]
+    if outside:
+        raise SdlcError(
+            f"code gate 后只允许修改 Spec 声明的测试脚本: {outside}"
+        )
+    return {
+        "ok": True,
+        "declared": sorted(declared),
+        "changed": changed,
+    }
+
+
 def run_test_plan(root: Path) -> dict[str, Any]:
     code_evidence = read_evidence_record(root, "code")
     if not code_evidence.get("ok"):
@@ -637,8 +705,9 @@ def run_test_plan(root: Path) -> dict[str, Any]:
     spec_hashes = current_spec_hashes(root)
     if code_evidence.get("spec_hashes") != spec_hashes:
         raise SdlcError("code 证据与当前 spec 不匹配，必须重新 compile/restart/verify")
-    if code_evidence.get("source_fingerprint") != worktree_fingerprint(root):
-        raise SdlcError("code 证据生成后工作树发生变化，必须重新 compile/restart/verify")
+    if code_evidence.get("source_fingerprint") != implementation_fingerprint(root):
+        raise SdlcError("code 证据生成后业务源码发生变化，必须重新执行 code gate")
+    test_sources = _validate_test_sources(root, code_evidence)
     spec = load_current_spec(root)
     commands = load_contract(root)["tests"]
     started_at = utc_now()
@@ -700,7 +769,9 @@ def run_test_plan(root: Path) -> dict[str, Any]:
             "spec_hashes": spec_hashes,
             "lifecycle_sha256": sha256_file(contract_path(root)),
             "source_fingerprint": code_evidence["source_fingerprint"],
+            "test_source_fingerprint": test_source_fingerprint(root),
         },
+        "test_sources": test_sources,
     }
     write_evidence_record(
         root,
@@ -821,6 +892,7 @@ def execute_tests(root: Path) -> dict[str, Any]:
         "spec_hashes": current_spec_hashes(root),
         "lifecycle_sha256": sha256_file(contract_path(root)),
         "source_fingerprint": code_evidence.get("source_fingerprint"),
+        "test_source_fingerprint": test_source_fingerprint(root),
     }
     if execution.get("binding") != expected_binding:
         raise SdlcError(
@@ -871,8 +943,10 @@ def execute_tests(root: Path) -> dict[str, Any]:
 
 def verify_delivery(root: Path) -> dict[str, Any]:
     """Run the single authoritative delivery verification for a fingerprint."""
+    read_work_record(root, "tester-handoff")
     binding = {
-        "source_fingerprint": worktree_fingerprint(root),
+        "source_fingerprint": implementation_fingerprint(root),
+        "test_source_fingerprint": test_source_fingerprint(root),
         "spec_hashes": current_spec_hashes(root),
         "lifecycle_sha256": sha256_file(contract_path(root)),
     }
@@ -885,6 +959,11 @@ def verify_delivery(root: Path) -> dict[str, Any]:
     code = read_evidence_record(root, "code")
     if not code.get("ok") or code.get("source_fingerprint") != binding["source_fingerprint"]:
         raise SdlcError("code evidence 缺失或已失效；请先重新执行 code gate")
+    _validate_test_sources(root, code)
+    started: dict[str, Any] = {}
+    health: dict[str, Any] = {}
+    execution: dict[str, Any] = {}
+    results: dict[str, Any] = {}
     cleanup: dict[str, Any] = {"stopped": False}
     try:
         started = start(root)

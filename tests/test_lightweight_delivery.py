@@ -38,7 +38,6 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             self.assertEqual(pack["brief"]["first_delivery"], {
                 "requirement_id": "R-0001",
                 "design_ids": ["D-0001"],
-                "test_ids": ["T-0001"],
             })
             self.assertTrue(pack["resources"])
             self.assertNotIn("content", json.dumps(pack, ensure_ascii=False))

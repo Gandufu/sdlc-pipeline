@@ -17,7 +17,11 @@ from .journal import journal_status, spec_work_index
 from .memory import memory_summary
 from .runs import active_identity_matches, pid_alive, read_active
 from .trace import verify_scaffold
-from .trace import worktree_fingerprint
+from .trace import (
+    implementation_fingerprint,
+    test_source_fingerprint,
+    worktree_fingerprint,
+)
 from .versions import current_version, parent_manifest
 from .spec_candidates import candidate_status
 from .stores import read_evidence_record, read_work_record
@@ -29,6 +33,7 @@ def status(root: Path) -> dict[str, Any]:
     diagnostics: list[dict[str, str]] = []
     parent = parent_manifest(root)
     fingerprint = worktree_fingerprint(root)
+    code_fingerprint = implementation_fingerprint(root)
     closed_baseline = bool(
         parent and parent.get("status") == "closed" and not fingerprint["entries"]
     )
@@ -63,7 +68,7 @@ def status(root: Path) -> dict[str, Any]:
     gates["code"] = closed_baseline or bool(
         code and code.get("ok")
         and code.get("spec_hashes") == spec_hashes
-        and code.get("source_fingerprint") == fingerprint
+        and code.get("source_fingerprint") == code_fingerprint
     )
     if not gates["code"]:
         missing.append("compile/restart/health/artifact evidence")
@@ -78,6 +83,7 @@ def status(root: Path) -> dict[str, Any]:
         "spec_hashes": spec_hashes,
         "lifecycle_sha256": lifecycle_sha256,
         "source_fingerprint": (code or {}).get("source_fingerprint"),
+        "test_source_fingerprint": test_source_fingerprint(root),
     }
     gates["test"] = closed_baseline or bool(
         candidate and candidate.get("status") in {"ready", "closed"}

@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 
 from sdlc_core.adapter import (  # noqa: E402
+    after_task,
     before_task,
     build_context_pack,
     validate_coder_handoff,
@@ -49,7 +50,14 @@ from sdlc_core.lifecycle import (  # noqa: E402
 )
 from sdlc_core.journal import begin_attempt, journal_status  # noqa: E402
 from sdlc_core.policies import evaluate_hard_policies  # noqa: E402
-from sdlc_core.runs import clear_active, pid_alive, record_active, record_tokens, stop_active  # noqa: E402
+from sdlc_core.runs import (  # noqa: E402
+    clear_active,
+    pid_alive,
+    read_active,
+    record_active,
+    record_tokens,
+    stop_active,
+)
 from sdlc_core.sources import (  # noqa: E402
     MAX_SOURCE_SEGMENT_CHARS,
     ingest_source,
@@ -703,6 +711,10 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(evidence["compile"]["ok"])
         self.assertTrue(evidence["policy"]["ok"])
         self.assertEqual(len(evidence["artifact_evidence"]["artifacts"]), 1)
+        self.assertTrue(evidence["start"]["pid"])
+        self.assertTrue(evidence["health"]["ok"])
+        self.assertTrue(evidence["stop"]["stopped"])
+        self.assertFalse(read_active(self.fixture.root))
 
 
 class ClosedLoopTests(unittest.TestCase):
@@ -712,23 +724,43 @@ class ClosedLoopTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.fixture.close()
 
-    def test_coder_context_explicitly_excludes_test_actions(self) -> None:
+    def test_coder_context_excludes_test_sources_and_verification(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
         result = before_task(self.fixture.root, "coder")
-        self.assertIn(
-            "code 阶段不运行依赖项目启动的 functional 测试",
-            result["instruction"],
+        manifest = read_markdown_record(
+            self.fixture.root / result["context_pack"]["paths"][0]
         )
+        self.assertNotIn("test_ids", manifest["brief"])
+        self.assertNotIn("verification", manifest["brief"])
+        self.assertNotIn("tests", manifest["brief"]["allowed_paths"])
+        self.assertFalse(any(
+            item["reason"] == "authoritative Verification"
+            or item["path"].startswith("tests/")
+            for item in manifest["resources"]
+        ))
+        self.assertIn("只实现业务代码", result["instruction"])
+
+    def test_coder_write_guard_rejects_test_sources(self) -> None:
+        init_project(self.fixture.root)
+        publish_spec(self.fixture.root, spec_payload())
+        execute(self.fixture.root, "task-before", {
+            "role": "coder",
+            "owner_pid": os.getpid(),
+        })
+
+        with self.assertRaisesRegex(SdlcError, "coder 禁止修改测试脚本"):
+            execute(self.fixture.root, "write-check", {
+                "path": "tests/functional/feature.functional.ts",
+                "owner_pid": os.getpid(),
+            })
 
     def _through_code(self) -> None:
         init_project(self.fixture.root)
         publish_spec(self.fixture.root, spec_payload())
         before_task(self.fixture.root, "coder")
         feature = self.fixture.root / "src" / "feature.py"
-        test = self.fixture.root / "tests" / "test_feature.py"
         feature.write_text("def feature(): return 'ok'\n", encoding="utf-8")
-        test.write_text("from src.feature import feature\nassert feature() == 'ok'\n", encoding="utf-8")
         handoff = {
             "summary": "fixture implementation",
             "open_issues": [],
@@ -737,6 +769,94 @@ class ClosedLoopTests(unittest.TestCase):
         }
         validate_coder_handoff(self.fixture.root, json.dumps(handoff))
         compile_restart_verify(self.fixture.root)
+
+    def _author_tests(self) -> None:
+        (self.fixture.root / "tests" / "test_feature.py").write_text(
+            "from src.feature import feature\nassert feature() == 'ok'\n",
+            encoding="utf-8",
+        )
+
+    def _through_tester(self) -> None:
+        before_task(self.fixture.root, "tester")
+        self._author_tests()
+        after_task(
+            self.fixture.root,
+            "tester",
+            json.dumps({"summary": "测试脚本已准备", "open_issues": []}),
+        )
+
+    def test_declared_test_script_can_be_added_after_code_gate(self) -> None:
+        self._through_code()
+        self._through_tester()
+
+        self.assertTrue(status(self.fixture.root)["gates"]["code"])
+        delivery = verify_delivery(self.fixture.root)
+
+        self.assertTrue(delivery["ok"])
+        self.assertIn(
+            "test_source_fingerprint",
+            delivery["binding"],
+        )
+
+    def test_test_stage_rejects_undeclared_test_script(self) -> None:
+        self._through_code()
+        self._through_tester()
+        (self.fixture.root / "tests" / "extra_test.py").write_text(
+            "assert True\n",
+            encoding="utf-8",
+        )
+
+        with self.assertRaisesRegex(
+            SdlcError,
+            "只允许修改 Spec 声明的测试脚本",
+        ):
+            verify_delivery(self.fixture.root)
+
+    def test_tester_subagent_context_and_handoff_are_test_only(self) -> None:
+        self._through_code()
+        dispatched = before_task(self.fixture.root, "tester")
+        manifest = read_markdown_record(
+            self.fixture.root / dispatched["context_pack"]["paths"][0]
+        )
+        self.assertEqual(manifest["role"], "tester")
+        self.assertEqual(manifest["brief"]["test_ids"], ["T-0001"])
+        self.assertEqual(
+            manifest["brief"]["allowed_paths"],
+            ["tests/test_feature.py"],
+        )
+        self._author_tests()
+
+        handoff = after_task(
+            self.fixture.root,
+            "tester",
+            json.dumps({"summary": "Playwright 脚本已准备", "open_issues": []}),
+        )
+
+        self.assertEqual(
+            handoff["handoff"]["changed_files"],
+            ["tests/test_feature.py"],
+        )
+
+    def test_tester_write_guard_rejects_business_source(self) -> None:
+        self._through_code()
+        execute(self.fixture.root, "task-before", {
+            "role": "tester",
+            "owner_pid": os.getpid(),
+        })
+
+        checked = execute(self.fixture.root, "write-check", {
+            "path": "tests/test_feature.py",
+            "owner_pid": os.getpid(),
+        })
+        self.assertEqual(checked["role"], "tester")
+        with self.assertRaisesRegex(
+            SdlcError,
+            "tester 只能修改 Spec 声明的测试脚本",
+        ):
+            execute(self.fixture.root, "write-check", {
+                "path": "src/feature.py",
+                "owner_pid": os.getpid(),
+            })
 
     def test_coder_handoff_changed_files_are_derived_from_git_diff(self) -> None:
         init_project(self.fixture.root)
@@ -807,6 +927,7 @@ class ClosedLoopTests(unittest.TestCase):
 
     def test_test_execution_cannot_be_reused_after_test_plan_changes(self) -> None:
         self._through_code()
+        self._author_tests()
         execution = run_test_plan(self.fixture.root)
         payload = spec_payload()
         payload["test_plan"]["items"][0]["expected"] = "更新后的退出码为 0"
@@ -828,15 +949,15 @@ class ClosedLoopTests(unittest.TestCase):
             "def feature(): return 'ok'\n",
             encoding="utf-8",
         )
-        (self.fixture.root / "tests" / "test_feature.py").write_text(
-            "from src.feature import feature\nassert feature() == 'ok'\n",
-            encoding="utf-8",
-        )
         validate_coder_handoff(
             self.fixture.root,
             json.dumps({"summary": "fixture", "open_issues": []}),
         )
         compile_restart_verify(self.fixture.root)
+        (self.fixture.root / "tests" / "test_feature.py").write_text(
+            "from src.feature import feature\nassert feature() == 'ok'\n",
+            encoding="utf-8",
+        )
 
         execution = run_test_plan(self.fixture.root)
 
@@ -854,6 +975,7 @@ class ClosedLoopTests(unittest.TestCase):
         self,
     ) -> None:
         self._through_code()
+        self._author_tests()
         execution = run_test_plan(self.fixture.root)
         execute_tests(self.fixture.root)
         current = status(self.fixture.root)
@@ -876,6 +998,7 @@ class ClosedLoopTests(unittest.TestCase):
 
     def test_full_init_spec_code_test_version(self) -> None:
         self._through_code()
+        self._through_tester()
         delivery = verify_delivery(self.fixture.root)
         results = load_test_results(self.fixture.root, delivery["test_results"])
         self.assertEqual(results["status"], "pass")
@@ -916,6 +1039,7 @@ class ClosedLoopTests(unittest.TestCase):
 
     def test_verify_delivery_reuses_success_for_same_fingerprint(self) -> None:
         self._through_code()
+        self._through_tester()
         first = verify_delivery(self.fixture.root)
         second = verify_delivery(self.fixture.root)
         self.assertFalse(first["cached"])
@@ -972,9 +1096,7 @@ class ReliabilityTests(unittest.TestCase):
         publish_spec(self.fixture.root, spec_payload())
         first = before_task(self.fixture.root, "coder")
         feature = self.fixture.root / "src/feature.py"
-        test_file = self.fixture.root / "tests/test_feature.py"
         feature.write_text("value = 'retry'\n", encoding="utf-8")
-        test_file.write_text("def test_feature(): assert True\n", encoding="utf-8")
 
         retry = before_task(self.fixture.root, "coder")
         handoff = {
@@ -989,7 +1111,7 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(retry["baseline"], "reused")
         self.assertEqual(
             result["diff"]["changed_paths"],
-            ["src/feature.py", "tests/test_feature.py"],
+            ["src/feature.py"],
         )
 
     def test_abandoned_attempt_is_reconciled_on_next_action(self) -> None:
@@ -1175,9 +1297,6 @@ class ReliabilityTests(unittest.TestCase):
 
         (self.fixture.root / "src/feature.py").write_text(
             "value = 1\n", encoding="utf-8"
-        )
-        (self.fixture.root / "tests/test_feature.py").write_text(
-            "def test_feature(): assert True\n", encoding="utf-8"
         )
         execute(self.fixture.root, "task-after", {
             "role": "coder",

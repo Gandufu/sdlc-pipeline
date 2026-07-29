@@ -5,9 +5,10 @@ import path from "node:path"
 
 const AGENTS = {
   "sdlc-coder": "coder",
+  "sdlc-tester": "tester",
 }
-const coderDeadlines = new Map()
-const coderWriteSessions = new Set()
+const taskDeadlines = new Map()
+const taskWriteSessions = new Set()
 const PLUGIN_PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", ".."
 )
@@ -505,7 +506,6 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           const options = args.options ? JSON.parse(args.options) : {}
           const allowed = {
             "sdlc-main": ["init"],
-            "sdlc-tester": ["verify_delivery"],
           }
           if (!allowed[context?.agent]?.includes(args.action)) {
             throw new Error(`agent ${context?.agent || "unknown"} cannot run lifecycle ${args.action}`)
@@ -535,15 +535,16 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
     "tool.execute.before": async (input, output) => {
       if (["edit", "write", "apply_patch"].includes(input.tool)) {
         const target = output.args?.filePath || output.args?.path
+        let checked
         if (target) {
-          await invoke(fallbackRoot, "write-check", {
+          checked = await invoke(fallbackRoot, "write-check", {
             path: target,
             owner_pid: process.pid,
           })
         }
-        if (input.sessionID && !coderWriteSessions.has(input.sessionID)) {
-          coderWriteSessions.add(input.sessionID)
-          await logPluginEvent(client, "coder.first_write", {
+        if (checked?.heartbeat?.active && input.sessionID && !taskWriteSessions.has(input.sessionID)) {
+          taskWriteSessions.add(input.sessionID)
+          await logPluginEvent(client, `${checked.role}.first_write`, {
             session_id: input.sessionID,
             tool: input.tool,
           })
@@ -553,34 +554,34 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       if (input.tool !== "task") return
       const role = AGENTS[output.args?.subagent_type]
       if (!role) {
-        throw new Error("sdlc-main 只能派发 sdlc-coder")
+        throw new Error("sdlc-main 只能派发 sdlc-coder 或 sdlc-tester")
       }
       const result = await invoke(fallbackRoot, "task-before", {
         role,
         owner_pid: process.pid,
       })
-      const coderDeadlineSeconds = Number(result.deadline_seconds)
-      if (!Number.isInteger(coderDeadlineSeconds) || coderDeadlineSeconds <= 0) {
-        throw new Error("Core 未返回有效的 coder deadline")
+      const deadlineSeconds = Number(result.deadline_seconds)
+      if (!Number.isInteger(deadlineSeconds) || deadlineSeconds <= 0) {
+        throw new Error(`Core 未返回有效的 ${role} deadline`)
       }
-      await logPluginEvent(client, "coder.dispatched", {
+      await logPluginEvent(client, `${role}.dispatched`, {
         session_id: input.sessionID,
-        deadline_seconds: coderDeadlineSeconds,
+        deadline_seconds: deadlineSeconds,
         requirement_count: result.requirement_count,
         context_characters: result.context_pack.characters,
         context_resources: result.context_pack.resource_count,
       })
       const deadline = setTimeout(async () => {
         try {
-          await logPluginEvent(client, "coder.deadline_exceeded", {
+          await logPluginEvent(client, `${role}.deadline_exceeded`, {
             session_id: input.sessionID,
-            deadline_seconds: coderDeadlineSeconds,
+            deadline_seconds: deadlineSeconds,
           }, "warn")
           await invoke(fallbackRoot, "task-cancel", {
-            reason: `coder deadline exceeded after ${coderDeadlineSeconds}s`,
+            reason: `${role} deadline exceeded after ${deadlineSeconds}s`,
           })
         } catch (error) {
-          await logPluginEvent(client, "coder.cancel_failed", {
+          await logPluginEvent(client, `${role}.cancel_failed`, {
             session_id: input.sessionID,
             error: String(error),
           }, "error")
@@ -590,17 +591,20 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             query: { directory: fallbackRoot },
           })
         }
-      }, coderDeadlineSeconds * 1000)
+      }, deadlineSeconds * 1000)
       deadline.unref()
-      coderDeadlines.set(input.callID, deadline)
+      taskDeadlines.set(input.callID, deadline)
       const manifest = result.context_pack.paths[0]
       const taskObjective = String(output.args?.description || "").trim()
       delete output.args.command
       output.args.prompt = `[SDLC context pack] ${manifest}\n`
         + `${result.instruction}\n`
         + (taskObjective ? `本次任务目标：${taskObjective}。\n` : "")
-        + `Coder deadline: ${coderDeadlineSeconds}s。`
-        + "不要展开读取 Core 源码，不要在 code 阶段运行 functional；"
+        + `${role} deadline: ${deadlineSeconds}s。`
+        + (role === "coder"
+          ? "只实现业务代码；禁止读取、创建或修改任何测试脚本；"
+          : "只编写声明的测试脚本；禁止修改业务源码或直接运行 lifecycle；")
+        + "不要展开读取 Core 源码；"
         + "完成实现后立即返回约定 JSON handoff。"
     },
 
@@ -608,17 +612,19 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       if (input.tool !== "task") return
       const role = AGENTS[input.args?.subagent_type]
       if (!role) return
-      const deadline = coderDeadlines.get(input.callID)
+      const deadline = taskDeadlines.get(input.callID)
       if (deadline) clearTimeout(deadline)
-      coderDeadlines.delete(input.callID)
+      taskDeadlines.delete(input.callID)
       await invoke(fallbackRoot, "task-after", {
         role,
         output: output.output || "",
       })
       await invoke(fallbackRoot, "lifecycle", {
-        action: "compile_restart_verify",
+        action: role === "coder"
+          ? "compile_restart_verify"
+          : "verify_delivery",
       })
-      await logPluginEvent(client, "coder.completed", {
+      await logPluginEvent(client, `${role}.completed`, {
         session_id: input.sessionID,
       })
     },

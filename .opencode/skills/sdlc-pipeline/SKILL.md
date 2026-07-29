@@ -10,10 +10,12 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
 - init：读取 status 的模板元数据；需要选择时询问用户；调用一次 `lifecycle(init)`。
 - spec：读取项目根目录的 `.sdlc-pipeline/runtime/references/spec-interview.md`；摄取来源、保存阻塞决策、分片构建 Candidate，
   validate 后按用户确认的 ID/hash 发布。
-- code：派发 coder；plugin 只传唯一 progressive context manifest；Core 根据 Git diff 生成证据映射，
-  再统一执行 compile/package/lint/typecheck code gate；不运行依赖项目启动的 functional 测试。
-- test：调用一次 `lifecycle(verify_delivery)`；只启动候选、检查 readiness、运行无头浏览器
-  functional T-id 并 cleanup；成功后展示候选，用户确认才 finalize。
+- code：派发 coder；plugin 只传唯一 progressive context manifest；coder 只实现业务代码；
+  Core 根据 Git diff 生成证据映射，再统一执行 compile/package/lint/typecheck、启动、readiness
+  和停止，不读取或生成测试脚本。
+- test：主会话派发唯一 tester 子 agent；tester 编写 Spec selector 指定的 Playwright functional
+  脚本并返回 handoff；plugin 校验后调用一次 `lifecycle(verify_delivery)`。Core 启动候选、
+  检查 readiness、运行确定性测试命令并 cleanup；成功后展示候选，用户确认才 finalize。
 
 工具只表达意图：
 

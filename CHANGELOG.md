@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- coder 退出所有测试源码读写；code gate 在 handoff 后统一完成 compile/package/lint/typecheck、
+  启动、readiness 和停止。
+- `sdlc-tester` 成为唯一测试编写入口，仅可修改 Spec selector 声明的 `tests/**`/`test/**`
+  Playwright 脚本；业务源码与测试源码分别绑定指纹，测试编写不会使 code gate 失效。
+- `sdlc-tester` 从 primary 阶段入口改为由 `sdlc-main` 派发的独立 subagent；tester 只返回
+  test handoff，plugin 校验后再由 Core 执行唯一 `verify_delivery`。
+- Playwright package/CLI 是确定性交付验证路径；Playwright MCP 保持可选且不进入 gate 依赖。
+
 ## 0.15.4 - 2026-07-28
 
 ### Fixed

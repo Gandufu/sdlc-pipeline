@@ -37,11 +37,16 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
    `candidate_id + content_hash` 发布不可变 baseline。
 3. `/sdlc-code`
    原生 task 只派发 `sdlc-coder`。coder 最多 16 个 agent steps，读取一个渐进式 context manifest，
-   在 allowed paths 内实现业务代码和 functional 文件。task-after 校验真实 Git diff 和 handoff，
-   Core 再执行 compile/package/lint/typecheck code gate。
+   在 allowed paths 内只实现业务代码，禁止读取或修改测试脚本。task-after 校验真实 Git diff 和
+   handoff，Core 再执行 compile/package/lint/typecheck、启动、readiness 和停止。
 4. `/sdlc-test`
-   start/readiness 后执行 mandatory 与 headless functional 验证，最后 cleanup。Core 记录每次测试、
-   中间错误和 Delivery Trace；最终成功不能覆盖此前失败 attempt。
+   `sdlc-main` 只派发一次 `sdlc-tester` 子 agent；tester 在测试目录内编写 Spec selector 声明的
+   Playwright functional 脚本并返回 handoff。plugin 校验 handoff 后，由 Core 执行
+   start/readiness、mandatory functional 验证和 cleanup。Core 记录每次测试、中间错误和
+   Delivery Trace；最终成功不能覆盖此前失败 attempt。
+
+Playwright MCP 不是 pipeline 的必需依赖。权威 gate 通过 lifecycle contract 直接调用项目已安装的
+Playwright package/CLI；MCP 仅适合未来可选的探索式浏览器交互，不能代替可重复执行的测试脚本。
 5. 用户确认后由 `sdlc_finalize` 固化版本、摘要、证据 commit 和 tag。
 
 相同输入指纹的成功 attempt 可幂等复用；同一失败连续出现两次时 Run 会进入 `blocked`，防止死循环。
@@ -72,7 +77,7 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
 ```text
 .opencode/
   plugins/                    # 唯一 OpenCode adapter
-  agents/                     # sdlc-main / sdlc-coder / sdlc-tester
+  agents/                     # primary sdlc-main + coder/tester subagents
   commands/                   # 四个用户命令
   skills/                     # 项目技能
 

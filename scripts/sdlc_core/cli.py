@@ -9,7 +9,7 @@ from typing import Any
 from .adapter import (
     after_task,
     before_task,
-    coder_deadline_seconds,
+    task_deadline_seconds,
     validate_write_path,
 )
 from .bootstrap import bootstrap
@@ -217,13 +217,27 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
             owner_pid=payload.get("owner_pid"),
         )
     if operation == "write-check":
-        checked = validate_write_path(root, payload["path"])
+        attempt = running_attempt(root, operation="task-before")
+        role = (
+            str(attempt.get("step", "")).removeprefix("task-before:")
+            if attempt else None
+        )
+        checked = validate_write_path(
+            root,
+            payload["path"],
+            role=role,
+        )
         heartbeat = heartbeat_attempt(
             root,
             operation="task-before",
             owner_pid=payload.get("owner_pid"),
         )
-        return {"ok": True, "path": checked["path"], "heartbeat": heartbeat}
+        return {
+            "ok": True,
+            "path": checked["path"],
+            "role": role,
+            "heartbeat": heartbeat,
+        }
     if operation == "task-cancel":
         stop = stop_active(root)
         return {
@@ -265,7 +279,7 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
         return "code", action
     if operation in {"task-before", "task-after"}:
         role = str(payload.get("role", "unknown"))
-        return "code", f"{operation}:{role}"
+        return ("test" if role == "tester" else "code"), f"{operation}:{role}"
     if operation == "finalize":
         return "version", "finalize"
     if operation == "path-check":
@@ -279,8 +293,11 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         return _execute(root, operation, payload)
     if operation == "task-before":
         payload = dict(payload)
-        if payload.get("role") == "coder":
-            payload["deadline_seconds"] = coder_deadline_seconds(root)
+        if payload.get("role") in {"coder", "tester"}:
+            payload["deadline_seconds"] = task_deadline_seconds(
+                root,
+                str(payload["role"]),
+            )
         phase, step = _phase_step(operation, payload)
         attempt = begin_attempt(
             root,
@@ -305,7 +322,13 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
     if operation == "task-after":
         attempt = running_attempt(root, operation="task-before")
         if not attempt:
-            raise SdlcError("coder dispatch 不存在、已超时或已回收")
+            raise SdlcError("subagent dispatch 不存在、已超时或已回收")
+        expected_step = f"task-before:{payload.get('role')}"
+        if attempt.get("step") != expected_step:
+            raise SdlcError(
+                f"subagent handoff role 不匹配: "
+                f"{attempt.get('step')} != {expected_step}"
+            )
         try:
             result = _execute(root, operation, payload)
         except Exception as exc:
