@@ -588,6 +588,7 @@ class InstallerTests(unittest.TestCase):
                 "0003-storage-layout-v3.md",
                 "0004-native-markdown-artifacts.md",
                 "0005-separate-code-controls-from-functional-tests.md",
+                "0006-contract-driven-test-suites-and-preflight.md",
             ],
         )
 
@@ -721,6 +722,8 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn('"sdlc-coder": allow', tester)
         self.assertIn('"tests/**": allow', tester)
         self.assertIn("Playwright", tester)
+        self.assertIn("按语义匹配请求而非数组下标", tester)
+        self.assertIn("可观察的业务结果", tester)
         self.assertIn("mode: subagent", tester)
         self.assertIn("sdlc_lifecycle: deny", tester)
         self.assertIn('"sdlc-tester": allow', main)
@@ -1006,9 +1009,9 @@ class InstallerTests(unittest.TestCase):
 
     def test_spec_guidance_distinguishes_test_key_from_shell_command(self) -> None:
         text = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
-        self.assertIn("functional 测试键", text)
+        self.assertIn("测试键由项目 lifecycle 合约声明", text)
         self.assertIn("functional", text)
-        self.assertNotIn("unit/integration", text)
+        self.assertIn("unit", text)
 
     def test_desktop_project_assets_are_discoverable(self) -> None:
         self.assertTrue((REPO / ".opencode/plugins/sdlc-pipeline.js").exists())

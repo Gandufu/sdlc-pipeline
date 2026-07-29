@@ -33,11 +33,13 @@
 extension point，不预测实际代码文件。写 Design 前必须读取
 `.sdlc-pipeline/contracts/scaffold.json`；
 `extension_points` 只能逐字使用该文件已声明的 ID，不能编造 `feature` 等泛称。Verification 建立 AC
-到 lifecycle 逻辑测试键 `test_key` 的映射；当前仅允许 functional 测试键，不能填写
-`pnpm functional` 等 shell command。
+到 lifecycle 逻辑测试键 `test_key` 的映射；测试键由项目 lifecycle 合约声明，可包含 unit 与
+functional suite，不能填写 `pnpm functional` 等 shell command。
 `F/R/D/T/AC` ID 由 Core 分配或校验；`feature_id` 可提供语义 hint，Core 会规范化为 `F-xxxx`；尤其不得手填 AC id，Requirement 保存后按所属 R 与顺序
-使用 `AC-R-xxxx-yy`。functional test key 必须声明 `allow_selector: true`，`selector` 必须填写
-`tests/functional/` 下的项目内相对路径，并由 tester 子 agent 编写对应 Playwright 脚本。
+使用 `AC-R-xxxx-yy`。`selector` 必须匹配 test_key 的 `selector_patterns`，并由 tester 子 agent
+编写对应脚本。v1.0 的 functional suite 可由 Core 按 T-id 生成默认 selector；v1.1 必须显式提供
+`tests/` 下的 POSIX 项目内路径。functional 测试使用项目已安装的 Playwright；unit 测试使用模板
+声明的 runner。
 正式文档使用项目配置语言（默认中文），代码标识、协议字段和原文保持原样。
 Core 将 R/D/T 写成 frontmatter 加固定标题文法的原生 Markdown；不得在正式 artifact 中嵌入
 structured-record JSON fenced block。模板位于

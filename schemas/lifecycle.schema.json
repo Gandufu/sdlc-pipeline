@@ -4,7 +4,7 @@
   "type": "object",
   "required": ["schema_version", "project_type", "tools", "commands", "health", "artifacts", "tests"],
   "properties": {
-    "schema_version": {"const": "1.0"},
+    "schema_version": {"enum": ["1.0", "1.1"]},
     "project_type": {"type": "string", "minLength": 1},
     "port": {"type": "integer", "minimum": 1, "maximum": 65535},
     "keep_running_after_init": {"type": "boolean"},
@@ -56,9 +56,13 @@
       }
     },
     "artifacts": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "test_preflight": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/command"}
+    },
     "tests": {
       "type": "object",
-      "required": ["functional"],
+      "minProperties": 1,
       "additionalProperties": {"$ref": "#/$defs/command"}
     }
   },
@@ -75,9 +79,25 @@
         "background": {"type": "boolean"}
         ,"windows_only": {"type": "boolean"}
         ,"allow_selector": {"type": "boolean"}
+        ,"requires_runtime": {"type": "boolean"}
+        ,"selector_patterns": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        }
       },
       "additionalProperties": false
     }
   },
+  "allOf": [
+    {
+      "if": {"properties": {"schema_version": {"const": "1.0"}}},
+      "then": {"properties": {"tests": {"required": ["functional"]}}}
+    },
+    {
+      "if": {"properties": {"schema_version": {"const": "1.1"}}},
+      "then": {"required": ["test_preflight"]}
+    }
+  ],
   "additionalProperties": false
 }

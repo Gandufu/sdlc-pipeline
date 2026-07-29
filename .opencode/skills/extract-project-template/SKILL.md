@@ -47,11 +47,12 @@ Electron 项目必须检查：
 
 ```text
 install -> compile -> package -> start -> readiness。code gate 保留预览；test gate 先停止预览并确认
-端口释放，再由 headless functional 脚本启动、验证和关闭测试实例
+端口释放，执行 test_preflight；仅在所选测试套件需要 runtime 时启动、readiness 后再运行测试并清理
 ```
 
-功能测试计划只描述由无头浏览器执行的 functional T-id；lint、typecheck 与 static analysis
-属于 code policy verifier。空测试集、只检查端口或只匹配 HTML 字符串均算失败。
+生命周期合同必须声明测试套件的 selector 路径模式和 `requires_runtime`。test_preflight 在 tester
+产出测试脚本后执行 lint、typecheck 与完整 unit test；functional T-id 仅在运行时 readiness 后执行。
+空测试集、只检查端口或只匹配 HTML 字符串均算失败。
 
 ## 5. 验证并报告
 

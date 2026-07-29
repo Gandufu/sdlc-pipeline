@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.17.0`。
+OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.18.0`。
 
 插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
 状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
@@ -42,11 +42,10 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
    handoff，Core 再执行 compile/package/lint/typecheck、启动与 readiness，并保留预览进程，
    返回模板声明的访问地址供用户检查当前页面。
 4. `/sdlc-test`
-   `sdlc-main` 只派发一次 `sdlc-tester` 子 agent；tester 在测试目录内编写 Spec selector 声明的
-   Playwright functional 脚本并返回 handoff。plugin 校验 handoff 后，Core 先停止 coder 预览并
-   确认端口释放，再由 Playwright 脚本启动、验证并关闭 Electron，最后复查 cleanup。Core 记录
-   每次测试、中间错误和
-   Delivery Trace；最终成功不能覆盖此前失败 attempt。
+   `sdlc-main` 只派发一次 `sdlc-tester` 子 agent；tester 仅在 Spec selector 声明的路径内编写
+   unit 或 functional 脚本并返回 handoff。plugin 校验 handoff 后，Core 停止 coder 预览并确认端口
+   释放，执行合同 `test_preflight`，再只为声明 `requires_runtime: true` 的测试套件启动运行时并完成
+   readiness。Core 记录每次测试、中间错误和 Delivery Trace；最终成功不能覆盖此前失败 attempt。
 
 Playwright MCP 不是 pipeline 的必需依赖。权威 gate 通过 lifecycle contract 直接调用项目已安装的
 Playwright package/CLI；MCP 仅适合未来可选的探索式浏览器交互，不能代替可重复执行的测试脚本。
@@ -134,12 +133,16 @@ docs/sdlc/
 
 ## 合同与门禁
 
-`lifecycle.json` 用 argv 数组分别声明 compile、package、start、health/artifact 和 functional
-测试键。start 产生的后台进程由 Core 记录 PID 与创建身份并统一停止，模板不重复实现 stop/restart
-脚本。code gate 执行 compile/package、lint、typecheck、启动与 readiness，并保持预览运行；
-test 阶段由 Core 清理预览端口，再执行 tester 编写的 Playwright functional 脚本。
-spec 写入 Verification 时可省略 selector，Core 会按最终 T-id 确定性生成
-`tests/functional/T-xxxx.functional.ts`；只有多个 T-id 共享一个脚本时才显式指定 selector。
+`lifecycle.json` 用 argv 数组分别声明 compile、package、start、health/artifact、test_preflight
+和测试套件。v1.1 的每个测试套件声明 `requires_runtime` 与 `selector_patterns`，使 Electron、Web 和
+未来 Spring Boot 都能作为同一 Core 的合同适配器。start 产生的后台进程由 Core 记录 PID 与创建身份
+并统一停止，模板不重复实现 stop/restart 脚本。code gate 执行 compile/package、lint、typecheck、
+启动与 readiness，并保持预览运行；test 阶段由 Core 清理预览端口、执行 tester 产出后的预检，再按
+suite 需求运行 unit 或 Playwright functional 测试。
+
+v1.0 继续支持默认 `functional` selector：省略时按最终 T-id 生成
+`tests/functional/T-xxxx.functional.ts`。v1.1 的 Verification 必须显式提供符合该 suite 路径模式的
+POSIX 项目内 selector；tester 仍只能修改已发布 Spec 声明的精确文件。
 `scaffold.json` 声明关键文件 fingerprint、protected paths、allowed paths 与 extension points。
 Design 只能引用已声明 extension point；实际代码文件由 code 后的 Git diff 推导。
 
@@ -151,7 +154,7 @@ Run 中不要切 agent、不要手动 `@` 子代理；团队边界见
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = "1"
-python -m unittest discover -s tests -v
+python -X utf8 -m unittest discover -s tests -v
 node --check .opencode/plugins/sdlc-pipeline.js
 git diff --check
 ```

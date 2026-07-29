@@ -14,10 +14,10 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
   Core 根据 Git diff 生成证据映射，再统一执行 compile/package/lint/typecheck、启动、readiness，
   并保留预览进程和访问地址
   和停止，不读取或生成测试脚本。
-- test：主会话派发唯一 tester 子 agent；tester 编写 Spec selector 指定的 Playwright functional
+- test：主会话派发唯一 tester 子 agent；tester 编写 Spec selector 指定的 unit 或 functional 测试
   脚本并返回 handoff；plugin 校验后调用一次 `lifecycle(verify_delivery)`。Core 停止 coder 预览、
-  确认端口释放，由 Playwright 启动并验证 Electron，再检查 cleanup；成功后展示候选，用户确认才
-  finalize。
+  确认端口释放，执行 test_preflight，并仅在被选 suite 需要 runtime 时启动、readiness 后执行测试，
+  再检查 cleanup；成功后展示候选，用户确认才 finalize。
 
 工具只表达意图：
 

@@ -36,7 +36,7 @@ from sdlc_core.common import (  # noqa: E402
 )
 from sdlc_core.common import sha256_json  # noqa: E402
 from sdlc_core.records import read_markdown_record  # noqa: E402
-from sdlc_core.stores import write_work_record  # noqa: E402
+from sdlc_core.stores import write_evidence_record, write_work_record  # noqa: E402
 from sdlc_core.cli import execute  # noqa: E402
 from sdlc_core.lifecycle import (  # noqa: E402
     artifact_evidence,
@@ -48,7 +48,7 @@ from sdlc_core.lifecycle import (  # noqa: E402
     run_test_plan,
     verify_delivery,
 )
-from sdlc_core.journal import begin_attempt, journal_status  # noqa: E402
+from sdlc_core.journal import begin_attempt, finish_attempt, journal_status  # noqa: E402
 from sdlc_core.policies import evaluate_hard_policies  # noqa: E402
 from sdlc_core.runs import (  # noqa: E402
     clear_active,
@@ -379,6 +379,38 @@ class ProjectFixture:
         finally:
             self.temp.cleanup()
 
+    def use_lifecycle_v11(self, *, preflight_code: str = "print('preflight pass')") -> None:
+        """Install a v1.1 contract before init and bind it into the fixture scaffold."""
+        (self.root / "tests" / "unit").mkdir(exist_ok=True)
+        lifecycle_path = (
+            self.root / ".sdlc-pipeline" / "contracts" / "lifecycle.json"
+        )
+        lifecycle = read_json(lifecycle_path)
+        command = lambda code: {  # noqa: E731
+            "argv": ["${PYTHON}", "-c", code], "timeout_seconds": 30
+        }
+        lifecycle["schema_version"] = "1.1"
+        lifecycle["test_preflight"] = [command(preflight_code)]
+        lifecycle["tests"]["unit"] = {
+            **command("print('unit pass')"),
+            "allow_selector": True,
+            "requires_runtime": False,
+            "selector_patterns": ["tests/unit/*.unit.py"],
+        }
+        lifecycle["tests"]["functional"].update({
+            "requires_runtime": True,
+            "selector_patterns": ["tests/functional/*.functional.ts"],
+        })
+        write_json(lifecycle_path, lifecycle)
+        scaffold_path = (
+            self.root / ".sdlc-pipeline" / "contracts" / "scaffold.json"
+        )
+        scaffold = read_json(scaffold_path)
+        scaffold["lifecycle_hash"] = sha256_contract_file(lifecycle_path)
+        write_json(scaffold_path, scaffold)
+        run("git", "add", "-A", cwd=self.root)
+        run("git", "commit", "-qm", "lifecycle v1.1", cwd=self.root)
+
 
 class SchemaAndTraceTests(unittest.TestCase):
     def test_publish_rejects_shell_command_instead_of_lifecycle_test_key(self) -> None:
@@ -393,6 +425,29 @@ class SchemaAndTraceTests(unittest.TestCase):
                 publish_spec(fixture.root, payload)
             self.assertFalse(
                 (fixture.root / "docs/sdlc/current.json").exists()
+            )
+        finally:
+            fixture.close()
+
+    def test_v11_publishes_unit_verification_for_declared_selector(self) -> None:
+        fixture = ProjectFixture()
+        try:
+            fixture.use_lifecycle_v11()
+            payload = spec_payload()
+            payload["test_plan"]["items"][0].update({
+                "level": "unit",
+                "preconditions": "已编译",
+                "input": "执行 unit",
+                "command": "unit",
+                "selector": "tests/unit/T-0001.unit.py",
+            })
+
+            result = publish_spec(fixture.root, payload)
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(
+                load_current_spec(fixture.root)["test_plan"]["items"][0]["selector"],
+                "tests/unit/T-0001.unit.py",
             )
         finally:
             fixture.close()
@@ -802,13 +857,13 @@ class ClosedLoopTests(unittest.TestCase):
         self._through_tester()
 
         self.assertTrue(status(self.fixture.root)["gates"]["code"])
-        with patch("sdlc_core.lifecycle.start") as test_stage_start:
-            delivery = verify_delivery(self.fixture.root)
+        delivery = verify_delivery(self.fixture.root)
 
         self.assertTrue(delivery["ok"])
-        test_stage_start.assert_not_called()
         self.assertTrue(delivery["runtime_reset"]["preview_stop"]["stopped"])
         self.assertTrue(delivery["runtime_reset"]["port_release"]["ok"])
+        self.assertTrue(delivery["runtime_reset"]["test_start"]["ok"])
+        self.assertTrue(delivery["runtime_reset"]["test_health"]["ok"])
         self.assertTrue(delivery["cleanup"]["port_release"]["ok"])
         self.assertIn(
             "test_source_fingerprint",
@@ -1067,6 +1122,61 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertTrue(second["cached"])
         self.assertEqual(first["version"], second["version"])
 
+    def test_verify_delivery_does_not_reuse_failed_evidence(self) -> None:
+        self._through_code()
+        self._through_tester()
+        first = verify_delivery(self.fixture.root)
+        failed = {**first, "ok": False}
+        write_evidence_record(
+            self.fixture.root,
+            "delivery",
+            failed,
+            state="failed",
+            title="Failed delivery evidence",
+        )
+
+        second = verify_delivery(self.fixture.root)
+
+        self.assertFalse(second["cached"])
+        self.assertTrue(second["ok"])
+
+    def test_v11_unit_preflight_runs_before_runtime_and_skips_runtime(self) -> None:
+        self.fixture.use_lifecycle_v11()
+        init_project(self.fixture.root)
+        payload = spec_payload()
+        payload["test_plan"]["items"][0].update({
+            "level": "unit",
+            "preconditions": "已编译",
+            "input": "执行 unit",
+            "command": "unit",
+            "selector": "tests/unit/T-0001.unit.py",
+        })
+        publish_spec(self.fixture.root, payload)
+        before_task(self.fixture.root, "coder")
+        (self.fixture.root / "src" / "feature.py").write_text(
+            "def feature(): return 'ok'\n", encoding="utf-8"
+        )
+        validate_coder_handoff(self.fixture.root, json.dumps({
+            "summary": "fixture implementation", "open_issues": [],
+        }))
+        compile_restart_verify(self.fixture.root)
+        before_task(self.fixture.root, "tester")
+        (self.fixture.root / "tests" / "unit" / "T-0001.unit.py").write_text(
+            "from src.feature import feature\nassert feature() == 'ok'\n",
+            encoding="utf-8",
+        )
+        after_task(self.fixture.root, "tester", json.dumps({
+            "summary": "unit test ready", "open_issues": [],
+        }))
+
+        with patch("sdlc_core.lifecycle.start") as start_runtime:
+            delivery = verify_delivery(self.fixture.root)
+
+        self.assertTrue(delivery["ok"])
+        self.assertFalse(delivery["runtime_reset"]["required"])
+        self.assertTrue(delivery["runtime_reset"]["test_start"]["skipped"])
+        self.assertEqual(len(delivery["preflight"]["commands"]), 1)
+        start_runtime.assert_not_called()
 
 class ReliabilityTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -1171,6 +1281,35 @@ class ReliabilityTests(unittest.TestCase):
         recovered = json.loads(path.read_text(encoding="utf-8"))
         self.assertEqual(recovered["state"], "aborted")
         self.assertEqual(next_attempt["attempt_id"], "A000002")
+
+    def test_failed_test_run_can_reenter_code_for_explicit_rework(self) -> None:
+        failed = begin_attempt(
+            self.fixture.root,
+            phase="test",
+            step="verify_delivery",
+            operation="lifecycle",
+            payload={"action": "verify_delivery"},
+        )
+        finish_attempt(
+            self.fixture.root,
+            failed,
+            state="failed",
+            error="functional assertion failed",
+        )
+
+        rework = begin_attempt(
+            self.fixture.root,
+            phase="code",
+            step="compile_restart_verify",
+            operation="lifecycle",
+            payload={"action": "compile_restart_verify"},
+        )
+
+        current = journal_status(self.fixture.root)
+        self.assertEqual(rework["phase"], "code")
+        self.assertEqual(current["phase"], "code")
+        self.assertEqual(current["state"], "running")
+        self.assertEqual(current["last_failure"]["repeat_count"], 1)
 
     def test_status_reconciles_abandoned_attempt_without_next_action(self) -> None:
         abandoned = begin_attempt(

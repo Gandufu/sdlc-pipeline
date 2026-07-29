@@ -40,12 +40,18 @@ def ensure_run(root: Path, phase: str) -> dict[str, Any]:
     run = active_run(root)
     if run and run.get("state") not in {"succeeded", "aborted"}:
         if run.get("phase") != phase:
-            if run.get("state") in {"failed", "blocked"}:
+            rework_from_failed_test = (
+                run.get("state") == "failed"
+                and run.get("phase") == "test"
+                and phase == "code"
+            )
+            if run.get("state") in {"failed", "blocked"} and not rework_from_failed_test:
                 raise SdlcError(
                     f"Run {run['run_id']} 在 {run['phase']} 阶段失败；"
                     "禁止通过切换阶段清除失败状态"
                 )
             previous = run.get("phase")
+            previous_state = run.get("state")
             run["phase"] = phase
             run["state"] = "running"
             run["updated_at"] = utc_now()
@@ -53,9 +59,13 @@ def ensure_run(root: Path, phase: str) -> dict[str, Any]:
             append_event(
                 root,
                 run["run_id"],
-                "run.phase_changed",
+                "run.rework_started" if rework_from_failed_test else "run.phase_changed",
                 phase=phase,
-                data={"previous_phase": previous, "phase": phase},
+                data={
+                    "previous_phase": previous,
+                    "previous_state": previous_state,
+                    "phase": phase,
+                },
             )
         return run
     run_id = f"RUN-{utc_now().replace(':', '').replace('-', '')}-{uuid.uuid4().hex[:8]}"

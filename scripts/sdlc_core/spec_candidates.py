@@ -29,6 +29,7 @@ from .layout import (
     state_root,
     work_root,
 )
+from .lifecycle_contract import normalize_test_selector
 from .records import (
     read_compact_index,
     read_markdown_record,
@@ -217,29 +218,15 @@ def put_verification(
     )
     lifecycle = read_json(lifecycle_path(root))
     test_key = normalized.get("test_key")
-    tests = lifecycle.get("tests", {}) if isinstance(lifecycle, dict) else {}
-    test_definition = tests.get(test_key) if isinstance(test_key, str) else None
-    if (
-        isinstance(test_definition, dict)
-        and test_definition.get("allow_selector") is not True
-    ):
-        normalized["selector"] = None
-    elif not isinstance(normalized.get("selector"), str) or not normalized["selector"].strip():
-        normalized["selector"] = f"tests/functional/{identifier}.functional.ts"
-    else:
-        normalized["selector"] = normalized["selector"].strip().replace("\\", "/")
+    if not isinstance(test_key, str) or not test_key:
+        raise SdlcError(f"{identifier} 必须声明 lifecycle test_key")
+    normalized["selector"] = normalize_test_selector(
+        lifecycle,
+        test_key,
+        normalized.get("selector"),
+        test_id=identifier,
+    )
     validate_schema_instance(root, "artifacts/verification.schema.json", normalized)
-    selector = normalized.get("selector")
-    path = Path(selector)
-    if (
-        path.is_absolute()
-        or ".." in path.parts
-        or not path.as_posix().startswith("tests/functional/")
-        or not path.name.endswith(".functional.ts")
-    ):
-        raise SdlcError(
-            f"{identifier} selector 必须是 tests/functional/ 下的 .functional.ts 项目内路径"
-        )
     existing = _load_artifacts(root, previous, "verification").get(identifier)
     if existing == normalized:
         return _idempotent_result(pointer, identifier)
@@ -839,8 +826,16 @@ def _candidate_diagnostics(
             add("unknown_verification_reference", f"{identifier} 引用未知 R/D/AC: {sorted(unknown)}")
         if test["test_key"] not in test_commands:
             add("unknown_test_key", f"{identifier} 引用未知 lifecycle test_key: {test['test_key']}")
-        elif test.get("selector") and test_commands[test["test_key"]].get("allow_selector") is not True:
-            add("selector_not_allowed", f"{identifier} 的 test_key 不允许 selector")
+        else:
+            try:
+                normalize_test_selector(
+                    lifecycle,
+                    test["test_key"],
+                    test.get("selector"),
+                    test_id=identifier,
+                )
+            except SdlcError as exc:
+                add("selector_invalid", f"{identifier} 的 selector 无效: {exc}")
         if test["mandatory"]:
             tested_requirements.update(test["requirement_ids"])
             tested_designs.update(test["design_ids"])

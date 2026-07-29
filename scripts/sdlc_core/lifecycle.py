@@ -35,6 +35,11 @@ from .layout import (
     scaffold_path,
     templates_root,
 )
+from .lifecycle_contract import (
+    test_plan_requires_runtime,
+    validate_test_selector,
+    validate_test_suites,
+)
 from .records import (
     write_compact_index,
     write_markdown_record,
@@ -109,8 +114,8 @@ def ensure_project_agents_file(root: Path) -> dict[str, str]:
         "",
         *(test_lines or ["- 当前 lifecycle 合约未声明测试命令。"]),
         "",
-        "- Verification frontmatter 的 `test_key` 填写冒号左侧逻辑键（当前为 `functional`），",
-        "不能填写 `pnpm functional` 等右侧 shell 命令。",
+        "- Verification frontmatter 的 `test_key` 填写上方左侧逻辑键，不能填写 shell 命令；",
+        "  selector 必须匹配该测试套件在 lifecycle 合约中声明的路径模式。",
         "",
         "## SDLC 规则",
         "",
@@ -205,6 +210,9 @@ def load_contract(root: Path) -> dict[str, Any]:
             if command is None:
                 continue
             validate_command(command, name)
+    validate_test_suites(value)
+    for index, command in enumerate(value.get("test_preflight", [])):
+        validate_command(command, f"test_preflight[{index}]")
     for tool in value["tools"]:
         if "probe" not in tool:
             raise SdlcError(f"工具 {tool.get('name')} 缺少 probe")
@@ -272,23 +280,17 @@ def execute_command(
     command: dict[str, Any],
     *,
     selector: str | None = None,
+    test_key: str | None = None,
 ) -> dict[str, Any]:
     argv, cwd, timeout = resolve_command(root, command)
     if selector is not None:
-        if command.get("allow_selector") is not True:
-            raise SdlcError(f"{name} 不允许 selector")
-        selector_path = root / selector
-        try:
-            relative_selector = selector_path.resolve().relative_to(root.resolve())
-        except ValueError as exc:
-            raise SdlcError(f"{name} selector 越出项目: {selector}") from exc
-        if (
-            not selector.startswith("tests/")
-            or not selector_path.is_file()
-            or relative_selector.as_posix() != selector
-        ):
-            raise SdlcError(f"{name} selector 必须是已存在的 tests/ 项目内文件: {selector}")
-        argv.append(selector)
+        if not test_key:
+            raise SdlcError(f"{name} 使用 selector 时必须声明 test_key")
+        normalized = validate_test_selector(
+            root, load_contract(root), test_key, selector
+        )
+        if normalized is not None:
+            argv.append(normalized)
     started = time.monotonic()
     result = run_command(argv, cwd=cwd, timeout=timeout, check=False)
     duration = int((time.monotonic() - started) * 1000)
@@ -793,6 +795,7 @@ def run_test_plan(root: Path) -> dict[str, Any]:
                 f"test-{case['id']}",
                 commands[command_name],
                 selector=case["selector"],
+                test_key=command_name,
             )
             executions[execution_key] = {
                 "test_id": case["id"],
@@ -848,6 +851,35 @@ def run_test_plan(root: Path) -> dict[str, Any]:
     return {"ok": policy["ok"] and all(item["status"] == "pass" for item in results), **execution}
 
 
+def run_test_preflight(root: Path) -> dict[str, Any]:
+    """Run contract-owned static checks after tester handoff and before tests."""
+    contract = load_contract(root)
+    commands = contract.get("test_preflight", [])
+    results = []
+    for index, command in enumerate(commands):
+        result = execute_command(root, f"test-preflight-{index + 1:02d}", command)
+        results.append(result)
+    report = {
+        "schema_version": "1.0",
+        "phase": "test-preflight",
+        "ok": all(item["ok"] for item in results),
+        "commands": results,
+        "created_at": utc_now(),
+        "source_fingerprint": worktree_fingerprint(root),
+    }
+    write_evidence_record(
+        root,
+        "test-preflight",
+        report,
+        state="passed" if report["ok"] else "failed",
+        title="Test preflight evidence",
+    )
+    if not report["ok"]:
+        failed = [str(index + 1) for index, item in enumerate(results) if not item["ok"]]
+        raise SdlcError(f"测试产物预检失败: commands={','.join(failed)}")
+    return report
+
+
 def run_focused_checks(
     root: Path,
     selected: list[str] | None = None,
@@ -899,6 +931,7 @@ def run_focused_checks(
                 f"focused-{test_id}",
                 commands[case["command"]],
                 selector=selector,
+                test_key=case["command"],
             )
             executions[execution_key] = {
                 "test_id": test_id,
@@ -1016,7 +1049,7 @@ def verify_delivery(root: Path) -> dict[str, Any]:
         "lifecycle_sha256": sha256_file(contract_path(root)),
     }
     cached = read_evidence_record(root, "delivery", required=False)
-    if cached and cached.get("binding") == binding:
+    if cached and cached.get("ok") and cached.get("binding") == binding:
         result_path = root / cached.get("test_results", "")
         if result_path.is_file():
             return {**cached, "cached": True}
@@ -1025,7 +1058,13 @@ def verify_delivery(root: Path) -> dict[str, Any]:
     if not code.get("ok") or code.get("source_fingerprint") != binding["source_fingerprint"]:
         raise SdlcError("code evidence 缺失或已失效；请先重新执行 code gate")
     _validate_test_sources(root, code)
+    contract = load_contract(root)
+    spec = load_current_spec(root)
+    requires_runtime = test_plan_requires_runtime(
+        contract, spec["test_plan"]["items"]
+    )
     runtime_reset: dict[str, Any] = {}
+    preflight: dict[str, Any] = {}
     execution: dict[str, Any] = {}
     results: dict[str, Any] = {}
     cleanup: dict[str, Any] = {}
@@ -1034,6 +1073,7 @@ def verify_delivery(root: Path) -> dict[str, Any]:
         port_release = wait_for_ports_released(root)
         runtime_reset = {
             "ok": preview_stop["ok"] and port_release["ok"],
+            "required": requires_runtime,
             "preview_stop": preview_stop,
             "port_release": port_release,
         }
@@ -1041,6 +1081,20 @@ def verify_delivery(root: Path) -> dict[str, Any]:
             raise SdlcError(
                 f"test 阶段无法释放模板端口: {port_release['occupied']}"
             )
+        preflight = run_test_preflight(root)
+        if requires_runtime:
+            test_start = start(root)
+            test_health = verify_health(root)
+            runtime_reset["test_start"] = test_start
+            runtime_reset["test_health"] = test_health
+            runtime_reset["ok"] = test_start["ok"] and test_health["ok"]
+            if not runtime_reset["ok"]:
+                if not test_health["ok"]:
+                    raise SdlcError("test 阶段 runtime readiness 未通过")
+                raise SdlcError("test 阶段无法启动 runtime")
+        else:
+            runtime_reset["test_start"] = {"ok": True, "skipped": True}
+            runtime_reset["test_health"] = {"ok": True, "skipped": True}
         execution = run_test_plan(root)
         results = execute_tests(root)
     finally:
@@ -1061,6 +1115,7 @@ def verify_delivery(root: Path) -> dict[str, Any]:
         "binding": binding,
         "code": code,
         "runtime_reset": runtime_reset,
+        "preflight": preflight,
         "execution": execution,
         "test_results": (
             f"docs/sdlc/test-results/{results['version']}/index.json"
