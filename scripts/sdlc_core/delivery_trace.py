@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .artifact_documents import read_artifact_document
 from .artifact_store import current_baseline
 from .artifacts import load_test_results
 from .common import SdlcError, git, read_json, sha256_file, sha256_json
@@ -154,6 +155,8 @@ def _documents(
     baseline: Path, manifest: dict[str, Any], folder: str
 ) -> dict[str, dict[str, Any]]:
     return {
-        record["id"]: read_markdown_record(baseline / record["content_ref"])
+        record["id"]: read_artifact_document(
+            baseline / record["content_ref"], folder
+        )
         for record in manifest[folder]
     }

@@ -6,6 +6,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from .artifact_documents import (
+    markdown_file_sha256,
+)
 from .common import SdlcError, sha256_file, sha256_json, utc_now
 from .layout import work_root
 from .records import read_compact_index, write_compact_index
@@ -29,11 +32,24 @@ def publish_baseline(
     if not final.is_dir():
         temporary = Path(tempfile.mkdtemp(prefix=".publishing-", dir=base))
         try:
+            candidate_record = candidate["candidate"]
+            candidate_source = root / candidate_record["content_ref"]
+            if (
+                not candidate_source.is_file()
+                or markdown_file_sha256(candidate_source)
+                != candidate_record["sha256"]
+            ):
+                raise SdlcError("candidate Markdown 缺失或 hash 漂移")
+            candidate_target = temporary / "candidate.md"
+            shutil.copy2(candidate_source, candidate_target)
             files: list[dict[str, Any]] = []
             for group in ("requirements", "designs", "verification"):
                 for record in candidate[group]:
                     source = root / record["content_ref"]
-                    if not source.is_file() or sha256_file(source) != record["sha256"]:
+                    if (
+                        not source.is_file()
+                        or markdown_file_sha256(source) != record["sha256"]
+                    ):
                         raise SdlcError(
                             f"candidate artifact 缺失或 hash 漂移: {record['content_ref']}"
                         )
@@ -43,9 +59,44 @@ def publish_baseline(
                     files.append({
                         **record,
                         "content_ref": f"{group}/{record['id']}.md",
-                        "sha256": sha256_file(target),
+                        "sha256": markdown_file_sha256(target),
                         "size": target.stat().st_size,
                     })
+            decisions: list[dict[str, Any]] = []
+            available_decisions = {
+                item["id"]: item for item in candidate["decisions"]
+            }
+            referenced_decisions = {
+                decision_id
+                for group in ("requirements", "designs")
+                for record in candidate[group]
+                for decision_id in record.get("decision_ids", [])
+            }
+            missing_decisions = sorted(
+                referenced_decisions - set(available_decisions)
+            )
+            if missing_decisions:
+                raise SdlcError(
+                    f"发布缺少被 R/D 引用的 Spec Work 决策: {missing_decisions}"
+                )
+            for decision in available_decisions.values():
+                source = root / decision["content_ref"]
+                if (
+                    not source.is_file()
+                    or markdown_file_sha256(source) != decision["sha256"]
+                ):
+                    raise SdlcError(
+                        f"candidate decision 缺失或 hash 漂移: {decision['id']}"
+                    )
+                target = temporary / "decisions" / f"{decision['id']}.md"
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+                decisions.append({
+                    **decision,
+                    "content_ref": f"decisions/{decision['id']}.md",
+                    "sha256": markdown_file_sha256(target),
+                    "size": target.stat().st_size,
+                })
             source_ids = sorted({
                 ref["source_id"] for ref in candidate["source_refs"]
             } | {
@@ -110,6 +161,10 @@ def publish_baseline(
                 "candidate_id": candidate["candidate_id"],
                 "candidate_revision": candidate["revision"],
                 "candidate_content_hash": candidate["content_hash"],
+                "candidate": {
+                    "content_ref": "candidate.md",
+                    "sha256": markdown_file_sha256(candidate_target),
+                },
                 "feature_index": candidate["feature_map"],
                 "source_refs": candidate["source_refs"],
                 "sources": sources,
@@ -125,6 +180,7 @@ def publish_baseline(
                     item for item in files
                     if item["id"].startswith("T-")
                 ],
+                "decisions": decisions,
                 "spec_ref": "spec.md",
                 "spec_sha256": sha256_file(temporary / "spec.md"),
                 "created_at": utc_now(),
@@ -178,10 +234,28 @@ def _verify_baseline(path: Path) -> dict[str, Any]:
                 raise SdlcError(
                     f"baseline artifact 路径越界: {record['content_ref']}"
                 ) from exc
-            if not artifact.is_file() or sha256_file(artifact) != record["sha256"]:
+            if (
+                not artifact.is_file()
+                or markdown_file_sha256(artifact) != record["sha256"]
+            ):
                 raise SdlcError(
                     f"baseline artifact 缺失或 hash 漂移: {record['content_ref']}"
                 )
+    candidate = path / manifest["candidate"]["content_ref"]
+    if (
+        not candidate.is_file()
+        or markdown_file_sha256(candidate) != manifest["candidate"]["sha256"]
+    ):
+        raise SdlcError("baseline candidate Markdown 缺失或 hash 漂移")
+    for record in manifest.get("decisions", []):
+        decision = path / record["content_ref"]
+        if (
+            not decision.is_file()
+            or markdown_file_sha256(decision) != record["sha256"]
+        ):
+            raise SdlcError(
+                f"baseline decision 缺失或 hash 漂移: {record['content_ref']}"
+            )
     for source in manifest.get("sources", []):
         for field, hash_field in (
             ("index_ref", "index_sha256"),

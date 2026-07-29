@@ -25,6 +25,8 @@ _FORBIDDEN_INDEX_KEYS = {
     "summary",
     "tail",
     "text",
+    "title",
+    "question",
 }
 MAX_INDEX_BYTES = 32 * 1024
 MAX_INDEX_STRING_CHARS = 512

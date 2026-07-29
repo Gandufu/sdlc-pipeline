@@ -33,7 +33,13 @@
     "selector": {"type": ["string", "null"]},
     "preconditions": {"type": "string", "minLength": 1},
     "expected": {"type": "string", "minLength": 1},
-    "mandatory": {"type": "boolean"}
+    "mandatory": {"type": "boolean"},
+    "test_basis": {
+      "type": "string",
+      "enum": ["acceptance", "risk", "regression", "contract"]
+    },
+    "intent": {"type": "string", "minLength": 1},
+    "coverage": {"type": "string", "minLength": 1}
   },
   "additionalProperties": false
 }

@@ -492,8 +492,14 @@ def query_spec_work(root: Path) -> dict[str, Any]:
     }
 
 
-def discard_spec_work(root: Path) -> dict[str, Any]:
-    run = active_run(root)
+def discard_spec_work(
+    root: Path, *, run_id: str | None = None
+) -> dict[str, Any]:
+    run = (
+        read_compact_index(_run_dir(root, run_id) / "index.json", required=False)
+        if run_id
+        else active_run(root)
+    )
     if not run:
         return {"deleted": False, "reason": "no_active_run"}
     index_path = _run_dir(root, run["run_id"]) / "spec-work.json"

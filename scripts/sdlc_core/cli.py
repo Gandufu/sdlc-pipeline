@@ -38,7 +38,6 @@ from .journal import (
     close_run,
     finish_attempt,
     heartbeat_attempt,
-    discard_spec_work,
     query_spec_work,
     record_spec_work,
     running_attempt,
@@ -369,11 +368,6 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         finish_attempt(root, attempt, state="failed", result=result, error=error)
         return result
     finish_attempt(root, attempt, state="succeeded", result=result)
-    if (
-        operation == "spec-candidate"
-        and effective_payload.get("action") == "approve"
-    ):
-        result = {**result, "spec_work_cleanup": discard_spec_work(root)}
     if operation == "finalize":
         close_run(root, "succeeded")
     return result

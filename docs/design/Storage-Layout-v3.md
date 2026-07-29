@@ -10,7 +10,8 @@ Layout v3 将“状态”和“内容”分离。JSON 只承担可快速解析�
 Store Module 是 Core 的持久化 seam：
 
 - `layout.py`：唯一目录定位器；
-- `records.py`：Markdown structured record 与 compact index 不变量；
+- `records.py`：通用 Markdown structured record 与 compact index 不变量；
+- `artifact_documents.py`：R/D/T 原生 Markdown 文法、解析和规范化 hash；
 - `stores.py`：work/evidence 深接口；
 - `journal.py`：Run/Attempt 状态索引和错误/结果引用；
 - `sources.py`：来源 Markdown、anchor offset 与 hash；
@@ -25,8 +26,9 @@ Store Module 是 Core 的持久化 seam：
 `prompt/answer/content/text/description/summary/result/error/rationale/tail`。写入时递归校验，
 超过 32 KiB 或出现超过 512 字符字符串立即失败。
 
-完整 payload 写入 Markdown 的 structured record 区块，同时保留可读标题和摘要。索引保存
-`content_ref + content_hash`；读取时重新计算 payload hash，任何漂移都会阻断流程。
+通用 work/evidence payload 写入 Markdown structured record。正式 R/D/T 使用 frontmatter 和固定
+标题文法，不包含 JSON fenced block。索引保存 `content_ref + hash`；读取时重新计算规范化 Markdown
+hash 并重新解析、Schema 校验，任何漂移都会阻断流程。
 
 ## Source 与 Candidate
 
@@ -35,14 +37,16 @@ Store Module 是 Core 的持久化 seam：
 以受控二进制元数据 extractor 摄取并保存原始 evidence blob。它不声称包含视觉语义或文档正文；需要
 OCR、版面或视觉理解时必须由单独、可审计的 extractor 提供。
 
-Candidate artifact 各自追加 Markdown revision。Candidate revision JSON 只引用 artifact revision，
+Candidate artifact 各自追加原生 Markdown revision。validate 同时冻结 resolved decision Markdown，
+并将其 hash 纳入 Candidate content hash。Candidate revision JSON 只引用 artifact revision，
 不执行 `copytree`，因此一次局部修改不会复制完整候选。validate 生成 validation/preview Markdown
 并冻结 content hash。
 
 ## 正式 baseline
 
 批准按精确 `candidate_id + revision + content_hash + confirmed` 执行。发布使用同目录临时目录和
-`os.replace`，生成 `docs/sdlc/baselines/<sha256>`。Baseline 同时冻结被引用的 Source Markdown，
+`os.replace`，生成 `docs/sdlc/baselines/<sha256>`。Baseline 同时冻结被引用的 Source Markdown 和
+resolved decision Markdown，
 因此清理全部 `work/` 后仍可独立加载。`docs/sdlc/current.json` 只是指针，不生成 current 镜像。
 
 ## Journal 与错误可观测性
@@ -55,8 +59,8 @@ Run、Attempt 和临时 spec work 索引位于 `state/runs`。临时访谈内容
 
 ## 清理与保留
 
-- Candidate 成功发布后自动删除对应的临时 spec work Markdown 和索引；清理失败只记录
-  `cleanup_pending`，不得回滚已发布 baseline；
+- Candidate 成功发布并验证 baseline 后自动删除对应的临时 spec work 和 Candidate；紧凑
+  publication receipt 支持幂等重试。清理失败只记录 `cleanup_pending`，不得回滚已发布 baseline；
 - 可清理：`state/`、`work/`、`evidence/`，但活动 Run 不应清理；
 - 长期保留：`docs/sdlc/baselines`、`test-results`、`versions`；
 - 外部 raw OpenCode 日志：保存在项目同级 evidence 目录；

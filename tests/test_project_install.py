@@ -106,7 +106,13 @@ class InstallerTests(unittest.TestCase):
                 ).rglob("*")
                 if path.is_file()
             )
-            self.assertEqual(installed_templates, ["manifest.json"])
+            self.assertEqual(installed_templates, [
+                "artifacts/decision.template.md",
+                "artifacts/design.template.md",
+                "artifacts/requirement.template.md",
+                "artifacts/verification.template.md",
+                "manifest.json",
+            ])
             self.assertFalse((target / ".sdlc-pipeline/opencode").exists())
             self.assertFalse((target / ".sdlc-pipeline/runs").exists())
             self.assertFalse((target / ".sdlc-pipeline/scripts").exists())
@@ -486,7 +492,13 @@ class InstallerTests(unittest.TestCase):
             for path in (REPO / "templates").rglob("*")
             if path.is_file()
         )
-        self.assertEqual(files, ["manifest.json"])
+        self.assertEqual(files, [
+            "artifacts/decision.template.md",
+            "artifacts/design.template.md",
+            "artifacts/requirement.template.md",
+            "artifacts/verification.template.md",
+            "manifest.json",
+        ])
 
     def test_remote_checkouts_disable_git_line_ending_conversion(self) -> None:
         installer_source = (REPO / "scripts/install_project.py").read_text(
@@ -535,6 +547,7 @@ class InstallerTests(unittest.TestCase):
                 "0001-opencode-first.md",
                 "0002-external-template-assets.md",
                 "0003-storage-layout-v3.md",
+                "0004-native-markdown-artifacts.md",
             ],
         )
 

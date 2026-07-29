@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.15.4`。
+OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.16.0`。
 
 插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
 状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
@@ -88,12 +88,12 @@ Playwright package/CLI；MCP 仅适合未来可选的探索式浏览器交互，
     schemas/                  # 当前 Schema；无 v2 兼容目录
     rules/                    # 可选规则和 policy
     references/               # spec 访谈等运行参考
-    templates/                # 模板 registry 元数据
+    templates/                # registry 与 R/D/T/Decision Markdown 模板
   contracts/
     lifecycle.json            # 脚手架生命周期合同
     scaffold.json             # protected/allowed/extension points
     active-rules.json         # 本项目启用规则的 hash 索引
-  state/                      # 仅 compact JSON 索引、ID、hash、引用和流转状态
+  state/                      # compact JSON 索引；含 publication receipt
   work/                       # Source/Candidate/temporary spec work/context/handoff Markdown
   evidence/                   # init/code/test/error/log 等 Markdown 证据
 
@@ -101,7 +101,9 @@ docs/sdlc/
   current.json                # 只指向当前 baseline
   baselines/<baseline-id>/
     manifest.json             # compact 索引
-    spec.md
+    spec.md                   # 从正式文档生成的评审汇总
+    candidate.md              # Candidate 标题正文
+    decisions/Q-xxxx.md       # 发布前阻塞决策的正式固化
     sources/<source-id>/       # 已冻结来源 Markdown 与索引
     requirements/R-xxxx.md
     designs/D-xxxx.md
@@ -117,9 +119,11 @@ docs/sdlc/
 
 约束：
 
-- JSON 索引不得保存 prompt、answer、content、text、summary、result、error 等正文；单个索引上限
+- JSON 索引不得保存 title、prompt、answer、content、text、summary、result、error 等正文；单个索引上限
   32 KiB，单字符串上限 512 字符。
-- 会话只保存宿主 session/run/task 引用和状态；对话、决策、结果与错误正文写 Markdown。
+- Spec Work 只保存已解决决策和提炼后的事实、假设、风险，不保存聊天全文；validate 将 resolved
+  decision 冻结进 Candidate hash，发布后再清理 Spec Work 和 Candidate。
+- R/D/T 使用 frontmatter 加固定标题文法的原生 Markdown，不嵌入 JSON fenced block。
 - 同一内容只存一次；Candidate revision 引用 artifact Markdown，不复制完整目录。
 - `.sdlc-pipeline/state`、`work`、`evidence` 是本地现场并默认忽略；正式批准的 baseline 和版本文档进入
   `docs/sdlc`。

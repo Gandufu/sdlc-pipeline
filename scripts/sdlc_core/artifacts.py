@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from .artifact_documents import read_artifact_document
 from .artifact_store import current_baseline
 from .common import SdlcError, read_json, sha256_json
 from .layout import lifecycle_path, relative_to_project, scaffold_path
@@ -239,9 +240,7 @@ def _baseline(root: Path) -> tuple[Path, dict[str, Any]]:
 
 
 def _full_feature_map(manifest: dict[str, Any]) -> dict[str, Any]:
-    value = dict(manifest["feature_index"])
-    value["goal"] = value["title"]
-    return value
+    return dict(manifest["feature_index"])
 
 
 def _documents(
@@ -253,7 +252,9 @@ def _documents(
 ) -> list[dict[str, Any]]:
     documents = []
     for record in manifest[group]:
-        document = read_markdown_record(baseline / record["content_ref"])
+        document = read_artifact_document(
+            baseline / record["content_ref"], group
+        )
         validate_schema_instance(root, schema_name, document)
         documents.append(document)
     return documents

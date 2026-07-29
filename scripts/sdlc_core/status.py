@@ -24,10 +24,12 @@ from .trace import (
 )
 from .versions import current_version, parent_manifest
 from .spec_candidates import candidate_status
+from .spec_publisher import retry_publication_cleanup
 from .stores import read_evidence_record, read_work_record
 
 
 def status(root: Path) -> dict[str, Any]:
+    publication_cleanup = retry_publication_cleanup(root)
     gates: dict[str, bool] = {}
     missing: list[str] = []
     diagnostics: list[dict[str, str]] = []
@@ -190,6 +192,7 @@ def status(root: Path) -> dict[str, Any]:
             **(spec_work or {}),
         },
         "spec_candidate": candidate_status(root),
+        "publication_cleanup": publication_cleanup,
         "memory": memory_summary(root),
         "diagnostics": diagnostics,
     }

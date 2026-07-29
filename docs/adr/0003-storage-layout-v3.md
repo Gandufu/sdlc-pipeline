@@ -12,7 +12,8 @@
 2. `.sdlc-pipeline/runtime` 保存已安装 Core 资源；
 3. `contracts` 保存生命周期、脚手架和 active rules；
 4. `state` 的 JSON 只保存索引、ID、引用、hash 与流转状态；
-5. `work` 和 `evidence` 的正文使用 Markdown structured record；
+5. `work` 和 `evidence` 的正文使用 Markdown；通用记录可使用 structured record，正式 R/D/T
+   由 ADR-0004 进一步约束为原生 Markdown；
 6. Candidate revision 引用独立 artifact Markdown，不复制完整候选；
 7. 正式 Spec 发布为自包含 Markdown baseline，`current.json` 只作指针；
 8. 测试结果和版本完整证据写 Markdown，JSON manifest 仅作 compact 索引。

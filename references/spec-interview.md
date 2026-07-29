@@ -40,6 +40,11 @@ extension point，不预测实际代码文件。写 Design 前必须读取
 `selector`，且必须是 `tests/` 下的项目内相对路径；unit/integration 等不允许 selector 的
 test key 必须传 `selector: null`，不要填测试文件名。
 正式文档使用项目配置语言（默认中文），代码标识、协议字段和原文保持原样。
+Core 将 R/D/T 写成 frontmatter 加固定标题文法的原生 Markdown；不得在正式 artifact 中嵌入
+structured-record JSON fenced block。模板位于
+`.sdlc-pipeline/runtime/templates/artifacts/`。若 Requirement 或 Design 由已解决的阻塞问题驱动，
+通过 `decision_ids` 引用对应 Q-id；Verification 可用 `test_basis` 标记 acceptance、risk、
+regression 或 contract 依据，但正文不得重复测试代码步骤。
 
 推荐方案与正式发布是两个独立动作：
 
@@ -53,9 +58,11 @@ test key 必须传 `selector: null`，不要填测试文件名。
 重发 candidate 正文。Core 负责分片 Schema、跨引用、来源 anchor、revision/hash 校验，
 并在批准后原子发布自包含的 Markdown baseline。
 
-Candidate 成功发布后，Core 才删除对应的临时 spec work Markdown 和索引；若清理失败，发布仍然
-有效，索引会标记为 `cleanup_pending` 以供后续重试。发布或显式丢弃前，临时 work 始终保留，
-因此流程可中断恢复并可追溯。
+validate 时 Core 将 resolved decision 冻结进 Candidate 并纳入 content hash；若之后 Spec Work
+决策变化，approve 会要求重新 validate。成功发布时 Core 将冻结版本原样复制到 baseline，再验证
+完整 baseline，最后删除对应的临时 spec work 和 Candidate。紧凑 publication receipt 保留批准三元组并支持幂等重试；
+若清理失败，发布仍然有效，索引会标记为 `cleanup_pending` 以供后续重试。发布或显式丢弃前，
+临时 work 始终保留，因此流程可中断恢复并可追溯。
 
 中断恢复时先读取 `sdlc_status.spec_work`，若 `active` 为 true 则调用 `sdlc_query_spec_work`；再读取
 `sdlc_status.spec_candidate`：draft 从当前 revision 继续 put；ready 直接展示原 preview/hash 等待确认；

@@ -4,8 +4,31 @@ import re
 from pathlib import Path
 from typing import Any
 
-from .common import SdlcError, atomic_write, read_json, sha256_file, sha256_json, utc_now
-from .layout import lifecycle_path, relative_to_project, scaffold_path, work_root
+from .artifact_documents import (
+    markdown_file_sha256,
+    markdown_sha256,
+    read_artifact_document,
+    read_candidate_title,
+    render_candidate_document,
+    render_decision_document,
+    write_artifact_document,
+)
+from .common import (
+    SdlcError,
+    atomic_write,
+    read_json,
+    sha256_file,
+    sha256_json,
+    utc_now,
+)
+from .journal import query_spec_work
+from .layout import (
+    lifecycle_path,
+    relative_to_project,
+    scaffold_path,
+    state_root,
+    work_root,
+)
 from .records import (
     read_compact_index,
     read_markdown_record,
@@ -39,16 +62,32 @@ def begin_candidate(
         for child in base.iterdir()
         if child.is_dir() and (match := _CANDIDATE_PATTERN.fullmatch(child.name))
     ]
+    publications = state_root(root) / "publications"
+    if publications.is_dir():
+        numbers.extend(
+            int(match.group(1))
+            for path in publications.glob("SC-*.json")
+            if (match := _CANDIDATE_PATTERN.fullmatch(path.stem))
+        )
     candidate_id = f"SC-{max(numbers, default=0) + 1:06d}"
+    candidate_path = _candidate_root(root, candidate_id) / "candidate.md"
+    atomic_write(
+        candidate_path,
+        render_candidate_document(candidate_id, title.strip()),
+    )
     revision = _commit_revision(
         root,
         candidate_id,
         previous=None,
-        title=title.strip(),
+        candidate={
+            "content_ref": relative_to_project(root, candidate_path),
+            "sha256": markdown_file_sha256(candidate_path),
+        },
         source_refs=source_refs,
         requirements=[],
         designs=[],
         verification=[],
+        decisions=[],
     )
     return {
         "ok": True,
@@ -101,6 +140,7 @@ def put_requirement(
             for index, item in enumerate(criteria, 1)
         ]
     normalized.setdefault("supersedes", None)
+    normalized.setdefault("decision_ids", [])
     validate_schema_instance(root, "artifacts/requirement.schema.json", normalized)
     _validate_source_refs(root, normalized["source_refs"])
     for criterion in normalized["acceptance_criteria"]:
@@ -115,11 +155,12 @@ def put_requirement(
         root,
         candidate_id,
         previous=previous,
-        title=previous["title"],
+        candidate=previous["candidate"],
         source_refs=previous["source_refs"],
         requirements=records,
         designs=previous["designs"],
         verification=previous["verification"],
+        decisions=previous["decisions"],
     )
     return _put_result(candidate_id, revision, identifier)
 
@@ -138,6 +179,7 @@ def put_design(
         pattern=_DESIGN_PATTERN,
         prefix="D",
     )
+    normalized.setdefault("decision_ids", [])
     validate_schema_instance(root, "artifacts/design.schema.json", normalized)
     existing = _load_artifacts(root, previous, "designs").get(identifier)
     if existing == normalized:
@@ -149,11 +191,12 @@ def put_design(
         root,
         candidate_id,
         previous=previous,
-        title=previous["title"],
+        candidate=previous["candidate"],
         source_refs=previous["source_refs"],
         requirements=previous["requirements"],
         designs=_replace_record(previous["designs"], record),
         verification=previous["verification"],
+        decisions=previous["decisions"],
     )
     return _put_result(candidate_id, revision, identifier)
 
@@ -201,11 +244,12 @@ def put_verification(
         root,
         candidate_id,
         previous=previous,
-        title=previous["title"],
+        candidate=previous["candidate"],
         source_refs=previous["source_refs"],
         requirements=previous["requirements"],
         designs=previous["designs"],
         verification=_replace_record(previous["verification"], record),
+        decisions=previous["decisions"],
     )
     return _put_result(candidate_id, revision, identifier)
 
@@ -215,12 +259,28 @@ def validate_candidate(root: Path, candidate_id: str) -> dict[str, Any]:
     requirements = _load_artifacts(root, previous, "requirements")
     designs = _load_artifacts(root, previous, "designs")
     verification = _load_artifacts(root, previous, "verification")
+    work_result = query_spec_work(root)
+    decision_ids = {
+        item["id"]
+        for item in (
+            work_result.get("work", {}).get("decisions", [])
+            if work_result.get("available")
+            else []
+        )
+    }
+    decision_records = _snapshot_decisions(
+        root,
+        candidate_id,
+        work_result.get("work") if work_result.get("available") else None,
+        previous["decisions"],
+    )
     diagnostics = _candidate_diagnostics(
         root,
         previous["feature_map"],
         requirements,
         designs,
         verification,
+        decision_ids,
     )
     next_revision = int(previous["revision"]) + 1
     report = {
@@ -254,10 +314,16 @@ def validate_candidate(root: Path, candidate_id: str) -> dict[str, Any]:
         _render_preview(
             candidate_id,
             next_revision,
+            _candidate_title(root, previous),
             previous["feature_map"],
             requirements,
             designs,
             verification,
+            (
+                work_result.get("work", {}).get("decisions", [])
+                if work_result.get("available")
+                else []
+            ),
             report,
         ),
     )
@@ -265,11 +331,12 @@ def validate_candidate(root: Path, candidate_id: str) -> dict[str, Any]:
         root,
         candidate_id,
         previous=previous,
-        title=previous["title"],
+        candidate=previous["candidate"],
         source_refs=previous["source_refs"],
         requirements=previous["requirements"],
         designs=previous["designs"],
         verification=previous["verification"],
+        decisions=decision_records,
         state="ready" if not diagnostics else "draft",
         validation={
             "ok": report["ok"],
@@ -298,20 +365,35 @@ def candidate_status(
 ) -> dict[str, Any] | None:
     base = _candidate_base(root)
     if candidate_id is not None:
+        candidate_root = _candidate_root(root, candidate_id)
+        if not candidate_root.is_dir():
+            return _publication_summary(root, candidate_id)
         pointer = read_compact_index(
-            _candidate_root(root, candidate_id) / "index.json"
+            candidate_root / "index.json"
         )
         return _candidate_summary(root, pointer)
-    if not base.is_dir():
-        return None
-    pointers = [
-        read_compact_index(path / "index.json")
-        for path in sorted(base.iterdir())
-        if path.is_dir() and (path / "index.json").is_file()
-    ]
+    pointers = (
+        [
+            read_compact_index(path / "index.json")
+            for path in sorted(base.iterdir())
+            if path.is_dir() and (path / "index.json").is_file()
+        ]
+        if base.is_dir()
+        else []
+    )
     active = [item for item in pointers if item.get("state") in {"draft", "ready"}]
     selected = active[-1] if active else (pointers[-1] if pointers else None)
-    return _candidate_summary(root, selected) if selected else None
+    if selected:
+        return _candidate_summary(root, selected)
+    publications = state_root(root) / "publications"
+    receipts = (
+        sorted(publications.glob("SC-*.json"))
+        if publications.is_dir()
+        else []
+    )
+    if not receipts:
+        return None
+    return _publication_summary(root, receipts[-1].stem)
 
 
 def load_candidate_revision(
@@ -356,6 +438,25 @@ def _candidate_summary(root: Path, pointer: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _publication_summary(root: Path, candidate_id: str) -> dict[str, Any] | None:
+    receipt = read_compact_index(
+        state_root(root) / "publications" / f"{candidate_id}.json",
+        required=False,
+    )
+    if not receipt:
+        return None
+    return {
+        "schema_version": receipt["schema_version"],
+        "candidate_id": receipt["candidate_id"],
+        "state": "published",
+        "current_revision": receipt["revision"],
+        "current_hash": receipt["content_hash"],
+        "published_baseline_id": receipt["baseline_id"],
+        "cleanup_state": receipt["cleanup_state"],
+        "updated_at": receipt.get("updated_at", receipt["approved_at"]),
+    }
+
+
 def _normalize_artifact(
     root: Path,
     previous: dict[str, Any],
@@ -389,30 +490,25 @@ def _write_artifact(
     ] if directory.is_dir() else []
     artifact_revision = max(versions, default=0) + 1
     path = directory / f"{artifact_revision:04d}.md"
-    write_markdown_record(
+    write_artifact_document(
         path,
+        group,
         value,
-        title=f"{identifier} {value.get('title', '')}".strip(),
-        summary_lines=[
-            f"- Candidate: `{candidate_id}`",
-            f"- Artifact revision: `{artifact_revision}`",
-        ],
     )
     return {
         "id": identifier,
         "artifact_revision": artifact_revision,
         "content_ref": relative_to_project(root, path),
-        "sha256": sha256_file(path),
+        "sha256": markdown_file_sha256(path),
         **_artifact_relations(group, value),
     }
 
 
 def _artifact_relations(group: str, value: dict[str, Any]) -> dict[str, Any]:
-    common = {"title": str(value.get("title", ""))[:256]}
     if group == "requirements":
         return {
-            **common,
             "feature_id": value["feature_id"],
+            "decision_ids": value.get("decision_ids", []),
             "source_refs": value["source_refs"],
             "acceptance_criteria": [
                 {
@@ -425,8 +521,8 @@ def _artifact_relations(group: str, value: dict[str, Any]) -> dict[str, Any]:
         }
     if group == "designs":
         return {
-            **common,
             "requirement_ids": value["requirement_ids"],
+            "decision_ids": value.get("decision_ids", []),
             "extension_points": value["extension_points"],
         }
     if group == "verification":
@@ -447,30 +543,28 @@ def _commit_revision(
     candidate_id: str,
     *,
     previous: dict[str, Any] | None,
-    title: str,
+    candidate: dict[str, str],
     source_refs: list[dict[str, str]],
     requirements: list[dict[str, Any]],
     designs: list[dict[str, Any]],
     verification: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
     state: str = "draft",
     validation: dict[str, Any] | None = None,
     preview: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     revision = 1 if previous is None else int(previous["revision"]) + 1
-    full_feature_map = _rebuild_feature_map(title, requirements)
+    feature_map = _rebuild_feature_map(requirements)
     validate_schema_instance(
-        root, "artifacts/feature-map.schema.json", full_feature_map
+        root, "artifacts/feature-map.schema.json", feature_map
     )
-    feature_map = {
-        key: value
-        for key, value in full_feature_map.items()
-        if key != "goal"
-    }
     content_identity = {
-        "feature_map": full_feature_map,
+        "candidate": candidate,
+        "feature_map": feature_map,
         "requirements": requirements,
         "designs": designs,
         "verification": verification,
+        "decisions": decisions,
         "source_refs": source_refs,
     }
     value = {
@@ -478,17 +572,19 @@ def _commit_revision(
         "candidate_id": candidate_id,
         "revision": revision,
         "state": state,
-        "title": title[:256],
+        "candidate": candidate,
         "feature_map": feature_map,
         "requirements": sorted(requirements, key=lambda item: item["id"]),
         "designs": sorted(designs, key=lambda item: item["id"]),
         "verification": sorted(verification, key=lambda item: item["id"]),
+        "decisions": sorted(decisions, key=lambda item: item["id"]),
         "source_refs": source_refs,
         "content_hash": f"sha256:{sha256_json(content_identity)}",
         "validation": validation,
         "preview": preview,
         "created_at": utc_now(),
     }
+    validate_schema_instance(root, "candidate-revision.schema.json", value)
     path = (
         _candidate_root(root, candidate_id)
         / "revisions"
@@ -510,7 +606,7 @@ def _commit_revision(
 
 
 def _rebuild_feature_map(
-    title: str, requirements: list[dict[str, Any]]
+    requirements: list[dict[str, Any]]
 ) -> dict[str, Any]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for requirement in requirements:
@@ -518,12 +614,9 @@ def _rebuild_feature_map(
     return {
         "schema_version": "3.0",
         "initiative_id": "I-0001",
-        "title": title,
-        "goal": title,
         "features": [
             {
                 "id": feature_id,
-                "title": sorted(records, key=lambda item: item["id"])[0]["title"],
                 "requirement_ids": sorted(item["id"] for item in records),
                 "depends_on": [],
                 "status": "candidate",
@@ -546,15 +639,70 @@ def _load_current_revision(
     return pointer, revision
 
 
+def _candidate_title(root: Path, revision: dict[str, Any]) -> str:
+    record = revision.get("candidate")
+    if not isinstance(record, dict):
+        raise SdlcError("candidate revision 缺少 candidate Markdown 引用")
+    path = root / record["content_ref"]
+    if not path.is_file() or markdown_file_sha256(path) != record.get("sha256"):
+        raise SdlcError("candidate Markdown 缺失或 hash 漂移")
+    return read_candidate_title(path)
+
+
+def _snapshot_decisions(
+    root: Path,
+    candidate_id: str,
+    spec_work: dict[str, Any] | None,
+    previous: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not spec_work:
+        return []
+    prior = {item["id"]: item for item in previous}
+    records = []
+    source_refs = list(spec_work.get("source_refs", []))
+    for decision in spec_work.get("decisions", []):
+        rendered = render_decision_document(decision, source_refs)
+        digest = markdown_sha256(rendered)
+        existing = prior.get(decision["id"])
+        if existing and existing.get("sha256") == digest:
+            records.append(existing)
+            continue
+        directory = (
+            _candidate_root(root, candidate_id)
+            / "artifacts"
+            / "decisions"
+            / decision["id"]
+        )
+        versions = (
+            [
+                int(path.stem)
+                for path in directory.glob("*.md")
+                if path.stem.isdigit()
+            ]
+            if directory.is_dir()
+            else []
+        )
+        artifact_revision = max(versions, default=0) + 1
+        path = directory / f"{artifact_revision:04d}.md"
+        atomic_write(path, rendered)
+        records.append({
+            "id": decision["id"],
+            "artifact_revision": artifact_revision,
+            "content_ref": relative_to_project(root, path),
+            "sha256": markdown_file_sha256(path),
+        })
+    return sorted(records, key=lambda item: item["id"])
+
+
 def _load_artifacts(
     root: Path, revision: dict[str, Any], group: str
 ) -> dict[str, dict[str, Any]]:
     documents = {}
     for record in revision[group]:
         path = root / record["content_ref"]
-        if not path.is_file() or sha256_file(path) != record["sha256"]:
+        if not path.is_file() or markdown_file_sha256(path) != record["sha256"]:
             raise SdlcError(f"artifact 缺失或 hash 漂移: {record['content_ref']}")
-        value = read_markdown_record(path)
+        value = read_artifact_document(path, group)
         documents[record["id"]] = value
     return documents
 
@@ -620,6 +768,7 @@ def _candidate_diagnostics(
     requirements: dict[str, dict[str, Any]],
     designs: dict[str, dict[str, Any]],
     verification: dict[str, dict[str, Any]],
+    decision_ids: set[str],
 ) -> list[dict[str, str]]:
     diagnostics: list[dict[str, str]] = []
 
@@ -638,6 +787,14 @@ def _candidate_diagnostics(
         add("requirement_multiple_features", f"Requirement 属于多个 Feature: {duplicates}")
     if set(mapped) != set(requirements):
         add("requirement_feature_mismatch", "Feature Map 与 Requirement 集合不一致")
+    referenced_decisions = {
+        decision_id
+        for document in [*requirements.values(), *designs.values()]
+        for decision_id in document.get("decision_ids", [])
+    }
+    unknown_decisions = sorted(referenced_decisions - decision_ids)
+    if unknown_decisions:
+        add("unknown_decision", f"R/D 引用未知 Spec Work 决策: {unknown_decisions}")
 
     scaffold = read_json(scaffold_path(root))
     extension_points = {
@@ -697,16 +854,18 @@ def _candidate_diagnostics(
 def _render_preview(
     candidate_id: str,
     revision: int,
+    candidate_title: str,
     feature_map: dict[str, Any],
     requirements: dict[str, dict[str, Any]],
     designs: dict[str, dict[str, Any]],
     verification: dict[str, dict[str, Any]],
+    decisions: list[dict[str, Any]],
     report: dict[str, Any],
 ) -> str:
     lines = [
         f"# Spec Candidate {candidate_id}",
         "",
-        f"- Initiative: {feature_map['title']}",
+        f"- Initiative: {candidate_title}",
         f"- Revision: `{revision}`",
         f"- Validation: `{'pass' if report['ok'] else 'fail'}`",
         f"- Requirements: `{len(requirements)}`",
@@ -715,8 +874,9 @@ def _render_preview(
         "",
     ]
     for feature in feature_map["features"]:
+        feature_title = requirements[feature["requirement_ids"][0]]["title"]
         lines += [
-            f"## {feature['id']} {feature['title']}",
+            f"## {feature['id']} {feature_title}",
             "",
             f"- Requirements: {', '.join(feature['requirement_ids'])}",
             "",
@@ -750,6 +910,13 @@ def _render_preview(
             lines.append(
                 f"- `{identifier}` `{test['test_key']}` "
                 f"mandatory=`{str(test['mandatory']).lower()}`"
+            )
+        lines.append("")
+    if decisions:
+        lines += ["## Decisions", ""]
+        for decision in decisions:
+            lines.append(
+                f"- `{decision['id']}` {decision['prompt']} → {decision['answer']}"
             )
         lines.append("")
     if report["diagnostics"]:

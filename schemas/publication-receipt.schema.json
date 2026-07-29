@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/publication-receipt.schema.json",
+  "type": "object",
+  "required": [
+    "schema_version", "candidate_id", "revision", "state", "content_hash",
+    "confirmed", "baseline_id", "approved_at", "cleanup_state",
+    "spec_work_cleanup_state"
+  ],
+  "properties": {
+    "schema_version": {"const": "3.0"},
+    "candidate_id": {"type": "string", "pattern": "^SC-[0-9]{6}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "state": {"const": "published"},
+    "content_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "confirmed": {"const": true},
+    "baseline_id": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "approved_at": {"type": "string", "minLength": 1},
+    "updated_at": {"type": "string", "minLength": 1},
+    "spec_run_id": {"type": "string", "minLength": 1},
+    "cleanup_state": {
+      "enum": ["pending", "deleted", "cleanup_pending"]
+    },
+    "spec_work_cleanup_state": {
+      "enum": ["pending", "deleted", "cleanup_pending", "not_present"]
+    }
+  },
+  "additionalProperties": false
+}

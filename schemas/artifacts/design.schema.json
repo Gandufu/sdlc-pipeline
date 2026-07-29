@@ -16,6 +16,11 @@
       "uniqueItems": true,
       "items": {"type": "string", "pattern": "^R-[0-9]{4}$"}
     },
+    "decision_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^Q-[0-9]{4}$"}
+    },
     "modules": {
       "type": "array",
       "minItems": 1,

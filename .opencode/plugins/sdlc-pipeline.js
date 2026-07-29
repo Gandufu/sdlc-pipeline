@@ -359,6 +359,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             scope: tool.schema.array(tool.schema.string()),
             non_goals: tool.schema.array(tool.schema.string()),
             source_refs: tool.schema.array(sourceRef),
+            decision_ids: tool.schema.array(tool.schema.string()).optional(),
             main_flow: tool.schema.array(tool.schema.string()),
             alternate_flows: tool.schema.array(tool.schema.object({
               name: tool.schema.string(),
@@ -390,6 +391,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             id: tool.schema.string().optional(),
             title: tool.schema.string(),
             requirement_ids: tool.schema.array(tool.schema.string()),
+            decision_ids: tool.schema.array(tool.schema.string()).optional(),
             modules: tool.schema.array(moduleSpec),
             interfaces: tool.schema.array(interfaceSpec),
             data_contracts: tool.schema.array(dataContract),
@@ -420,6 +422,11 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             preconditions: tool.schema.string(),
             expected: tool.schema.string(),
             mandatory: tool.schema.boolean(),
+            test_basis: tool.schema.enum([
+              "acceptance", "risk", "regression", "contract",
+            ]).optional(),
+            intent: tool.schema.string().optional(),
+            coverage: tool.schema.string().optional(),
           }),
         },
         async execute(args, context) {
