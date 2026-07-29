@@ -7,6 +7,7 @@ import socket
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -196,7 +197,7 @@ def load_contract(root: Path) -> dict[str, Any]:
     if missing:
         raise SdlcError(f"lifecycle.json 缺少字段: {', '.join(missing)}")
     commands = value["commands"]
-    for name in ("install", "compile", "start", "stop", "restart"):
+    for name in ("install", "compile", "package", "start"):
         if name not in commands:
             raise SdlcError(f"lifecycle commands 缺少 {name}")
     for section in (commands, value["tests"]):
@@ -512,6 +513,63 @@ def verify_health(root: Path) -> dict[str, Any]:
     return {"ok": all(item["ok"] for item in results), "checks": results}
 
 
+def access_url(root: Path) -> str | None:
+    """Return the template-declared URL a user can open for preview."""
+    contract = load_contract(root)
+    variables = _variables(root, contract)
+    for check in contract["health"]:
+        if check["type"] == "http":
+            return _expand(check["url"], variables)
+    return None
+
+
+def _declared_ports(root: Path) -> list[dict[str, Any]]:
+    contract = load_contract(root)
+    variables = _variables(root, contract)
+    endpoints: set[tuple[str, int]] = set()
+    for check in contract["health"]:
+        kind = check["type"]
+        if kind == "tcp":
+            endpoints.add((
+                str(check.get("host", "127.0.0.1")),
+                int(_expand(str(check["port"]), variables)),
+            ))
+        elif kind == "http":
+            parsed = urllib.parse.urlparse(_expand(check["url"], variables))
+            if parsed.hostname:
+                port = parsed.port or (443 if parsed.scheme == "https" else 80)
+                endpoints.add((parsed.hostname, port))
+    return [
+        {"host": host, "port": port}
+        for host, port in sorted(endpoints)
+    ]
+
+
+def wait_for_ports_released(root: Path, timeout: float = 15) -> dict[str, Any]:
+    """Prove the preview runtime released every declared network endpoint."""
+    endpoints = _declared_ports(root)
+    deadline = time.monotonic() + timeout
+    occupied: list[dict[str, Any]] = []
+    while True:
+        occupied = []
+        for endpoint in endpoints:
+            try:
+                with socket.create_connection(
+                    (endpoint["host"], endpoint["port"]), timeout=0.25
+                ):
+                    occupied.append(endpoint)
+            except OSError:
+                pass
+        if not occupied or time.monotonic() >= deadline:
+            break
+        time.sleep(0.1)
+    return {
+        "ok": not occupied,
+        "endpoints": endpoints,
+        "occupied": occupied,
+    }
+
+
 def artifact_evidence(root: Path) -> dict[str, Any]:
     contract = load_contract(root)
     items = []
@@ -547,27 +605,32 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
     if not drift["ok"]:
         raise SdlcError(f"脚手架漂移，拒绝编译: {drift['drift']}")
     compile_result = run_phase(root, "compile")
+    package_result = run_phase(root, "package")
     policy = run_policy_gate(root, "code")
     artifacts = artifact_evidence(root)
     if not artifacts["ok"]:
         raise SdlcError("code 阶段 artifact 验证未通过")
     started: dict[str, Any] = {}
     health: dict[str, Any] = {}
-    stopped: dict[str, Any] = {"stopped": False}
     try:
         started = start(root)
         health = verify_health(root)
         if not health["ok"]:
             raise SdlcError("code 阶段 readiness 未通过")
-    finally:
-        stopped = stop_active(root)
+    except Exception:
+        stop_active(root)
+        raise
     evidence = {
         "ok": True,
         "compiled_at": utc_now(),
         "compile": compile_result,
+        "package": package_result,
         "start": started,
         "health": health,
-        "stop": stopped,
+        "preview": {
+            "running": True,
+            "access_url": access_url(root),
+        },
         "artifact_evidence": artifacts,
         "policy": policy,
         "source_fingerprint": implementation_fingerprint(root),
@@ -609,6 +672,7 @@ def init_project(
         return report
     install = run_phase(root, "install")
     compile_result = run_phase(root, "compile")
+    package_result = run_phase(root, "package")
     started = start(root)
     health = verify_health(root)
     artifacts = artifact_evidence(root)
@@ -625,6 +689,7 @@ def init_project(
         "system_installs": system_installs,
         "install": install,
         "compile": compile_result,
+        "package": package_result,
         "start": started,
         "health": health,
         "artifacts": artifacts,
@@ -701,10 +766,10 @@ def _validate_test_sources(
 def run_test_plan(root: Path) -> dict[str, Any]:
     code_evidence = read_evidence_record(root, "code")
     if not code_evidence.get("ok"):
-        raise SdlcError("code 阶段没有真实 compile/restart/verify 证据")
+        raise SdlcError("code 阶段没有真实 compile/package/preview 证据")
     spec_hashes = current_spec_hashes(root)
     if code_evidence.get("spec_hashes") != spec_hashes:
-        raise SdlcError("code 证据与当前 spec 不匹配，必须重新 compile/restart/verify")
+        raise SdlcError("code 证据与当前 spec 不匹配，必须重新执行 code gate")
     if code_evidence.get("source_fingerprint") != implementation_fingerprint(root):
         raise SdlcError("code 证据生成后业务源码发生变化，必须重新执行 code gate")
     test_sources = _validate_test_sources(root, code_evidence)
@@ -960,27 +1025,42 @@ def verify_delivery(root: Path) -> dict[str, Any]:
     if not code.get("ok") or code.get("source_fingerprint") != binding["source_fingerprint"]:
         raise SdlcError("code evidence 缺失或已失效；请先重新执行 code gate")
     _validate_test_sources(root, code)
-    started: dict[str, Any] = {}
-    health: dict[str, Any] = {}
+    runtime_reset: dict[str, Any] = {}
     execution: dict[str, Any] = {}
     results: dict[str, Any] = {}
-    cleanup: dict[str, Any] = {"stopped": False}
+    cleanup: dict[str, Any] = {}
     try:
-        started = start(root)
-        health = verify_health(root)
-        if not health["ok"]:
-            raise SdlcError("test 阶段 readiness 未通过")
+        preview_stop = stop_active(root)
+        port_release = wait_for_ports_released(root)
+        runtime_reset = {
+            "ok": preview_stop["ok"] and port_release["ok"],
+            "preview_stop": preview_stop,
+            "port_release": port_release,
+        }
+        if not runtime_reset["ok"]:
+            raise SdlcError(
+                f"test 阶段无法释放模板端口: {port_release['occupied']}"
+            )
         execution = run_test_plan(root)
         results = execute_tests(root)
     finally:
-        cleanup = stop_active(root)
+        runner_cleanup = stop_active(root)
+        port_cleanup = wait_for_ports_released(root)
+        cleanup = {
+            "ok": runner_cleanup["ok"] and port_cleanup["ok"],
+            "runner_cleanup": runner_cleanup,
+            "port_release": port_cleanup,
+        }
+    if not cleanup["ok"]:
+        raise SdlcError(
+            f"test 阶段结束后端口仍被占用: {cleanup['port_release']['occupied']}"
+        )
     evidence = {
         "ok": results["status"] == "pass",
         "cached": False,
         "binding": binding,
         "code": code,
-        "start": started,
-        "health": health,
+        "runtime_reset": runtime_reset,
         "execution": execution,
         "test_results": (
             f"docs/sdlc/test-results/{results['version']}/index.json"

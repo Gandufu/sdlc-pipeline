@@ -311,14 +311,13 @@ class ProjectFixture:
             "commands": {
                 "install": command("print('installed')"),
                 "compile": {"argv": ["${PYTHON}", "build.py"], "timeout_seconds": 30},
+                "package": command("print('packaged')"),
                 "start": {
                     "argv": ["${PYTHON}", "app.py"],
                     "timeout_seconds": 30,
                     "startup_grace_seconds": 0.5,
                     "background": True,
                 },
-                "stop": command("print('runner stop')"),
-                "restart": command("print('runner restart')"),
                 "lint": command("print('lint pass')"),
                 "typecheck": command("print('typecheck pass')"),
             },
@@ -488,6 +487,7 @@ class LifecycleTests(unittest.TestCase):
     def test_contract_uses_argv(self) -> None:
         contract = load_contract(self.fixture.root)
         self.assertIsInstance(contract["commands"]["compile"]["argv"], list)
+        self.assertIsInstance(contract["commands"]["package"]["argv"], list)
 
     def test_system_install_requires_explicit_confirmation(self) -> None:
         with self.assertRaises(SdlcError):
@@ -499,6 +499,7 @@ class LifecycleTests(unittest.TestCase):
         report = init_project(self.fixture.root)
         self.assertEqual(report["status"], "pass")
         self.assertTrue(report["compile"]["ok"])
+        self.assertTrue(report["package"]["ok"])
         self.assertTrue(report["health"]["ok"])
         self.assertTrue(report["artifacts"]["ok"])
         self.assertTrue(report["stop"]["stopped"])
@@ -705,12 +706,17 @@ class LifecycleTests(unittest.TestCase):
         )
         evidence = compile_restart_verify(self.fixture.root)
         self.assertTrue(evidence["compile"]["ok"])
+        self.assertTrue(evidence["package"]["ok"])
         self.assertTrue(evidence["policy"]["ok"])
         self.assertEqual(len(evidence["artifact_evidence"]["artifacts"]), 1)
         self.assertTrue(evidence["start"]["pid"])
         self.assertTrue(evidence["health"]["ok"])
-        self.assertTrue(evidence["stop"]["stopped"])
-        self.assertFalse(read_active(self.fixture.root))
+        self.assertTrue(evidence["preview"]["running"])
+        self.assertEqual(
+            evidence["preview"]["access_url"],
+            f"http://127.0.0.1:{self.fixture.port}",
+        )
+        self.assertTrue(read_active(self.fixture.root))
 
 
 class ClosedLoopTests(unittest.TestCase):
@@ -786,9 +792,14 @@ class ClosedLoopTests(unittest.TestCase):
         self._through_tester()
 
         self.assertTrue(status(self.fixture.root)["gates"]["code"])
-        delivery = verify_delivery(self.fixture.root)
+        with patch("sdlc_core.lifecycle.start") as test_stage_start:
+            delivery = verify_delivery(self.fixture.root)
 
         self.assertTrue(delivery["ok"])
+        test_stage_start.assert_not_called()
+        self.assertTrue(delivery["runtime_reset"]["preview_stop"]["stopped"])
+        self.assertTrue(delivery["runtime_reset"]["port_release"]["ok"])
+        self.assertTrue(delivery["cleanup"]["port_release"]["ok"])
         self.assertIn(
             "test_source_fingerprint",
             delivery["binding"],
@@ -975,6 +986,11 @@ class ClosedLoopTests(unittest.TestCase):
         execution = run_test_plan(self.fixture.root)
         execute_tests(self.fixture.root)
         current = status(self.fixture.root)
+        self.assertTrue(current["preview"]["running"])
+        self.assertEqual(
+            current["preview"]["access_url"],
+            f"http://127.0.0.1:{self.fixture.port}",
+        )
         self.assertEqual(
             current["lifecycle_tests"]["available"],
             ["functional"],

@@ -57,10 +57,13 @@ coder dispatch 的 deadline 由 Core 根据已发布 Requirement 数量派生（
 增加 2 分钟、最多 15 分钟）；恢复时以 journal 的 heartbeat/deadline 为准。
 
 coder 只实现业务代码，不读取或修改测试脚本。handoff 后 Core 统一执行 compile/package/lint/typecheck、
-启动、readiness 和停止。`/sdlc-code` 看到 code gate 通过后必须立即报告并停止；不得调用
+启动与 readiness，并保留预览进程。`/sdlc-code` 看到 code gate 通过后必须报告访问地址并结束
+code 阶段；
+不得调用
 `sdlc_lifecycle(verify_delivery)`、不得开始 test 阶段，后续只由用户显式执行 `/sdlc-test`。
 test 阶段只派发一次 `sdlc-tester` 子 agent；它编写 Spec selector 指定的 Playwright 脚本并返回
 JSON handoff，plugin 在 handoff 校验后调用一次 `verify_delivery`。主会话和 tester 都不得直接调用
-test lifecycle；Core 负责 start、readiness、确定性测试命令和 cleanup。Playwright MCP 不属于权威
+test lifecycle；Core 先停止 coder 预览并确认端口释放，再由 Playwright 脚本启动、验证并关闭
+Electron，最后复查端口和进程清理。Playwright MCP 不属于权威
 gate 的依赖。
 正式文档、Git 映射、进程身份和通过状态以 Core 返回值为准。版本固化必须再次取得用户明确确认。

@@ -25,13 +25,12 @@
     },
     "commands": {
       "type": "object",
-      "required": ["install", "compile", "start", "stop", "restart"],
+      "required": ["install", "compile", "package", "start"],
       "properties": {
         "install": {"$ref": "#/$defs/command"},
         "compile": {"$ref": "#/$defs/command"},
+        "package": {"$ref": "#/$defs/command"},
         "start": {"$ref": "#/$defs/command"},
-        "stop": {"$ref": "#/$defs/command"},
-        "restart": {"$ref": "#/$defs/command"},
         "lint": {"$ref": "#/$defs/command"},
         "typecheck": {"$ref": "#/$defs/command"}
       },

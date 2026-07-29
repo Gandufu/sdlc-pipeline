@@ -11,7 +11,7 @@
 导致工程控制被误称为功能测试，也让 tester 与 coder 的职责边界不清晰。
 
 当前流程已经规定 coder 不读取或编写测试脚本；coder handoff 后由 Core 执行 compile/package、
-lint、typecheck、启动、readiness 和停止。tester 是独立子 agent，只编写 Spec selector 指定的
+lint、typecheck、启动与 readiness，并保持预览运行。tester 是独立子 agent，只编写 Spec selector 指定的
 Playwright functional 脚本。
 
 ## 决策
@@ -22,6 +22,8 @@ Playwright functional 脚本。
 3. Verification `level` 固定为 `functional`，并要求 selector 指向 `tests/functional/` 下的脚本。
 4. 模板仓库的 Vitest 属于模板维护者自检，不是 Feature tester 的交付职责。
 5. Playwright MCP 可用于非权威探索，但 functional 脚本必须使用项目依赖并由 Core 确定性执行。
+6. test gate 先停止 coder 预览并确认端口释放；Playwright 脚本拥有测试 Electron 实例的启动和关闭，
+   Core 在命令结束后复查端口与受管进程清理。
 
 ## 结果
 

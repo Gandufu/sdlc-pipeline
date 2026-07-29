@@ -626,11 +626,18 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         role,
         output: output.output || "",
       })
-      await invoke(fallbackRoot, "lifecycle", {
+      const lifecycleResult = await invoke(fallbackRoot, "lifecycle", {
         action: role === "coder"
           ? "compile_restart_verify"
           : "verify_delivery",
       })
+      if (role === "coder") {
+        const accessUrl = lifecycleResult?.preview?.access_url
+        const preview = accessUrl
+          ? `预览已启动：${accessUrl}`
+          : "预览进程已启动；当前模板未声明 HTTP 访问地址。"
+        output.output = `${output.output || ""}\n[SDLC code gate] compile/package/readiness 通过；${preview}`
+      }
       await logPluginEvent(client, `${role}.completed`, {
         session_id: input.sessionID,
       })

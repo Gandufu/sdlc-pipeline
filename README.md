@@ -30,7 +30,8 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
 
 1. `/sdlc-init`
    选择 registry 中的脚手架，导入 `.sdlc-pipeline/contracts`，执行
-   install → compile → start → health → artifact → stop。init 只写 evidence，不创建 `docs/sdlc`。
+   install → compile → package → start → health → artifact → stop。init 只写 evidence，不创建
+   `docs/sdlc`。
 2. `/sdlc-spec`
    摄取原型、协议和需求为 Source Markdown；一次只处理阻塞决策；按 R/D/T 分片构建 Candidate。
    “采用推荐”只保存临时 spec work；validate 后展示 revision/hash；只有“确认发布”才按
@@ -38,11 +39,13 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
 3. `/sdlc-code`
    原生 task 只派发 `sdlc-coder`。coder 最多 16 个 agent steps，读取一个渐进式 context manifest，
    在 allowed paths 内只实现业务代码，禁止读取或修改测试脚本。task-after 校验真实 Git diff 和
-   handoff，Core 再执行 compile/package/lint/typecheck、启动、readiness 和停止。
+   handoff，Core 再执行 compile/package/lint/typecheck、启动与 readiness，并保留预览进程，
+   返回模板声明的访问地址供用户检查当前页面。
 4. `/sdlc-test`
    `sdlc-main` 只派发一次 `sdlc-tester` 子 agent；tester 在测试目录内编写 Spec selector 声明的
-   Playwright functional 脚本并返回 handoff。plugin 校验 handoff 后，由 Core 执行
-   start/readiness、mandatory functional 验证和 cleanup。Core 记录每次测试、中间错误和
+   Playwright functional 脚本并返回 handoff。plugin 校验 handoff 后，Core 先停止 coder 预览并
+   确认端口释放，再由 Playwright 脚本启动、验证并关闭 Electron，最后复查 cleanup。Core 记录
+   每次测试、中间错误和
    Delivery Trace；最终成功不能覆盖此前失败 attempt。
 
 Playwright MCP 不是 pipeline 的必需依赖。权威 gate 通过 lifecycle contract 直接调用项目已安装的
@@ -131,9 +134,10 @@ docs/sdlc/
 
 ## 合同与门禁
 
-`lifecycle.json` 用 argv 数组声明工具、工程命令、start/stop/health/artifact 和 functional 测试键。
-code gate 从 `commands` 执行 compile/package、lint、typecheck、启动与 readiness；test 阶段只由
-tester 编写 selector 指定的 Playwright functional 脚本，并由 Core 执行与清理。
+`lifecycle.json` 用 argv 数组分别声明 compile、package、start、health/artifact 和 functional
+测试键。start 产生的后台进程由 Core 记录 PID 与创建身份并统一停止，模板不重复实现 stop/restart
+脚本。code gate 执行 compile/package、lint、typecheck、启动与 readiness，并保持预览运行；
+test 阶段由 Core 清理预览端口，再执行 tester 编写的 Playwright functional 脚本。
 `scaffold.json` 声明关键文件 fingerprint、protected paths、allowed paths 与 extension points。
 Design 只能引用已声明 extension point；实际代码文件由 code 后的 Git diff 推导。
 

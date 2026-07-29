@@ -292,6 +292,18 @@ class LightweightDeliveryContractTests(unittest.TestCase):
             "typecheck",
             lifecycle_schema["properties"]["commands"]["properties"],
         )
+        self.assertIn(
+            "package",
+            lifecycle_schema["properties"]["commands"]["required"],
+        )
+        self.assertNotIn(
+            "stop",
+            lifecycle_schema["properties"]["commands"]["properties"],
+        )
+        self.assertNotIn(
+            "restart",
+            lifecycle_schema["properties"]["commands"]["properties"],
+        )
         policy_schema = json.loads(
             (REPO / "schemas/rule-policy.schema.json").read_text(encoding="utf-8")
         )

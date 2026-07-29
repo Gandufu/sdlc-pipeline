@@ -46,7 +46,8 @@ Electron 项目必须检查：
 生命周期至少覆盖：
 
 ```text
-install -> compile/package -> start -> readiness -> headless functional -> stop
+install -> compile -> package -> start -> readiness。code gate 保留预览；test gate 先停止预览并确认
+端口释放，再由 headless functional 脚本启动、验证和关闭测试实例
 ```
 
 功能测试计划只描述由无头浏览器执行的 functional T-id；lint、typecheck 与 static analysis

@@ -202,7 +202,7 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
             return install_system_tool(
                 lifecycle_root, payload["tool"], bool(payload.get("approved"))
             )
-        if action in {"install", "compile", "restart"}:
+        if action in {"install", "compile", "package"}:
             return run_phase(lifecycle_root, action)
         raise SdlcError(f"不支持的 lifecycle action: {action}")
     if operation == "task-before":

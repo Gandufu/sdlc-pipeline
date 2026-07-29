@@ -42,7 +42,7 @@ permission:
 读取 manifest 后只检查即将修改的少量业务代码，不得预读全部 resources 或枚举源码目录；
 **第 4 次工具调用前必须在 `allowed_paths` 内开始真实编辑**。没有实际业务改动时不得返回 handoff。
 禁止读取、创建或修改 `tests/**`、`test/**` 以及任何测试脚本。测试设计与 Playwright 脚本由
-后续 `sdlc-tester` 负责。compile/package/lint/typecheck、启动、readiness 和停止均由 coder
+后续 `sdlc-tester` 负责。compile/package/lint/typecheck、启动与 readiness 均由 coder
 handoff 后的 Core code gate 统一执行。
 
 TypeScript hard policy 在 handoff 后立即检查全部改动：严禁写入 `: any`、`as any` 或 `<any>`。

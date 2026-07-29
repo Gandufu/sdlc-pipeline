@@ -73,7 +73,7 @@ def status(root: Path) -> dict[str, Any]:
         and code.get("source_fingerprint") == code_fingerprint
     )
     if not gates["code"]:
-        missing.append("compile/restart/health/artifact evidence")
+        missing.append("compile/package/preview/health/artifact evidence")
     candidate = read_work_record(root, "version-candidate", required=False)
     lifecycle_contract_path = lifecycle_path(root)
     lifecycle_sha256 = (
@@ -173,6 +173,14 @@ def status(root: Path) -> dict[str, Any]:
         "gates": gates,
         "missing": missing,
         "active_pid": active_pid if active_safe else None,
+        "preview": {
+            "running": bool(active_safe and code and code.get("preview", {}).get("running")),
+            "access_url": (
+                code.get("preview", {}).get("access_url")
+                if active_safe and code
+                else None
+            ),
+        },
         "unfinished_run": candidate if candidate and candidate.get("status") != "closed" else None,
         "affected_ids": ids,
         "blocking_questions": [

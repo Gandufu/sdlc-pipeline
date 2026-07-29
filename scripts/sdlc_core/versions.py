@@ -77,8 +77,9 @@ def render_version_summary(manifest: dict[str, Any]) -> str:
         "## 交付证据",
         "",
         f"- Compile：`{'pass' if evidence.get('compile', {}).get('ok') else 'fail'}`",
+        f"- Package：`{'pass' if evidence.get('package', {}).get('ok') else 'fail'}`",
         f"- Cleanup：`{'pass' if runtime.get('cleanup', {}).get('ok') else 'fail'}`",
-        f"- Start：`{'pass' if runtime.get('start', {}).get('ok') else 'fail'}`",
+        f"- Preview start：`{'pass' if runtime.get('preview_start', {}).get('ok') else 'fail'}`",
         f"- Health：`{'pass' if evidence.get('health', {}).get('ok') else 'fail'}`",
         f"- Tests：`{evidence.get('tests', '')}`",
         "",
@@ -179,11 +180,13 @@ def build_manifest(root: Path, version: str, summary: str) -> dict[str, Any]:
         "trace": trace["rows"],
         "evidence": {
             "compile": code_evidence["compile"],
+            "package": code_evidence["package"],
             "runtime": {
-                "start": delivery_evidence["start"],
+                "preview_start": code_evidence["start"],
+                "test_reset": delivery_evidence["runtime_reset"],
                 "cleanup": delivery_evidence["cleanup"],
             },
-            "health": delivery_evidence["health"],
+            "health": code_evidence["health"],
             "artifacts": code_evidence["artifact_evidence"],
             "tests": candidate["test_results"],
             "policy": {

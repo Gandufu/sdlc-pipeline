@@ -369,7 +369,7 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
             "第 4 次工具调用前必须在 allowed_paths 内开始真实实现；"
             "coder 只实现业务代码，禁止读取、创建或修改 tests/、test/ 下的测试脚本；"
             "禁止调用 compile/start/restart/health/stop/test；"
-            "handoff 后 Core 统一执行 compile、start、readiness 与 stop。"
+            "handoff 后 Core 统一执行 compile、package、start 与 readiness，并保留预览进程。"
             "TypeScript hard policy 会拒绝 : any、as any、<any>；"
             "只实现已确认 R/D/AC，不为臆造的无效输入使用类型逃逸。"
         )
@@ -379,7 +379,7 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
             "只能创建或修改 brief.allowed_paths 明确列出的测试脚本；"
             "禁止修改业务源码、配置和正式 SDLC 文档；"
             "禁止调用 compile/start/restart/health/stop/test；"
-            "handoff 后 Core 统一执行 start、readiness、测试和 cleanup。"
+            "handoff 后 Core 停止预览并确认端口释放，再由 Playwright 脚本启动、测试和 cleanup。"
         )
     return {
         "ok": True,
