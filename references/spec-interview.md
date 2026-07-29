@@ -40,6 +40,9 @@ functional suite，不能填写 `pnpm functional` 等 shell command。
 编写对应脚本。v1.0 的 functional suite 可由 Core 按 T-id 生成默认 selector；v1.1 必须显式提供
 `tests/` 下的 POSIX 项目内路径。functional 测试使用项目已安装的 Playwright；unit 测试使用模板
 声明的 runner。
+当 Verification 复用既有 mock、设备或其它外部服务时，`预期结果`必须写入可由测试确定性断言的
+固定响应值、错误触发方式及其预期结构化/UI 结果；不能只写“字段存在”“正确数据”或“错误时展示”。
+这描述的是验收事实而不是测试代码步骤，避免 tester 退化为类型/非空断言或自行猜测服务情境。
 正式文档使用项目配置语言（默认中文），代码标识、协议字段和原文保持原样。
 Core 将 R/D/T 写成 frontmatter 加固定标题文法的原生 Markdown；不得在正式 artifact 中嵌入
 structured-record JSON fenced block。模板位于

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- 强化 tester 上下文与 handoff 契约：Verification 必须记录既有外部服务的固定值和错误情境；主会话
+  不得丢弃这些断言，tester 必须维护 preflight 测试、使用确定性断言并只返回裸 JSON handoff。
 - Core 为每个实现指纹持久化单次 tester dispatch 边界；测试失败后 OpenCode 无法自动重复派发
   tester，只有明确 code 返工改变实现指纹后才可重新进入 test 阶段。
 - 修复 lifecycle Schema 的 `minProperties` 与 fail-closed 运行时校验器不一致，避免 v1.1

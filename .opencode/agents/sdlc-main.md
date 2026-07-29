@@ -71,8 +71,13 @@ code 阶段；唯一例外是 journal 明确为 `state=failed, phase=test`，且
 必须停止报告。
 不得调用
 `sdlc_lifecycle(verify_delivery)`、不得开始 test 阶段，后续只由用户显式执行 `/sdlc-test`。
-test 阶段只派发一次 `sdlc-tester` 子 agent；它只修改 Spec selector 指定的测试脚本并返回 JSON
-handoff，plugin 在 handoff 校验后调用一次 `verify_delivery`。主会话和 tester 都不得直接调用 test
+test 阶段只派发一次 `sdlc-tester` 子 agent。派发前必须逐项核对已发布 Verification 的 `expected`：
+对既有外部服务的固定响应值、错误触发方式和预期 UI/结构化结果，必须已经写入 Verification；不得把
+当前用户消息中的具体断言静默丢弃，也不得用临时 task 描述覆盖已发布 Spec。若测试所需的确定性断言
+尚未发布，先报告需要补充 Spec，不能派发一个只做“非空/类型”断言的 tester。派发 task 时描述保持
+简短，但必须逐字保留已发布的精确断言、既有服务限制和 `preflight_unit_test_paths` 维护要求。
+tester 只修改 Spec selector 指定的测试脚本及该 preflight 明确列出的既有单元测试，并返回裸 JSON
+handoff；plugin 在 handoff 校验后调用一次 `verify_delivery`。主会话和 tester 都不得直接调用 test
 lifecycle；Core 先停止 coder 预览并确认端口释放，执行合同的 test_preflight，再只在已选测试套件
 需要 runtime 时启动并完成 readiness，随后运行 unit/functional 测试并复查 cleanup。Playwright MCP
 不属于权威 gate 的依赖。

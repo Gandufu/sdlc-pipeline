@@ -724,12 +724,17 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Playwright", tester)
         self.assertIn("按语义匹配请求而非数组下标", tester)
         self.assertIn("可观察的业务结果", tester)
+        self.assertIn("不得用类型、非空、成功/失败任选分支", tester)
+        self.assertIn("最终回复必须是下列单个、裸的 JSON 对象", tester)
+        self.assertIn("preflight_unit_test_paths", tester)
         self.assertIn("替代 mock、启动服务或绑定其地址/端口", tester)
         self.assertIn("mode: subagent", tester)
         self.assertIn("sdlc_lifecycle: deny", tester)
         self.assertIn('"sdlc-tester": allow', main)
         self.assertIn("agent: sdlc-main", test_command)
         self.assertIn("task", test_command)
+        self.assertIn("外部服务响应、错误情境与可观察结果", test_command)
+        self.assertIn("Spec 缺口", test_command)
         self.assertIn('"sdlc-tester": "tester"', plugin)
         self.assertNotIn('"sdlc-tester": ["verify_delivery"]', plugin)
         self.assertFalse((REPO / ".opencode/agents/sdlc-executor.md").exists())
@@ -751,6 +756,8 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("feature-contract.schema.json", command + main)
         self.assertIn("Storage Layout v3", reference)
         self.assertIn("R/D/T/AC", reference)
+        self.assertIn("固定响应值、错误触发方式", reference)
+        self.assertIn("不能只写“字段存在”", reference)
 
     def test_code_command_stops_before_test_lifecycle(self) -> None:
         command = (REPO / ".opencode/commands/sdlc-code.md").read_text(
