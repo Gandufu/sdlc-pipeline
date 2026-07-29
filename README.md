@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.18.2`。
+OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.18.3`。
 
 插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
 状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
@@ -41,6 +41,9 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
    在 allowed paths 内只实现业务代码，禁止读取或修改测试脚本。task-after 校验真实 Git diff 和
    handoff，Core 再执行 compile/package/lint/typecheck、启动与 readiness，并保留预览进程，
    返回模板声明的访问地址供用户检查当前页面。
+   若 `/sdlc-test` 的已记录失败明确归因为业务代码，用户可显式执行 `/sdlc-code 返工 <原因>`；Core 会
+   记录 `run.rework_started` 并重新完成完整 code gate。该入口不能用于跳过测试、修改测试脚本或重复已通过的
+   普通 code 阶段。
 4. `/sdlc-test`
    `sdlc-main` 只派发一次 `sdlc-tester` 子 agent；tester 仅在 Spec selector 声明的路径内编写
    unit 或 functional 脚本并返回 handoff。plugin 校验 handoff 后，Core 停止 coder 预览并确认端口

@@ -765,6 +765,20 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("不得调用", main)
         self.assertIn("sdlc-tester", main)
 
+    def test_code_command_allows_explicit_rework_after_failed_test(self) -> None:
+        command = (REPO / ".opencode/commands/sdlc-code.md").read_text(
+            encoding="utf-8"
+        )
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+
+        self.assertIn("$ARGUMENTS", command)
+        self.assertIn("journal.state=failed", command)
+        self.assertIn("journal.phase=test", command)
+        self.assertIn("返工", command)
+        self.assertIn("run.rework_started", command)
+        self.assertIn("state=failed, phase=test", main)
+        self.assertIn("完整 code gate", main)
+
     def test_spec_work_guidance_uses_structured_arguments(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
         reference = (REPO / "references/spec-interview.md").read_text(encoding="utf-8")
