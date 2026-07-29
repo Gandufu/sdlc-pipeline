@@ -220,6 +220,30 @@ def load_contract(root: Path) -> dict[str, Any]:
     return value
 
 
+def preflight_unit_test_paths(root: Path) -> set[str]:
+    """Return existing unit tests a tester may maintain for preflight.
+
+    The result is captured by the code gate before the tester starts. It must
+    not be recalculated after tester handoff, otherwise a new undeclared test
+    could become allowed merely by matching a unit selector pattern.
+    """
+    unit = load_contract(root).get("tests", {}).get("unit", {})
+    patterns = unit.get("selector_patterns", [])
+    if not isinstance(patterns, list):
+        return set()
+    paths: set[str] = set()
+    for pattern in patterns:
+        if not isinstance(pattern, str):
+            continue
+        for candidate in root.glob(pattern):
+            if not candidate.is_file():
+                continue
+            relative = candidate.relative_to(root).as_posix()
+            if relative.startswith(("tests/", "test/")):
+                paths.add(relative)
+    return paths
+
+
 def validate_command(command: dict[str, Any], name: str) -> None:
     if not isinstance(command, dict):
         raise SdlcError(f"{name} 必须是命令对象")
@@ -637,6 +661,7 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
         "policy": policy,
         "source_fingerprint": implementation_fingerprint(root),
         "worktree": worktree_fingerprint(root),
+        "preflight_unit_test_paths": sorted(preflight_unit_test_paths(root)),
         "spec_hashes": current_spec_hashes(root),
     }
     write_evidence_record(
@@ -747,6 +772,7 @@ def _validate_test_sources(
     outside = [
         path for path in changed
         if path not in declared
+        and path not in set(code_evidence.get("preflight_unit_test_paths", []))
         and not path.startswith("docs/sdlc/test-results/")
         and not path.startswith("docs/sdlc/baselines/")
         and path != "docs/sdlc/current.json"
@@ -761,6 +787,11 @@ def _validate_test_sources(
     return {
         "ok": True,
         "declared": sorted(declared),
+        "preflight_unit_test_paths": sorted(
+            path
+            for path in code_evidence.get("preflight_unit_test_paths", [])
+            if isinstance(path, str)
+        ),
         "changed": changed,
     }
 

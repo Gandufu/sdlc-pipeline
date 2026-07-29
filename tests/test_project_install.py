@@ -724,6 +724,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("Playwright", tester)
         self.assertIn("按语义匹配请求而非数组下标", tester)
         self.assertIn("可观察的业务结果", tester)
+        self.assertIn("不得在测试脚本内创建替代 mock", tester)
         self.assertIn("mode: subagent", tester)
         self.assertIn("sdlc_lifecycle: deny", tester)
         self.assertIn('"sdlc-tester": allow', main)

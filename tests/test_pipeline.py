@@ -870,6 +870,32 @@ class ClosedLoopTests(unittest.TestCase):
             delivery["binding"],
         )
 
+    def test_test_stage_allows_existing_preflight_unit_script(self) -> None:
+        self.fixture.use_lifecycle_v11()
+        legacy_test = self.fixture.root / "tests" / "unit" / "legacy.unit.py"
+        legacy_test.parent.mkdir(parents=True, exist_ok=True)
+        legacy_test.write_text("assert True\n", encoding="utf-8")
+        run("git", "add", "-A", cwd=self.fixture.root)
+        run("git", "commit", "-qm", "add legacy unit test", cwd=self.fixture.root)
+
+        self._through_code()
+        before_task(self.fixture.root, "tester")
+        self._author_tests()
+        legacy_test.write_text("assert True  # maintained by tester\n", encoding="utf-8")
+        after_task(
+            self.fixture.root,
+            "tester",
+            json.dumps({"summary": "测试脚本已准备", "open_issues": []}),
+        )
+
+        delivery = verify_delivery(self.fixture.root)
+
+        self.assertTrue(delivery["ok"])
+        self.assertIn(
+            "tests/unit/legacy.unit.py",
+            delivery["test_sources"]["preflight_unit_test_paths"],
+        )
+
     def test_test_stage_rejects_undeclared_test_script(self) -> None:
         self._through_code()
         self._through_tester()

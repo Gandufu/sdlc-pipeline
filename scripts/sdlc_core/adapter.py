@@ -82,24 +82,9 @@ def _preflight_unit_test_paths(root: Path) -> set[str]:
     Restrict the exception to already-existing files under the contract's unit
     selector patterns; the tester still cannot create arbitrary test sources.
     """
-    from .lifecycle import load_contract
+    from .lifecycle import preflight_unit_test_paths
 
-    contract = load_contract(root)
-    unit = contract.get("tests", {}).get("unit", {})
-    patterns = unit.get("selector_patterns", [])
-    if not isinstance(patterns, list):
-        return set()
-    paths: set[str] = set()
-    for pattern in patterns:
-        if not isinstance(pattern, str):
-            continue
-        for candidate in root.glob(pattern):
-            if not candidate.is_file():
-                continue
-            relative = candidate.relative_to(root).as_posix()
-            if _is_test_path(relative):
-                paths.add(relative)
-    return paths
+    return preflight_unit_test_paths(root)
 
 
 def _tester_writable_paths(root: Path) -> set[str]:

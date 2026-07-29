@@ -30,6 +30,9 @@ permission:
 不得用并发请求、React effect 或回调的数组下标推断重试因果；应按语义匹配请求而非数组下标。
 固定等待只能辅助同步，不能作为正确性的唯一依据。
 
+若 Verification、confirmed decision 或 task 明确指定既有外部服务，必须直接使用该服务；不得在测试
+脚本内创建替代 mock、启动服务或绑定其地址/端口。只有 Verification 明确要求自托管测试服务时才可例外。
+
 禁止调用 lifecycle、bash 或继续派发 task。测试脚本准备完成后只返回：
 
 ```json
