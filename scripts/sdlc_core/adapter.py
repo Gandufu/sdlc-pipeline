@@ -18,6 +18,7 @@ from .stores import (
 from .trace import (
     TOOLING_CONFIG_PATHS,
     changed_path_fingerprints,
+    implementation_fingerprint,
     validate_diff,
     verify_extension_points,
 )
@@ -328,6 +329,34 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         require_code_ready(load_current_spec(root))
     verify_extension_points(root)
     spec_pointer = read_json(root / "docs" / "sdlc" / "current.json", required=False) or {}
+    if role == "tester":
+        implementation = implementation_fingerprint(root)
+        previous_dispatch = read_work_record(
+            root,
+            "tester-dispatch",
+            required=False,
+        )
+        if (
+            previous_dispatch is not None
+            and previous_dispatch.get("implementation_fingerprint")
+            == implementation["sha256"]
+            and not current["gates"]["test"]
+        ):
+            raise SdlcError(
+                "当前实现已派发过 tester；测试失败后禁止自动重复派发。"
+                "请先完成明确的 code 返工，使实现指纹变化后再进入 test 阶段"
+            )
+        write_work_record(
+            root,
+            "tester-dispatch",
+            {
+                "baseline_id": spec_pointer.get("baseline_id"),
+                "implementation_fingerprint": implementation["sha256"],
+                "created_at": utc_now(),
+            },
+            state="captured",
+            title="Tester dispatch boundary",
+        )
     previous = read_work_record(root, f"task/{role}-before", required=False)
     reuse_baseline = (
         previous is not None

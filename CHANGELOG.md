@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Core 为每个实现指纹持久化单次 tester dispatch 边界；测试失败后 OpenCode 无法自动重复派发
+  tester，只有明确 code 返工改变实现指纹后才可重新进入 test 阶段。
 - 修复 lifecycle Schema 的 `minProperties` 与 fail-closed 运行时校验器不一致，避免 v1.1
   测试套件项目在 init 读取合约时被错误阻断。
 - coder 退出所有测试源码读写；code gate 在 handoff 后统一完成 compile/package/lint/typecheck、

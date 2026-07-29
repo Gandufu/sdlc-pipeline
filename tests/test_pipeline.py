@@ -36,7 +36,11 @@ from sdlc_core.common import (  # noqa: E402
 )
 from sdlc_core.common import sha256_json  # noqa: E402
 from sdlc_core.records import read_markdown_record  # noqa: E402
-from sdlc_core.stores import write_evidence_record, write_work_record  # noqa: E402
+from sdlc_core.stores import (  # noqa: E402
+    read_work_record,
+    write_evidence_record,
+    write_work_record,
+)
 from sdlc_core.cli import execute  # noqa: E402
 from sdlc_core.lifecycle import (  # noqa: E402
     artifact_evidence,
@@ -73,6 +77,7 @@ from sdlc_core.spec_candidates import (  # noqa: E402
 from sdlc_core.spec_publisher import approve_and_promote  # noqa: E402
 from sdlc_core.status import status  # noqa: E402
 from sdlc_core.trace import (  # noqa: E402
+    implementation_fingerprint,
     verify_scaffold,
 )
 from sdlc_core.versions import finalize, parent_manifest  # noqa: E402
@@ -930,6 +935,44 @@ class ClosedLoopTests(unittest.TestCase):
             handoff["handoff"]["changed_files"],
             ["tests/functional/T-0001.functional.ts"],
         )
+
+    def test_tester_dispatch_rejects_automatic_retry_for_same_implementation(self) -> None:
+        self._through_code()
+
+        first = before_task(self.fixture.root, "tester")
+        dispatch = read_work_record(
+            self.fixture.root,
+            "tester-dispatch",
+        )
+
+        self.assertEqual(first["role"], "tester")
+        self.assertEqual(
+            dispatch["implementation_fingerprint"],
+            implementation_fingerprint(self.fixture.root)["sha256"],
+        )
+        with self.assertRaisesRegex(
+            SdlcError,
+            "当前实现已派发过 tester；测试失败后禁止自动重复派发",
+        ):
+            before_task(self.fixture.root, "tester")
+
+    def test_tester_dispatch_allows_test_after_code_rework_changes_implementation(self) -> None:
+        self._through_code()
+        before_task(self.fixture.root, "tester")
+
+        before_task(self.fixture.root, "coder")
+        feature = self.fixture.root / "src" / "feature.py"
+        feature.write_text("def feature(): return 'reworked'\n", encoding="utf-8")
+        validate_coder_handoff(self.fixture.root, json.dumps({
+            "summary": "fixture rework",
+            "open_issues": [],
+            "full_scan": False,
+            "full_scan_reason": None,
+        }))
+        compile_restart_verify(self.fixture.root)
+
+        dispatched = before_task(self.fixture.root, "tester")
+        self.assertEqual(dispatched["role"], "tester")
 
     def test_tester_write_guard_rejects_business_source(self) -> None:
         self._through_code()
