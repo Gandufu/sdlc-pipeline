@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- main/coder/tester 改为完整项目读写能力；以不同模型、独立 context、task prompt 和 handoff
+  区分角色，删除 plugin/Core 的工具前目录 ACL。
+- tester context 显式引用 coder handoff；main 状态返回轻量 artifact refs，便于检查上一阶段产物。
+- task hook 保留 main 的完整委派原文；handoff 存在 `open_issues` 时停止 gate 和状态推进。
+- Electron 模板通过 `brief.asset_paths` 约定项目根目录 `assets/`，外部原型资产保持原格式复制，
+  不进入 Source 摄取或 Core 内容处理。
 - 采用最终 Task 状态图，支持 Code/Human Review/Test/Spec 的显式返工循环。
 - 只追加用户原始 `input.md`；删除 Source、Spec Work、Candidate revision、Feedback 和会话恢复。
 - Spec prepare 只保存待确认 hash；approve 后直接生成正式 Markdown baseline。

@@ -11,7 +11,8 @@ from .artifacts import (
 )
 from .bootstrap import template_registry
 from .common import read_json
-from .common import sha256_file
+from .common import sha256_file, sha256_json
+from .journal import has_attempt
 from .layout import contracts_root, lifecycle_path, runtime_root
 from .runs import active_identity_matches, pid_alive, read_active
 from .trace import verify_scaffold
@@ -21,7 +22,7 @@ from .trace import (
     worktree_fingerprint,
 )
 from .versions import current_version, parent_manifest
-from .stores import read_evidence_record, read_work_record
+from .stores import read_evidence_record, read_work_record, record_index
 from .task_state import task_status
 
 
@@ -128,33 +129,10 @@ def status(root: Path) -> dict[str, Any]:
         drift = verify_scaffold(root)
     except Exception as exc:
         drift = {"ok": False, "drift": [str(exc)]}
-    try:
-        test_commands = lifecycle_test_commands(root)
-        lifecycle_tests = {
-            "available": sorted(test_commands),
-            "commands": test_commands,
-        }
-    except Exception as exc:
-        lifecycle_tests = {
-            "available": [],
-            "commands": {},
-            "error": str(exc),
-        }
-    try:
-        templates = template_registry(runtime_root(root))
-    except Exception as exc:
-        templates = []
-        template_error = str(exc)
-    else:
-        template_error = None
     scaffold_contract = read_json(
         contract_root / "scaffold.json",
         required=False,
     ) or {}
-    active_rules = read_json(
-        contract_root / "active-rules.json",
-        required=False,
-    )
     init_state = {
         "completed": init_completed,
         "report_status": (init or {}).get("status"),
@@ -162,7 +140,8 @@ def status(root: Path) -> dict[str, Any]:
         "contracts_present": contracts_present,
         "template_id": scaffold_contract.get("template_id"),
     }
-    return {
+    task = task_status(root)
+    result = {
         "ok": True,
         "current_version": current_version(root),
         "parent_version": parent.get("version") if parent else None,
@@ -185,7 +164,49 @@ def status(root: Path) -> dict[str, Any]:
             for item in blocking_questions
         ],
         "scaffold": {"ok": drift["ok"], "drift": drift["drift"]},
-        "spec_contract": {
+        "init_state": init_state,
+        "can_enter_next": prerequisites[stage],
+        "task": task,
+        "diagnostics": diagnostics,
+    }
+    artifact_refs: dict[str, str] = {}
+    for record_id, evidence in (
+        ("init", True),
+        ("code", True),
+        ("coder-handoff", False),
+        ("tester-handoff", False),
+        ("test-results", True),
+    ):
+        index = record_index(
+            root,
+            record_id,
+            evidence=evidence,
+            required=False,
+        )
+        if index:
+            artifact_refs[record_id] = index["content_ref"]
+    if artifact_refs:
+        result["artifact_refs"] = artifact_refs
+    task_stage = (task or {}).get("stage")
+    coder_handoff = read_work_record(root, "coder-handoff", required=False)
+    reverify_input_hash = sha256_json({
+        "action": "compile_restart_verify",
+        "source_fingerprint": code_fingerprint["sha256"],
+    })
+    result["code_reverify_available"] = bool(
+        task_stage == "code"
+        and coder_handoff
+        and not gates["code"]
+        and not has_attempt(
+            root,
+            operation="lifecycle",
+            step="compile_restart_verify",
+            input_hash=reverify_input_hash,
+            states={"failed", "blocked", "running"},
+        )
+    )
+    if task_stage in {None, "spec", "awaiting_spec_approval"}:
+        result["spec_contract"] = {
             "core_assigned_fields": [
                 "requirements[].id",
                 "requirements[].acceptance_criteria[].id",
@@ -201,13 +222,25 @@ def status(root: Path) -> dict[str, Any]:
                 for item in scaffold_contract.get("extension_points", [])
                 if isinstance(item, dict) and isinstance(item.get("id"), str)
             ],
-        },
-        "lifecycle_tests": lifecycle_tests,
-        "init_state": init_state,
-        "templates": templates,
-        "active_rules": active_rules,
-        "template_registry_error": template_error,
-        "can_enter_next": prerequisites[stage],
-        "task": task_status(root),
-        "diagnostics": diagnostics,
-    }
+        }
+    if not contracts_present:
+        try:
+            result["templates"] = template_registry(runtime_root(root))
+            result["template_registry_error"] = None
+        except Exception as exc:
+            result["templates"] = []
+            result["template_registry_error"] = str(exc)
+    if task_stage == "test":
+        try:
+            test_commands = lifecycle_test_commands(root)
+            result["lifecycle_tests"] = {
+                "available": sorted(test_commands),
+                "commands": test_commands,
+            }
+        except Exception as exc:
+            result["lifecycle_tests"] = {
+                "available": [],
+                "commands": {},
+                "error": str(exc),
+            }
+    return result

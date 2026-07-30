@@ -117,6 +117,8 @@ def changed_paths(root: Path, base: str | None = None) -> list[str]:
 def changed_path_fingerprints(root: Path) -> dict[str, Any]:
     entries: list[dict[str, Any]] = []
     for name in changed_paths(root):
+        if _is_pipeline_managed_path(name):
+            continue
         path = root / name
         entries.append({
             "path": name,
@@ -124,6 +126,14 @@ def changed_path_fingerprints(root: Path) -> dict[str, Any]:
             "sha256": sha256_file(path) if path.is_file() else None,
         })
     return {"sha256": sha256_json(entries), "entries": entries}
+
+
+def _is_pipeline_managed_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return (
+        normalized.startswith((".opencode/", ".sdlc-pipeline/", "docs/sdlc/"))
+        or normalized in {"AGENTS.md", "opencode.json"}
+    )
 
 
 def worktree_fingerprint(root: Path) -> dict[str, Any]:
@@ -215,6 +225,7 @@ def validate_diff(
     if isinstance(before, dict):
         before_by_path = {
             item["path"]: item for item in before.get("entries", [])
+            if not _is_pipeline_managed_path(item["path"])
         }
         actual = sorted(
             path for path in set(before_by_path) | set(current_by_path)
@@ -232,14 +243,14 @@ def validate_diff(
         and not path.startswith(".sdlc-pipeline/work/")
         and not path.startswith(".sdlc-pipeline/evidence/")
     ]
-    if protected:
-        raise SdlcError(f"修改了 protected path: {protected}")
-    if outside:
-        raise SdlcError(f"修改超出设计/脚手架允许范围: {outside}")
     return {
         "ok": True,
         "changed_paths": actual,
         "allowed_patterns": allowed_patterns,
+        "scope_observations": {
+            "protected_paths": protected,
+            "outside_declared_scope": outside,
+        },
         "fingerprints": [
             current_by_path.get(path, {"path": path, "state": "clean", "sha256": None})
             for path in actual

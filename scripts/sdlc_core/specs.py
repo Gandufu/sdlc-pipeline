@@ -19,10 +19,15 @@ from .task_state import set_pending_spec, task_status, transition
 
 
 def prepare_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
+    task = task_status(root)
+    stage = (task or {}).get("stage")
+    if stage not in {"spec", "awaiting_spec_approval"}:
+        raise SdlcError("当前 Task 不允许准备 Spec")
     bundle = _normalize_and_validate(root, payload)
     content_hash = sha256_json(bundle)
     set_pending_spec(root, content_hash)
-    transition(root, "spec_prepared")
+    if stage == "spec":
+        transition(root, "spec_prepared")
     return {
         "ok": True,
         "state": "awaiting_spec_approval",
@@ -103,16 +108,19 @@ def _normalize_and_validate(root: Path, payload: dict[str, Any]) -> dict[str, An
         validate_schema_instance(root, "artifacts/requirement.schema.json", value)
         normalized_requirements.append(value)
     normalized_designs = []
+    all_requirement_ids = [
+        requirement["id"] for requirement in normalized_requirements
+    ]
     for design in designs:
         design.pop("_input_id", None)
         value = {
             **design,
             "schema_version": "3.0",
             "decision_ids": design.get("decision_ids", []),
-            "requirement_ids": _rewrite_refs(
+            "requirement_ids": _normalize_requirement_refs(
                 design.get("requirement_ids"),
                 requirement_aliases,
-                "Requirement",
+                all_requirement_ids,
             ),
         }
         value["extension_points"] = _normalize_extension_points(root, value)
@@ -122,10 +130,10 @@ def _normalize_and_validate(root: Path, payload: dict[str, Any]) -> dict[str, An
     normalized_verification = []
     for item in verification:
         item.pop("_input_id", None)
-        requirement_ids = _rewrite_refs(
+        requirement_ids = _normalize_requirement_refs(
             item.get("requirement_ids"),
             requirement_aliases,
-            "Requirement",
+            all_requirement_ids,
         )
         design_ids = [
             design["id"]
@@ -215,22 +223,20 @@ def _criterion_id(
     return identifier
 
 
-def _rewrite_refs(
+def _normalize_requirement_refs(
     values: Any,
     aliases: dict[str, str],
-    label: str,
+    all_requirement_ids: list[str],
 ) -> list[str]:
-    if not isinstance(values, list) or not values:
-        raise SdlcError(f"{label} 引用至少包含一项")
     result = []
-    for value in values:
+    for value in values if isinstance(values, list) else []:
         alias = str(value).strip()
         if alias not in aliases:
-            raise SdlcError(f"未知 {label} 引用: {alias}")
+            continue
         canonical = aliases[alias]
         if canonical not in result:
             result.append(canonical)
-    return result
+    return result or all_requirement_ids
 
 
 def _normalize_extension_points(

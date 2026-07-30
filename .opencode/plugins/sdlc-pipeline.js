@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 
 const AGENTS = { "sdlc-coder": "coder", "sdlc-tester": "tester" }
-const taskWriteSessions = new Set()
 const PLUGIN_PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", ".."
 )
@@ -162,7 +161,6 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
   })
   const design = tool.schema.object({
     title: tool.schema.string(),
-    requirement_ids: tool.schema.array(tool.schema.string()),
     modules: tool.schema.array(moduleSpec),
     interfaces: tool.schema.array(interfaceSpec),
     data_contracts: tool.schema.array(dataContract),
@@ -170,7 +168,6 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
     decisions: tool.schema.array(tool.schema.string()),
   })
   const verification = tool.schema.object({
-    requirement_ids: tool.schema.array(tool.schema.string()),
     level: tool.schema.enum(["unit", "functional"]),
     preconditions: tool.schema.string(),
     expected: tool.schema.string(),
@@ -218,7 +215,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         description: [
           "一次性校验完整 Spec，或在用户确认后直接发布正式 baseline；未发布正文不落盘。",
           "不要提交 R/D/T/AC 的 id、design_ids、acceptance_criteria_ids、test_key 或 selector；它们全部由 Core 分配。",
-          "designs/verification 的 requirement_ids 可引用输入中的 Requirement 临时名称，Core 会重写为 R-0001 格式。",
+          "不要提交 requirement_ids；Core 将 Design/Verification 关联到本次 Spec 的正式 Requirement。",
           "extension_points 只使用 sdlc_status.spec_contract 中列出的值；无法匹配时 Core 使用脚手架受控范围。",
           "校验失败后立即向用户报告原始错误并停止，本轮不得猜测格式、搜索插件文件或自动重试。",
         ].join(" "),
@@ -243,18 +240,29 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_lifecycle: tool({
-        description: "初始化项目；Code/Test 执行由 subagent hook 驱动。",
+        description: "初始化项目，或对已有 Coder handoff 做一次确定性 Code 门禁复验。",
         args: {
-          action: tool.schema.enum(["init"]),
-          options: tool.schema.string().optional(),
+          action: tool.schema.enum(["init", "reverify_code"]),
+          options: tool.schema.object({
+            template: tool.schema.string().optional(),
+          }).optional(),
         },
         async execute(args, context) {
           requireAgent(context, ["sdlc-main"], "sdlc_lifecycle")
-          const options = args.options ? JSON.parse(args.options) : {}
-          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "lifecycle", {
-            action: args.action,
+          const options = args.options || {}
+          const root = rootOf(context, fallbackRoot)
+          const result = await invoke(root, "lifecycle", {
+            action: args.action === "reverify_code"
+              ? "compile_restart_verify"
+              : args.action,
             ...options,
-          }, { signal: context.abort }))
+          }, { signal: context.abort })
+          if (args.action === "reverify_code") {
+            await invoke(root, "task-state", {
+              action: "transition", event: "code_completed",
+            })
+          }
+          return JSON.stringify(result)
         },
       }),
       sdlc_finalize: tool({
@@ -277,22 +285,6 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       }),
     },
     "tool.execute.before": async (input, output) => {
-      if (["edit", "write", "apply_patch"].includes(input.tool)) {
-        const target = output.args?.filePath || output.args?.path
-        if (target) {
-          const checked = await invoke(fallbackRoot, "write-check", {
-            path: target,
-            owner_pid: process.pid,
-          })
-          if (checked?.heartbeat?.active && input.sessionID && !taskWriteSessions.has(input.sessionID)) {
-            taskWriteSessions.add(input.sessionID)
-            await logPluginEvent(client, `${checked.role}.first_write`, {
-              session_id: input.sessionID,
-            })
-          }
-        }
-        return
-      }
       if (input.tool !== "task") return
       const role = AGENTS[output.args?.subagent_type]
       if (!role) throw new Error("sdlc-main 只能派发 sdlc-coder 或 sdlc-tester")
@@ -301,20 +293,38 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         owner_pid: process.pid,
       })
       const objective = String(output.args?.description || "").trim()
+      const delegatedPrompt = String(
+        output.args?.prompt || output.args?.command || "",
+      ).trim()
       delete output.args.command
       output.args.prompt = `[SDLC context pack] ${result.context_pack.paths[0]}\n`
         + `${result.instruction}\n`
-        + (objective ? `本次任务目标：${objective}。\n` : "")
+        + (
+          delegatedPrompt
+            ? `主会话委派内容（原文）：\n${delegatedPrompt}\n`
+            : (objective ? `本次任务目标：${objective}。\n` : "")
+        )
         + "完成后立即返回约定 JSON handoff。"
     },
     "tool.execute.after": async (input, output) => {
       if (input.tool !== "task") return
       const role = AGENTS[input.args?.subagent_type]
       if (!role) return
-      await invoke(fallbackRoot, "task-after", {
+      const receipt = await invoke(fallbackRoot, "task-after", {
         role,
         output: output.output || "",
       })
+      const openIssues = receipt?.handoff?.open_issues
+      if (Array.isArray(openIssues) && openIssues.length) {
+        output.output = `${output.output || ""}\n`
+          + `[SDLC ${role} handoff] 存在 open_issues，`
+          + "未执行后续 gate，也未推进 Task；由 sdlc-main 决定回退或重新派发。"
+        await logPluginEvent(client, `${role}.open_issues`, {
+          session_id: input.sessionID,
+          count: openIssues.length,
+        })
+        return
+      }
       const result = await invoke(fallbackRoot, "lifecycle", {
         action: role === "coder" ? "compile_restart_verify" : "verify_delivery",
       })

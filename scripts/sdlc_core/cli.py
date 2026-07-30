@@ -9,7 +9,6 @@ from typing import Any
 from .adapter import (
     after_task,
     before_task,
-    validate_write_path,
 )
 from .bootstrap import bootstrap
 from .common import SdlcError, project_root
@@ -43,6 +42,7 @@ from .status import status
 from .versions import finalize
 from .specs import approve_spec, prepare_spec
 from .task_state import record_input, task_status, transition
+from .trace import implementation_fingerprint
 
 
 def _input() -> dict[str, Any]:
@@ -190,28 +190,6 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
             operation="task-before",
             owner_pid=payload.get("owner_pid"),
         )
-    if operation == "write-check":
-        attempt = running_attempt(root, operation="task-before")
-        role = (
-            str(attempt.get("step", "")).removeprefix("task-before:")
-            if attempt else None
-        )
-        checked = validate_write_path(
-            root,
-            payload["path"],
-            role=role,
-        )
-        heartbeat = heartbeat_attempt(
-            root,
-            operation="task-before",
-            owner_pid=payload.get("owner_pid"),
-        )
-        return {
-            "ok": True,
-            "path": checked["path"],
-            "role": role,
-            "heartbeat": heartbeat,
-        }
     if operation == "task-cancel":
         stop = stop_active(root)
         return {
@@ -222,8 +200,6 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
             ),
             "process_cleanup": stop,
         }
-    if operation == "path-check":
-        return validate_write_path(root, payload["path"])
     if operation == "finalize":
         return finalize(
             root,
@@ -258,8 +234,6 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
         return ("test" if role == "tester" else "code"), f"{operation}:{role}"
     if operation == "finalize":
         return "version", "finalize"
-    if operation == "path-check":
-        return "code", "write-guard"
     return "unknown", operation
 
 
@@ -305,7 +279,7 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         finish_attempt(root, attempt, state="succeeded", result=result)
         return result
     if operation in {
-        "status", "task-state", "spec", "path-check", "write-check",
+        "status", "task-state", "spec",
     } or (
         operation == "publish" and payload.get("kind") == "tokens"
     ):
@@ -316,6 +290,13 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         not isinstance(idempotency_key, str) or not idempotency_key.strip()
     ):
         raise SdlcError("idempotency_key 必须是非空字符串")
+    if (
+        operation == "lifecycle"
+        and effective_payload.get("action") == "compile_restart_verify"
+    ):
+        effective_payload["source_fingerprint"] = implementation_fingerprint(
+            root
+        )["sha256"]
     phase, step = _phase_step(operation, effective_payload)
     attempt = begin_attempt(
         root,
@@ -352,7 +333,7 @@ def main() -> int:
         "operation",
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
-            "task-heartbeat", "task-cancel", "write-check", "path-check", "finalize",
+            "task-heartbeat", "task-cancel", "finalize",
             "spec", "task-state",
         ),
     )

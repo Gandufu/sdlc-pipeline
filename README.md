@@ -45,6 +45,31 @@ flowchart LR
 - `sdlc_lifecycle`
 - `sdlc_finalize`
 
+## Agent 角色与模型
+
+`sdlc-main` 是拥有完整项目读写和命令能力的主会话，负责架构判断、状态流转、回退和派发。
+`sdlc-coder` 与 `sdlc-tester` 使用独立 context，分别交付实现和独立测试；它们不是受限目录执行器。
+角色通过模型、task prompt、context pack 和 handoff 区分，Core 不在工具调用前实施目录 ACL。
+
+OpenCode 支持为每个 agent 单独选择模型。例如可在项目 `opencode.json` 中配置：
+
+```json
+{
+  "$schema": "https://opencode.ai/config.json",
+  "default_agent": "sdlc-main",
+  "agent": {
+    "sdlc-main": {"model": "<architecture-model>"},
+    "sdlc-coder": {"model": "<coding-model>"},
+    "sdlc-tester": {"model": "<test-model>"}
+  }
+}
+```
+
+未单独指定时，子代理继承主会话模型。
+
+Electron 模板固定使用项目根目录 `assets/` 存放原型直接引用的 PNG、字体等静态资源。
+该路径通过 coder context 的 `brief.asset_paths` 提供，不由 Core 摄取、解析或复制。
+
 ## 存储
 
 ```text

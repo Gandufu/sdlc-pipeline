@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .common import SdlcError, atomic_write, sha256_json, utc_now
-from .layout import evidence_root, relative_to_project, state_root, work_root
+from .layout import evidence_root, relative_to_project, state_root
 from .records import (
     read_compact_index,
     write_compact_index,
@@ -42,8 +42,8 @@ def ensure_run(root: Path, phase: str) -> dict[str, Any]:
         "state": "running",
         "phase": phase,
         "attempt_count": 0,
+        "consecutive_failures": 0,
         "last_error_ref": None,
-        "last_failure": None,
         "created_at": utc_now(),
         "updated_at": utc_now(),
     }
@@ -101,6 +101,28 @@ def running_attempt(root: Path, *, operation: str) -> dict[str, Any] | None:
     return matches[-1] if matches else None
 
 
+def has_attempt(
+    root: Path,
+    *,
+    operation: str,
+    step: str,
+    input_hash: str,
+    states: set[str],
+) -> bool:
+    run = active_run(root)
+    if not run:
+        return False
+    paths = sorted((_run_dir(root, run["run_id"]) / "attempts").glob("*.json"))
+    return any(
+        value.get("operation") == operation
+        and value.get("step") == step
+        and value.get("input_hash") == input_hash
+        and value.get("state") in states
+        for path in paths
+        if (value := read_compact_index(path))
+    )
+
+
 def heartbeat_attempt(
     root: Path, *, operation: str, owner_pid: int | None = None
 ) -> dict[str, Any]:
@@ -136,10 +158,6 @@ def finish_attempt(
         raise SdlcError(f"非法 attempt state: {state}")
     stored = read_compact_index(_attempt_path(root, attempt))
     result_ref = None
-    if result is not None:
-        path = work_root(root) / "runs" / attempt["run_id"] / f"{attempt['attempt_id']}.md"
-        write_markdown_record(path, result, title=f"Attempt {attempt['attempt_id']} result")
-        result_ref = relative_to_project(root, path)
     error_ref = None
     if error:
         path = evidence_root(root) / "errors" / attempt["run_id"] / f"{attempt['attempt_id']}.md"
@@ -153,16 +171,15 @@ def finish_attempt(
     })
     write_compact_index(_attempt_path(root, attempt), stored)
     run = read_compact_index(_run_dir(root, attempt["run_id"]) / "index.json")
-    repeated = (
-        int((run.get("last_failure") or {}).get("repeat_count", 0)) + 1
-        if error and (run.get("last_failure") or {}).get("message") == error else 1
+    consecutive_failures = (
+        int(run.get("consecutive_failures", 0)) + 1 if error else 0
     )
     run.update({
-        "state": "blocked" if error and repeated >= 2 else (
+        "state": "blocked" if error and consecutive_failures >= 2 else (
             "running" if state == "succeeded" else state
         ),
+        "consecutive_failures": consecutive_failures,
         "last_error_ref": error_ref,
-        "last_failure": {"message": error, "repeat_count": repeated} if error else run.get("last_failure"),
         "updated_at": utc_now(),
     })
     write_compact_index(_run_dir(root, run["run_id"]) / "index.json", run)

@@ -8,8 +8,10 @@ from typing import Any
 
 from .artifacts import load_current_spec, require_code_ready
 from .artifact_store import current_baseline
-from .common import SdlcError, read_json, sha256_file, utc_now
-from .layout import contracts_root, rules_root, runtime_root
+from .common import SdlcError, read_json, sha256_file, sha256_json, utc_now
+from .journal import active_run
+from .layout import contracts_root, rules_root, runtime_root, state_root
+from .records import read_compact_index
 from .stores import (
     read_work_record,
     record_index,
@@ -29,36 +31,42 @@ MAX_CONTEXT_RESOURCES = 10
 MAX_IMPLEMENTATION_RESOURCES = 6
 
 
-def validate_write_path(
-    root: Path,
-    path_value: str,
-    *,
-    role: str | None = None,
-) -> dict[str, Any]:
-    path = Path(path_value)
-    if not path.is_absolute():
-        path = root / path
-    try:
-        relative = path.resolve().relative_to(root.resolve()).as_posix()
-    except ValueError as exc:
-        raise SdlcError("禁止写入项目之外的路径") from exc
-    from .trace import allowed_change_paths, matches_path, scaffold
-
-    if role == "coder" and _is_test_path(relative):
-        raise SdlcError(f"coder 禁止修改测试脚本: {relative}")
-    if role == "tester":
-        if relative not in _tester_writable_paths(root):
-            raise SdlcError(
-                "tester 只能修改 Spec 声明的测试脚本或"
-                f"预检必需的既有单元测试: {relative}"
-            )
-    contract = scaffold(root)
-    if matches_path(relative, contract["protected_paths"]):
-        raise SdlcError(f"禁止修改 protected path: {relative}")
-    allowed = allowed_change_paths(root)
-    if not matches_path(relative, allowed):
-        raise SdlcError(f"路径不在设计/脚手架允许范围: {relative}")
-    return {"ok": True, "path": relative}
+def _active_failure_ref(root: Path, role: str) -> str | None:
+    if role != "coder":
+        return None
+    run = active_run(root) or {}
+    run_id = run.get("run_id")
+    if not isinstance(run_id, str) or not run_id:
+        return None
+    attempts_dir = state_root(root) / "runs" / run_id / "attempts"
+    attempts = [
+        read_compact_index(path)
+        for path in sorted(attempts_dir.glob("*.json"), reverse=True)
+    ]
+    current_source_hash = implementation_fingerprint(root)["sha256"]
+    expected_input_hash = sha256_json({
+        "action": "compile_restart_verify",
+        "source_fingerprint": current_source_hash,
+    })
+    failed = [
+        item for item in attempts
+        if item.get("state") == "failed"
+        and item.get("phase") == "code"
+        and isinstance(item.get("error_ref"), str)
+        and item.get("operation") == "lifecycle"
+        and item.get("step") == "compile_restart_verify"
+        and item.get("input_hash") == expected_input_hash
+    ]
+    selected = failed[0] if failed else None
+    if not selected:
+        return None
+    value = selected["error_ref"]
+    normalized = value.replace("\\", "/")
+    if not normalized.startswith(".sdlc-pipeline/evidence/errors/"):
+        raise SdlcError(f"非法 failure_ref: {value}")
+    if not (root / normalized).is_file():
+        raise SdlcError(f"failure_ref 不可读: {value}")
+    return normalized
 
 
 def _is_test_path(path: str) -> bool:
@@ -118,6 +126,26 @@ def _context_resources(root: Path, role: str) -> list[dict[str, Any]]:
             "authoritative Spec preview",
         ),
     }
+    from .task_state import task_status
+
+    task = task_status(root) or {}
+    input_ref = task.get("input_ref")
+    if isinstance(input_ref, str) and input_ref:
+        candidates[input_ref] = (1, "original user requirement")
+    failure_ref = _active_failure_ref(root, role)
+    if failure_ref:
+        candidates[failure_ref] = (0, "latest code-gate failure evidence")
+    if role == "tester":
+        coder_handoff = record_index(
+            root,
+            "coder-handoff",
+            required=False,
+        )
+        if coder_handoff:
+            candidates[coder_handoff["content_ref"]] = (
+                0,
+                "previous coder handoff",
+            )
     for group, reason in (
         ("requirements", "authoritative Requirement"),
         ("design", "authoritative Design"),
@@ -223,6 +251,7 @@ def _context_resources(root: Path, role: str) -> list[dict[str, Any]]:
 
 def build_context_pack(root: Path, role: str) -> dict[str, Any]:
     spec = load_current_spec(root)
+    scaffold_contract = read_json(contracts_root(root) / "scaffold.json")
     requirements = spec["requirements"]["items"]
     designs = spec["design"]["items"]
     tests = spec["test_plan"]["items"]
@@ -247,7 +276,7 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
         "extension_points": sorted({
             item["extension_point"] for item in designs
         }),
-        "allowed_paths": sorted({
+        "scope_paths": sorted({
             path for item in designs for path in item["allowed_paths"]
             if not _is_test_path(path.rstrip("/") + "/")
         }),
@@ -259,10 +288,33 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
             for criterion in item["acceptance_criteria"]
         ],
     }
+    asset_paths = sorted({
+        item["path"]
+        for item in scaffold_contract.get("extension_points", [])
+        if isinstance(item, dict)
+        and item.get("id") == "renderer-assets"
+        and isinstance(item.get("path"), str)
+    })
+    if asset_paths:
+        brief["asset_paths"] = asset_paths
+    from .task_state import task_status
+
+    task = task_status(root) or {}
+    input_ref = task.get("input_ref")
+    if isinstance(input_ref, str) and input_ref:
+        brief["input_ref"] = input_ref
+    failure_ref = _active_failure_ref(root, role)
+    if failure_ref:
+        brief["failure_ref"] = failure_ref
     if role == "tester":
+        coder_handoff = record_index(
+            root,
+            "coder-handoff",
+            required=False,
+        )
         brief.update({
             "test_ids": [item["id"] for item in tests],
-            "allowed_paths": sorted(_tester_writable_paths(root)),
+            "test_targets": sorted(_tester_writable_paths(root)),
             "preflight_unit_test_paths": sorted(_preflight_unit_test_paths(root)),
             "verification": [
                 {
@@ -274,6 +326,8 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
                 for item in tests
             ],
         })
+        if coder_handoff:
+            brief["previous_handoff_ref"] = coder_handoff["content_ref"]
     pack = {
         "schema_version": "1.0",
         "mode": "progressive",
@@ -282,7 +336,11 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
         "resources": _context_resources(root, role),
         "instruction": (
             "以 brief 为实现事实；只在修改需要时读取 resources。"
-            "禁止读取 .sdlc-pipeline/runtime/scripts/** 来理解 Core。"
+            "brief.input_ref 存在时先读取原始需求 Markdown，"
+            "保留其中明确指定的外部参考路径和验收措辞。"
+            "brief.failure_ref 存在时先读取该 Markdown，它是本次修复反馈。"
+            "resources 是独立 context 的优先阅读清单，不是目录权限列表。"
+            "业务任务通常无需读取 .sdlc-pipeline/runtime/scripts/**。"
             "tier=1 是权威契约，tier=2 是业务实现候选，tier=3 是 active rule。"
         ),
     }
@@ -387,23 +445,35 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         repeated_chars=context["repeated_chars"],
         source="context-pack",
     )
+    failure_ref = _active_failure_ref(root, role)
     if role == "coder":
+        if failure_ref:
+            recovery_instruction = (
+                "brief.failure_ref 存在时第一步读取错误 Markdown；"
+                "若当前代码已不存在该错误，禁止 no-op 编辑或重复失败工具，"
+                "直接返回 JSON handoff 交给 Core 复验；否则只修复已证实问题；"
+            )
+        else:
+            recovery_instruction = (
+                "brief.input_ref 存在时第一步读取原始需求 Markdown；"
+                "其中明确指定的 HTML、协议或资源路径必须按需读取，禁止自行替代设计；"
+                "再以 brief.first_delivery 指定的 R/D 作为第一个纵向交付切片；"
+                "读取 manifest 后按需检查与当前任务相关的项目内容；"
+            )
         role_instruction = (
-            "先以 brief.first_delivery 指定的 R/D 作为第一个纵向交付切片；"
-            "读取 manifest 后不得预读全部 resources 或枚举源码目录，"
-            "第 4 次工具调用前必须在 allowed_paths 内开始真实实现；"
-            "coder 只实现业务代码，禁止读取、创建或修改 tests/、test/ 下的测试脚本；"
-            "禁止调用 compile/start/restart/health/stop/test；"
-            "handoff 后 Core 统一执行 compile、package、start 与 readiness，并保留预览进程。"
+            recovery_instruction
+            +
+            "coder 拥有完整项目读写与命令能力，以业务实现为本阶段主要交付；"
+            "可以检查既有测试和配置，但不要替代 tester 完成测试阶段；"
+            "handoff 后 Core 统一执行权威 compile、package、start 与 readiness，并保留预览进程。"
             "TypeScript hard policy 会拒绝 : any、as any、<any>；"
             "只实现已确认 R/D/AC，不为臆造的无效输入使用类型逃逸。"
         )
     else:
         role_instruction = (
-            "tester 只读取 Verification/AC、必要业务界面和现有测试约定；"
-            "只能创建或修改 brief.allowed_paths 明确列出的测试脚本；"
-            "禁止修改业务源码、配置和正式 SDLC 文档；"
-            "禁止调用 compile/start/restart/health/stop/test；"
+            "tester 拥有完整项目读写与命令能力，并以独立 context 检查 coder handoff 和实现；"
+            "测试阶段主要交付 brief.test_targets 对应的 Verification 测试；"
+            "发现实现问题时在 open_issues 中报告，由 main 决定回退到 Code；"
             "handoff 后 Core 停止预览并确认端口释放，再由 Playwright 脚本启动、测试和 cleanup。"
         )
     return {
@@ -428,7 +498,7 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     actual = sorted(set(diff["changed_paths"]))
     if not actual:
         raise SdlcError(
-            "coder handoff 未产生允许的业务改动；请完成当前 Feature Slice 后再提交 handoff"
+            "coder handoff 未产生实现改动；请完成当前 Feature Slice 后再提交 handoff"
         )
     test_changes = [path for path in actual if _is_test_path(path)]
     if test_changes:
@@ -457,15 +527,15 @@ def validate_tester_handoff(root: Path, text: str) -> dict[str, Any]:
         # Some OpenCode task transports can lose the tester's final JSON even
         # after its constrained writes have completed.  Do not manufacture a
         # claim on behalf of the agent: only recover a receipt after the same
-        # allowed-path and declared-selector checks below have independently
-        # proved that test sources were delivered.  The receipt remains
+        # declared-selector checks below have independently proved that test
+        # sources were delivered.  The receipt remains
         # explicitly marked so the release audit can distinguish it.
         recovery_reason = str(error)
         value = {
-            "summary": "Core 根据受限测试改动恢复 tester handoff 收据",
+            "summary": "Core 根据已声明测试改动恢复 tester handoff 收据",
             "open_issues": [],
             "full_scan": False,
-            "full_scan_reason": "subagent JSON handoff 缺失；Core 将核验声明的测试文件和受限 diff",
+            "full_scan_reason": "subagent JSON handoff 缺失；Core 将核验声明的测试文件和 diff",
         }
     validate_schema_instance(root, "handoff.schema.json", value)
     before = read_work_record(root, "task/tester-before")
@@ -492,7 +562,7 @@ def validate_tester_handoff(root: Path, text: str) -> dict[str, Any]:
     value["mapping_strategy"] = "post-test-delivery-trace"
     if recovery_reason is not None:
         value["output_recovery"] = {
-            "mode": "allowed-test-diff",
+            "mode": "declared-test-diff",
             "reason": recovery_reason,
             "observed_paths": actual,
         }
