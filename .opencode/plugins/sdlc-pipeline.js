@@ -304,7 +304,12 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
             ? `主会话委派内容（原文）：\n${delegatedPrompt}\n`
             : (objective ? `本次任务目标：${objective}。\n` : "")
         )
-        + "完成后立即返回约定 JSON handoff。"
+        + (
+          role === "coder"
+            ? "验证按既有测试、compile、lint/typecheck、必要时一次 package 的顺序闭环；"
+              + "不要反复 start 或深挖发布包。完成或形成 open_issues 后立即返回约定 JSON handoff。"
+            : "完成后立即返回约定 JSON handoff。"
+        )
     },
     "tool.execute.after": async (input, output) => {
       if (input.tool !== "task") return

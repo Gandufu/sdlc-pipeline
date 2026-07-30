@@ -464,7 +464,9 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
             recovery_instruction
             +
             "coder 拥有完整项目读写与命令能力，以业务实现为本阶段主要交付；"
-            "可以检查既有测试和配置，但不要替代 tester 完成测试阶段；"
+            "可以读取、运行并按公开接口变化更新既有测试，但不要扩展验收范围或替代 tester；"
+            "验证只做一轮受影响测试、compile、lint/typecheck，必要时一次 package；"
+            "任一检查失败必须先闭环或写入 open_issues，禁止绕过失败反复 start、深挖发布包；"
             "handoff 后 Core 统一执行权威 compile、package、start 与 readiness，并保留预览进程。"
             "TypeScript hard policy 会拒绝 : any、as any、<any>；"
             "只实现已确认 R/D/AC，不为臆造的无效输入使用类型逃逸。"
@@ -499,11 +501,6 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
     if not actual:
         raise SdlcError(
             "coder handoff 未产生实现改动；请完成当前 Feature Slice 后再提交 handoff"
-        )
-    test_changes = [path for path in actual if _is_test_path(path)]
-    if test_changes:
-        raise SdlcError(
-            f"coder handoff 包含测试脚本改动，测试脚本只属于 test 阶段: {test_changes}"
         )
     from .task_state import task_status
 

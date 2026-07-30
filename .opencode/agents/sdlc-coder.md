@@ -37,9 +37,15 @@ permission:
 `brief.failure_ref` 存在时属于恢复模式：先读取错误 Markdown；若当前代码已不存在该错误，
 禁止制造 no-op 编辑或重复调用失败工具，直接返回 JSON handoff 交给 Core 复验；否则只修复已证实问题。
 整个任务没有已有或新增业务 diff 时才不得返回 handoff。
-可以读取和检查 `tests/**`、`test/**` 来理解既有验收，但测试交付由后续 `sdlc-tester`
-负责；若发现测试或需求问题，在 `open_issues` 中报告给 main，不要替代 tester 完成测试阶段。
-handoff 后 Core 仍会执行权威 compile/package/lint/typecheck、启动与 readiness。
+可以读取、运行并按实现影响更新既有 `tests/**`、`test/**`，保证原有回归测试不过期；不要主动
+扩展本阶段的验收测试范围，新增独立业务验收与测试阶段结论仍由后续 `sdlc-tester` 负责。
+若测试失败，先判断是实现回归还是既有 mock/断言随公开接口变化而失效并闭环；无法闭环时放入
+`open_issues` 交给 main，禁止绕过失败继续做重复启动、发布包深挖或无关复读。
+
+验证最多执行一轮聚焦检查：受影响的既有测试、compile、lint/typecheck；需要确认打包兼容时
+再执行一次 package。已有任一检查失败时只修复该失败并重跑对应检查。不要自行反复运行
+`start`、检查 ASAR/构建目录或补做 tester 的验收；handoff 后 Core 会权威执行
+compile/package/start/readiness。检查通过或形成 `open_issues` 后立即返回 handoff 并停止。
 
 TypeScript hard policy 在 handoff 后立即检查全部改动：严禁写入 `: any`、`as any` 或 `<any>`。
 只为已确认的 R/D/AC 实现类型正确的业务代码；确需处理不可信输入时，提供明确的 `unknown`

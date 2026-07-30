@@ -11,7 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from sdlc_core.artifacts import load_current_spec  # noqa: E402
-from sdlc_core.adapter import before_task, build_context_pack  # noqa: E402
+from sdlc_core.adapter import (  # noqa: E402
+    before_task,
+    build_context_pack,
+    validate_coder_handoff,
+)
 from sdlc_core.cli import execute  # noqa: E402
 from sdlc_core.common import SdlcError, git  # noqa: E402
 from sdlc_core.journal import begin_attempt, finish_attempt  # noqa: E402
@@ -500,6 +504,8 @@ class TaskFlowTests(unittest.TestCase):
         )
         self.assertIn("sdlc_status: deny", coder)
         self.assertIn("禁止制造 no-op 编辑", coder)
+        self.assertIn("按实现影响更新既有", coder)
+        self.assertIn("禁止绕过失败继续做重复启动", coder)
         for agent in (main, coder, tester):
             self.assertIn("read: allow", agent)
             self.assertIn("edit: allow", agent)
@@ -512,6 +518,47 @@ class TaskFlowTests(unittest.TestCase):
         self.assertNotIn("主会话禁止读取或修改业务源码", main)
         self.assertNotIn('"write-check"', plugin)
         self.assertNotIn('"path-check"', plugin)
+        self.assertIn("不要反复 start 或深挖发布包", plugin)
+
+    def test_coder_can_update_affected_existing_tests(self) -> None:
+        record_input(self.root, "实现设备管理")
+        ready = prepare_spec(self.root, _spec())
+        approve_spec(
+            self.root,
+            _spec(),
+            content_hash=ready["content_hash"],
+            confirmed=True,
+        )
+        git(self.root, "init")
+        write_work_record(
+            self.root,
+            "task/coder-before",
+            {"worktree": {"sha256": "0" * 64, "entries": []}},
+            state="captured",
+            title="coder task before snapshot",
+        )
+        source = self.root / "src" / "app.ts"
+        existing_test = self.root / "tests" / "app.test.ts"
+        source.parent.mkdir(parents=True)
+        existing_test.parent.mkdir(parents=True)
+        source.write_text("export const value = 2;\n", encoding="utf-8")
+        existing_test.write_text("expect(value).toBe(2);\n", encoding="utf-8")
+
+        receipt = validate_coder_handoff(
+            self.root,
+            json.dumps({
+                "summary": "更新实现及受影响的既有回归测试",
+                "open_issues": [],
+                "full_scan": False,
+                "full_scan_reason": None,
+            }),
+        )
+
+        self.assertIn("src/app.ts", receipt["handoff"]["changed_files"])
+        self.assertIn(
+            "tests/app.test.ts",
+            receipt["handoff"]["changed_files"],
+        )
 
     def test_tester_context_references_previous_coder_handoff(self) -> None:
         record_input(self.root, "实现设备管理")
