@@ -196,6 +196,9 @@ def status(root: Path) -> dict[str, Any]:
     result["code_reverify_available"] = bool(
         task_stage == "code"
         and coder_handoff
+        and coder_handoff.get("task_id") == (task or {}).get("task_id")
+        and coder_handoff.get("stage_iteration")
+        == ((task or {}).get("iterations") or {}).get("code")
         and not gates["code"]
         and not has_attempt(
             root,

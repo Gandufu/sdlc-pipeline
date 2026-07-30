@@ -459,10 +459,16 @@ class TaskFlowTests(unittest.TestCase):
             content_hash=ready["content_hash"],
             confirmed=True,
         )
+        current_task = task_status(self.root)
         write_work_record(
             self.root,
             "coder-handoff",
-            {"summary": "implemented", "open_issues": []},
+            {
+                "summary": "implemented",
+                "open_issues": [],
+                "task_id": current_task["task_id"],
+                "stage_iteration": current_task["iterations"]["code"],
+            },
             state="captured",
             title="Coder handoff",
         )
@@ -538,6 +544,37 @@ class TaskFlowTests(unittest.TestCase):
         )
         self.assertEqual(0, resource["tier"])
         self.assertEqual("previous coder handoff", resource["reason"])
+
+    def test_human_review_rollback_invalidates_the_previous_coder_handoff(self) -> None:
+        record_input(self.root, "实现设备管理")
+        ready = prepare_spec(self.root, _spec())
+        approve_spec(
+            self.root,
+            _spec(),
+            content_hash=ready["content_hash"],
+            confirmed=True,
+        )
+        current = task_status(self.root)
+        write_work_record(
+            self.root,
+            "coder-handoff",
+            {
+                "summary": "first implementation",
+                "open_issues": [],
+                "task_id": current["task_id"],
+                "stage_iteration": current["iterations"]["code"],
+            },
+            state="validated",
+            title="Coder handoff",
+        )
+        self.assertTrue(execute(self.root, "status", {})["code_reverify_available"])
+
+        transition(self.root, "code_completed")
+        transition(self.root, "implementation_issue")
+
+        rolled_back = execute(self.root, "status", {})
+        self.assertEqual("code", rolled_back["task"]["stage"])
+        self.assertFalse(rolled_back["code_reverify_available"])
 
     def test_delivery_scope_is_observed_without_becoming_a_directory_acl(self) -> None:
         record_input(self.root, "实现设备管理")

@@ -505,6 +505,13 @@ def validate_coder_handoff(root: Path, text: str) -> dict[str, Any]:
         raise SdlcError(
             f"coder handoff 包含测试脚本改动，测试脚本只属于 test 阶段: {test_changes}"
         )
+    from .task_state import task_status
+
+    task = task_status(root) or {}
+    value["task_id"] = task.get("task_id")
+    value["stage_iteration"] = int(
+        (task.get("iterations") or {}).get("code", 0)
+    )
     value["changed_files"] = actual
     value["validated_at"] = utc_now()
     value["compiled_claim_ignored"] = True
@@ -557,6 +564,13 @@ def validate_tester_handoff(root: Path, text: str) -> dict[str, Any]:
         raise SdlcError(f"Spec 声明的测试脚本不存在: {missing}")
     if recovery_reason is not None and not actual:
         raise SdlcError(recovery_reason)
+    from .task_state import task_status
+
+    task = task_status(root) or {}
+    value["task_id"] = task.get("task_id")
+    value["stage_iteration"] = int(
+        (task.get("iterations") or {}).get("test", 0)
+    )
     value["changed_files"] = actual
     value["validated_at"] = utc_now()
     value["mapping_strategy"] = "post-test-delivery-trace"
