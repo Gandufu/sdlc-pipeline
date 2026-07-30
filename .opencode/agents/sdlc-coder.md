@@ -56,3 +56,6 @@ TypeScript hard policy 在 handoff 后立即检查全部改动：严禁写入 `:
 ```json
 {"summary":"实现摘要","open_issues":[],"full_scan":false,"full_scan_reason":null}
 ```
+
+`open_issues` 必须是字符串数组；例如
+`["既有断言与当前公开接口脱节：tests/App.test.tsx"]`。禁止在数组中返回对象。

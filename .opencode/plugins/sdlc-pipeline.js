@@ -315,10 +315,23 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       if (input.tool !== "task") return
       const role = AGENTS[input.args?.subagent_type]
       if (!role) return
-      const receipt = await invoke(fallbackRoot, "task-after", {
-        role,
-        output: output.output || "",
-      })
+      let receipt
+      try {
+        receipt = await invoke(fallbackRoot, "task-after", {
+          role,
+          output: output.output || "",
+        })
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        output.output = `${output.output || ""}\n`
+          + `[SDLC ${role} handoff rejected] ${detail}\n`
+          + "未执行后续 gate，也未推进 Task；本次命令必须停止，由 main 或用户修正后重新执行。"
+        await logPluginEvent(client, `${role}.handoff_rejected`, {
+          session_id: input.sessionID,
+          error: detail,
+        })
+        return
+      }
       const openIssues = receipt?.handoff?.open_issues
       if (Array.isArray(openIssues) && openIssues.length) {
         output.output = `${output.output || ""}\n`

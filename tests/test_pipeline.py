@@ -506,6 +506,7 @@ class TaskFlowTests(unittest.TestCase):
         self.assertIn("禁止制造 no-op 编辑", coder)
         self.assertIn("按实现影响更新既有", coder)
         self.assertIn("禁止绕过失败继续做重复启动", coder)
+        self.assertIn("open_issues` 必须是字符串数组", coder)
         for agent in (main, coder, tester):
             self.assertIn("read: allow", agent)
             self.assertIn("edit: allow", agent)
@@ -519,6 +520,12 @@ class TaskFlowTests(unittest.TestCase):
         self.assertNotIn('"write-check"', plugin)
         self.assertNotIn('"path-check"', plugin)
         self.assertIn("不要反复 start 或深挖发布包", plugin)
+        self.assertIn("handoff rejected", plugin)
+        self.assertIn("本次命令必须停止", plugin)
+        self.assertLess(
+            plugin.index("handoff rejected"),
+            plugin.index("receipt?.handoff?.open_issues"),
+        )
 
     def test_coder_can_update_affected_existing_tests(self) -> None:
         record_input(self.root, "实现设备管理")

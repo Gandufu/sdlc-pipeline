@@ -487,7 +487,7 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         "instruction": (
             "先读取 context manifest 的 brief，再按需读取 resources，禁止预读全部文件。"
             + role_instruction
-            + "最终只返回约定 JSON handoff。"
+            + "最终只返回约定 JSON handoff；open_issues 必须是字符串数组，禁止返回对象。"
         ),
     }
 
