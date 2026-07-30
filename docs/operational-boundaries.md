@@ -1,16 +1,8 @@
-# 团队运行边界
+# 运行边界
 
-SDLC Pipeline 的权限配置约束的是 Pipeline 代表主会话发起的工具调用。OpenCode 仍允许用户在界面中
-手动切换 agent，或通过 `@ 调用` 直接启动任何已安装 agent；这属于宿主产品的用户控制能力，不能由
-`permission.task` 强制封堵。
-
-因此，处于活动 Run 时团队成员必须：
-
-- 只通过 `/sdlc-init`、`/sdlc-spec`、`/sdlc-code`、`/sdlc-test` 推进流程；
-- 不要手动切换 agent；
-- 不要通过 `@ 调用` 其他 agent，也不要直接启动内置 `build`、`plan`、`explore` 或 `general` 代理；
-- 人工预览或验收发现缺陷时，通过主会话登记结构化 Feedback；Core 停止预览、保留原证据并在同一 Run
-  中前向返工，不手工改 journal、不直接重复派发子 agent。
-
-Core 可以验证 Git diff、受控路径、审批、journal 和交付证据，但不能证明一次绕过 UI 约束的对话也遵循
-这些规则。审计或团队交付应把以上约束作为运行规范，并把所有偏离、失败和重新执行写入 release evidence。
+- OpenCode 管理会话上下文；插件不保存或恢复会话。
+- 主会话只记录用户原始输入并驱动 Task 状态。
+- coder 只修改业务代码，tester 只修改正式 Verification 声明的测试。
+- Core 管理状态流转、写入范围、compile/package/start/readiness、测试与固化门禁。
+- 外部文件由 OpenCode 按用户授权读取，插件不复制或归档。
+- 返工是 Task 状态流转，不执行自动 Git 回滚。

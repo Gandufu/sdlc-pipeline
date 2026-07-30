@@ -15,16 +15,8 @@ permission:
   bash: deny
   task: deny
   sdlc_status: allow
-  sdlc_ingest_source: deny
-  sdlc_query_source: allow
-  sdlc_save_spec_work: deny
-  sdlc_query_spec_work: deny
-  sdlc_begin_candidate: deny
-  sdlc_put_requirement: deny
-  sdlc_put_design: deny
-  sdlc_put_verification: deny
-  sdlc_validate_candidate: deny
-  sdlc_approve_candidate: deny
+  sdlc_task: deny
+  sdlc_spec: deny
   sdlc_lifecycle: deny
   sdlc_finalize: deny
 ---

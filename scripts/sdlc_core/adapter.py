@@ -222,9 +222,6 @@ def _context_resources(root: Path, role: str) -> list[dict[str, Any]]:
 
 
 def build_context_pack(root: Path, role: str) -> dict[str, Any]:
-    from .memory import delivery_memory
-    from .feedback import active_feedback
-
     spec = load_current_spec(root)
     requirements = spec["requirements"]["items"]
     designs = spec["design"]["items"]
@@ -261,25 +258,7 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
             for item in requirements
             for criterion in item["acceptance_criteria"]
         ],
-        "source_refs": sorted({
-            f"{ref['source_id']}#{ref['anchor']}"
-            for item in requirements
-            for ref in item.get("source_refs", [])
-        }),
-        "confirmed_decisions": delivery_memory(root)["decisions"],
     }
-    if role == "coder":
-        feedback = active_feedback(root)
-        if feedback is not None:
-            brief["rework"] = {
-                key: feedback[key]
-                for key in (
-                    "feedback_id", "origin", "classification", "summary",
-                    "expected", "actual", "reproduction_steps",
-                    "affected_ids", "source_refs", "evidence_refs",
-                    "target_phase", "stage",
-                )
-            }
     if role == "tester":
         brief.update({
             "test_ids": [item["id"] for item in tests],
@@ -330,25 +309,21 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
     if role not in {"coder", "tester"}:
         raise SdlcError(f"不允许的 subagent: {role}")
     from .status import status
+    from .task_state import task_status
 
     current = status(root)
+    task = task_status(root)
     if role == "coder" and not (
         current["gates"]["init"] and current["gates"]["spec"]
     ):
         raise SdlcError("coder 门禁要求 init 与 spec 均通过")
-    if role == "coder" and current["gates"]["code"]:
-        raise SdlcError(
-            "code gate 已通过；再次派发 coder 必须先记录结构化 Feedback"
-        )
-    rework = current.get("rework") or {}
     if (
         role == "coder"
-        and rework.get("status") == "active"
-        and rework.get("target_phase") == "spec"
-        and rework.get("stage") != "spec_published"
+        and current["gates"]["code"]
+        and (task or {}).get("stage") != "code"
     ):
         raise SdlcError(
-            "Feedback 要求先发布修订后的 Spec baseline，再派发 coder"
+            "code gate 已通过；请先把 Task 流转回 code"
         )
     if role == "tester" and not current["gates"]["code"]:
         raise SdlcError("tester 门禁要求 code gate 已通过")
@@ -364,16 +339,6 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
             "tester-dispatch",
             required=False,
         )
-        if (
-            previous_dispatch is not None
-            and previous_dispatch.get("implementation_fingerprint")
-            == implementation["sha256"]
-            and not current["gates"]["test"]
-        ):
-            raise SdlcError(
-                "当前实现已派发过 tester；测试失败后禁止自动重复派发。"
-                "请先完成明确的 code 返工，使实现指纹变化后再进入 test 阶段"
-            )
         write_work_record(
             root,
             "tester-dispatch",

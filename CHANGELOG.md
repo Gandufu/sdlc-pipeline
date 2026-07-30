@@ -2,35 +2,11 @@
 
 ## Unreleased
 
-- Source 摄取同时支持文件和目录，且受控副本保持原扩展名、原字节与相对目录树；新增
-  `manifest.json` 文件索引和 directory tree hash，正式 baseline 同步冻结原始文件树。
-- 修复未显式提供 media type 的 PNG 被默认当作 `text/plain` 解码并生成巨型乱码 `content.md`；
-  二进制现在使用 asset anchor/`asset_ref`，只有真实 extractor 输出才允许独立 `projection.md`。
-- 旧版错误 Source 不做不可验证的原地转换；升级后从权威原路径重新摄取并替换未发布的 Source 引用，
-  旧目录继续保留为审计证据，避免静默覆盖。
-- `source_type=file` 指向目录时自动识别为 directory，同时提供显式 directory 类型、数量/大小限制、
-  符号链接拒绝和准确的“路径不存在/类型错误”诊断。
-- 新增统一 Feedback/Rework 生命周期：人工预览、人工验收和自动测试失败都先写入 `FB-xxxx` 结构化证据，
-  再按 implementation/spec/test_contract 在同一 Run 中前向返工；旧的自由文本 Spec-rework 分叉已删除。
-- code/test gate 在 active Feedback 期间失效；Spec 类返工必须先发布修订 baseline，implementation 类返工
-  必须重新通过完整 code gate，最终 delivery 成功后 Feedback 才 resolved。
-- `sdlc-coder` 可在 active coder attempt 中按当前 Spec/Feedback 引用查询受限 Source anchor；其他来源、
-  非活动 coder 和 tester 均被拒绝。
-- 当 OpenCode 丢失 tester 的最终 JSON 时，Core 只在独立验证到非空、受限测试 diff 且所有 Spec selector
-  存在后写入带 `output_recovery` 的透明 receipt，并继续唯一一次权威验证；缺少/越界改动仍 fail-closed。
-- 强化 tester 上下文与 handoff 契约：Verification 必须记录既有外部服务的固定值和错误情境；主会话
-  不得丢弃这些断言，tester 必须维护 preflight 测试、使用确定性断言并只返回裸 JSON handoff。
-- Core 为每个实现指纹持久化单次 tester dispatch 边界；测试失败后 OpenCode 无法自动重复派发
-  tester，只有明确 code 返工改变实现指纹后才可重新进入 test 阶段。
-- 修复 lifecycle Schema 的 `minProperties` 与 fail-closed 运行时校验器不一致，避免 v1.1
-  测试套件项目在 init 读取合约时被错误阻断。
-- coder 退出所有测试源码读写；code gate 在 handoff 后统一完成 compile/package/lint/typecheck、
-  启动、readiness 和停止。
-- `sdlc-tester` 成为唯一测试编写入口，仅可修改 Spec selector 声明的 `tests/**`/`test/**`
-  Playwright 脚本；业务源码与测试源码分别绑定指纹，测试编写不会使 code gate 失效。
-- `sdlc-tester` 从 primary 阶段入口改为由 `sdlc-main` 派发的独立 subagent；tester 只返回
-  test handoff，plugin 校验后再由 Core 执行唯一 `verify_delivery`。
-- Playwright package/CLI 是确定性交付验证路径；Playwright MCP 保持可选且不进入 gate 依赖。
+- 采用最终 Task 状态图，支持 Code/Human Review/Test/Spec 的显式返工循环。
+- 只追加用户原始 `input.md`；删除 Source、Spec Work、Candidate revision、Feedback 和会话恢复。
+- Spec prepare 只保存待确认 hash；approve 后直接生成正式 Markdown baseline。
+- 对外工具收缩为 status、task、spec、lifecycle、finalize。
+- 删除约 8900 行旧实现和过时回归，保留快速状态图、Spec 发布和 lifecycle 合同测试。
 
 ## 0.15.4 - 2026-07-28
 

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1100" viewBox="0 0 1800 1100">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#172b4d"/></marker>
+    <marker id="ag" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#00875a"/></marker>
+    <marker id="ab" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#0052cc"/></marker>
+    <marker id="ap" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#6554c0"/></marker>
+    <style>
+      text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif;fill:#172b4d}
+      .title{font-size:30px;font-weight:700}.sub{font-size:16px;fill:#5e6c84}.head{font-size:17px;font-weight:700}
+      .label{font-size:15px;font-weight:700;text-anchor:middle}.small{font-size:13px;fill:#5e6c84;text-anchor:middle}
+      .group{stroke-width:2;rx:16}.box{stroke-width:2;rx:10}.edge{fill:none;stroke-width:2.4;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect width="1800" height="1100" fill="#fff"/>
+  <text x="50" y="62" class="title">过渡期：协议中立的本地智能体执行框架</text>
+  <text x="50" y="94" class="sub">目标是验证快速迭代闭环；插件、MCP、CLI/SDK 只选最短路径，不进入领域内核</text>
+
+  <rect x="50" y="130" width="260" height="470" class="group" fill="#f4f5f7" stroke="#7a869a"/>
+  <text x="180" y="166" class="head" text-anchor="middle">外部智能体宿主</text>
+  <g fill="#deebff" stroke="#0052cc">
+    <rect x="80" y="200" width="200" height="62" class="box"/><rect x="80" y="288" width="200" height="62" class="box"/>
+    <rect x="80" y="376" width="200" height="62" class="box"/><rect x="80" y="464" width="200" height="62" class="box"/>
+  </g>
+  <text x="180" y="238" class="label">OpenCode</text><text x="180" y="326" class="label">Claude Code</text>
+  <text x="180" y="414" class="label">Codex</text><text x="180" y="502" class="label">Hermes / 后续宿主</text>
+
+  <rect x="360" y="130" width="280" height="470" class="group" fill="#fff7e6" stroke="#ff991f"/>
+  <text x="500" y="166" class="head" text-anchor="middle">可替换适配器</text>
+  <g fill="#fffae6" stroke="#ff991f">
+    <rect x="390" y="212" width="220" height="78" class="box"/><rect x="390" y="324" width="220" height="78" class="box"/>
+    <rect x="390" y="436" width="220" height="78" class="box"/>
+  </g>
+  <text x="500" y="242" class="label">轻量宿主插件</text><text x="500" y="265" class="small">技能 / 钩子 / 权限</text>
+  <text x="500" y="354" class="label">MCP 适配器</text><text x="500" y="377" class="small">可选互操作层</text>
+  <text x="500" y="466" class="label">CLI / 本地 SDK</text><text x="500" y="489" class="small">参考适配器</text>
+
+  <rect x="700" y="130" width="270" height="470" class="group" fill="#eae6ff" stroke="#6554c0"/>
+  <text x="835" y="166" class="head" text-anchor="middle">版本化接口</text>
+  <g fill="#eae6ff" stroke="#6554c0">
+    <rect x="730" y="235" width="210" height="92" class="box"/><rect x="730" y="395" width="210" height="92" class="box"/>
+  </g>
+  <text x="835" y="271" class="label">智能体动作接口</text><text x="835" y="296" class="small">7 个以内的深动作</text>
+  <text x="835" y="431" class="label">人工控制接口</text><text x="835" y="456" class="small">审批 / 取消 / 接管</text>
+
+  <rect x="1030" y="130" width="700" height="470" class="group" fill="#e3fcef" stroke="#00875a"/>
+  <text x="1380" y="168" class="head" text-anchor="middle">协议中立的 SDLC 内核</text>
+  <rect x="1060" y="195" width="300" height="64" class="box" fill="#e3fcef" stroke="#00875a"/>
+  <text x="1210" y="234" class="label">应用用例</text>
+  <g fill="#fff" stroke="#00875a">
+    <rect x="1060" y="290" width="190" height="62" class="box"/><rect x="1280" y="290" width="190" height="62" class="box"/><rect x="1500" y="290" width="190" height="62" class="box"/>
+    <rect x="1060" y="385" width="190" height="62" class="box"/><rect x="1280" y="385" width="190" height="62" class="box"/><rect x="1500" y="385" width="190" height="62" class="box"/>
+    <rect x="1170" y="480" width="190" height="62" class="box"/><rect x="1390" y="480" width="190" height="62" class="box"/>
+  </g>
+  <text x="1155" y="328" class="label">任务引擎</text><text x="1375" y="328" class="label">上下文编译器</text><text x="1595" y="318" class="label"><tspan x="1595">策略与</tspan><tspan x="1595" dy="20">门禁引擎</tspan></text>
+  <text x="1155" y="423" class="label">失败路由器</text><text x="1375" y="423" class="label">项目事实存储</text><text x="1595" y="423" class="label">证据存储</text>
+  <text x="1265" y="518" class="label">工作区端口</text><text x="1485" y="518" class="label">模板端口</text>
+
+  <rect x="360" y="700" width="610" height="84" class="box" fill="#ffebe6" stroke="#de350b"/>
+  <text x="665" y="735" class="label" fill="#bf2600"><tspan x="665">P0 只选择一个最短宿主适配器；删除适配器后，</tspan><tspan x="665" dy="24">内核、契约测试、动作结构仍必须独立通过。</tspan></text>
+  <rect x="1030" y="670" width="320" height="100" class="box" fill="#e6fcff" stroke="#00a3bf"/>
+  <text x="1190" y="709" class="label">框架包</text><text x="1190" y="738" class="small">Electron · 假实现 · 后续框架</text>
+  <rect x="1410" y="670" width="320" height="100" class="box" fill="#deebff" stroke="#0052cc"/>
+  <text x="1570" y="709" class="label">项目边界</text><text x="1570" y="738" class="small">Git 仓库 · 工作树 · 运行环境</text>
+
+  <path d="M280 231 H390" class="edge"/><path d="M280 319 H335 V363 H390" class="edge" stroke-dasharray="7 6"/>
+  <path d="M280 407 H335 V475 H390" class="edge" stroke-dasharray="7 6"/>
+  <path d="M610 251 H670 V281 H730" class="edge" stroke="#6554c0" marker-end="url(#ap)"/>
+  <path d="M610 363 H670 V281 H730" class="edge" stroke="#6554c0" marker-end="url(#ap)"/>
+  <path d="M610 475 H670 V281 H730" class="edge" stroke="#6554c0" marker-end="url(#ap)"/>
+  <path d="M940 281 H1000 V227 H1060" class="edge" stroke="#00875a" marker-end="url(#ag)"/>
+  <path d="M940 441 H990 V245 H1060" class="edge" stroke="#00875a" marker-end="url(#ag)"/>
+  <path d="M1485 542 V630 H1190 V670" class="edge" stroke="#00a3bf"/>
+  <path d="M1265 542 V630 H1570 V670" class="edge" stroke="#0052cc" marker-end="url(#ab)"/>
+  <path d="M1350 720 H1410" class="edge" stroke="#0052cc" marker-end="url(#ab)"/>
+
+  <g transform="translate(50 850)">
+    <rect width="1680" height="115" rx="14" fill="#f4f5f7" stroke="#dfe1e6"/>
+    <text x="30" y="36" class="head">不变量</text>
+    <text x="30" y="70" class="sub">适配器只翻译身份、工作区、调用和显示；状态、门禁、证据、审批收据全部留在内核。</text>
+    <text x="30" y="98" class="sub">最终软件工厂拥有第一方智能体运行时后，外部宿主与 MCP 都退化为可选入口。</text>
+  </g>
+  <text x="50" y="1055" class="sub">可编辑源文件：SDLC-Pipeline-2.0-Architecture.drawio · 第 1 页</text>
+</svg>

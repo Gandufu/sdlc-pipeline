@@ -19,7 +19,7 @@ PLUGIN_ROOT = (
     if _SOURCE_FILE and not str(_SOURCE_FILE).startswith("<")
     else Path.cwd().resolve()
 )
-VERSION = "0.21.0"
+VERSION = "0.23.0"
 DEFAULT_REPOSITORY = "https://github.com/Gandufu/sdlc-pipeline.git"
 DEFAULT_REF = "main"
 OPENCODE_PLUGIN_VERSION = "^1.18.7"
@@ -305,7 +305,7 @@ def install(target: Path, force: bool = False) -> dict[str, object]:
         "version": VERSION,
         "host": "opencode",
         "layout": "project-local",
-        "layout_version": "3.0",
+        "layout_version": "4.0",
         "desktop_compatible": True,
     }
     atomic_write(

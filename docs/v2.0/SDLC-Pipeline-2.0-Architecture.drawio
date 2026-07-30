@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-07-30T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="transition-harness" name="01-过渡期本地执行框架">
+    <mxGraphModel dx="1800" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="t-title" value="过渡期：协议中立的本地智能体执行框架" style="text;html=1;strokeColor=none;fillColor=none;fontSize=28;fontStyle=1;fontColor=#172B4D;align=left;" vertex="1" parent="1"><mxGeometry x="50" y="30" width="900" height="40" as="geometry"/></mxCell>
+        <mxCell id="t-sub" value="目标是验证快速迭代闭环；插件、MCP、CLI/SDK 只选最短路径，不进入领域内核" style="text;html=1;strokeColor=none;fillColor=none;fontSize=15;fontColor=#5E6C84;align=left;" vertex="1" parent="1"><mxGeometry x="50" y="72" width="1100" height="30" as="geometry"/></mxCell>
+
+        <mxCell id="t-host-group" value="外部智能体宿主" style="swimlane;html=1;rounded=1;startSize=38;fillColor=#F4F5F7;strokeColor=#7A869A;fontColor=#172B4D;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="50" y="130" width="260" height="470" as="geometry"/></mxCell>
+        <mxCell id="t-oc" value="OpenCode" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;" vertex="1" parent="t-host-group"><mxGeometry x="30" y="70" width="200" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-cc" value="Claude Code" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;" vertex="1" parent="t-host-group"><mxGeometry x="30" y="158" width="200" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-cx" value="Codex" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;" vertex="1" parent="t-host-group"><mxGeometry x="30" y="246" width="200" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-he" value="Hermes / 后续宿主" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;" vertex="1" parent="t-host-group"><mxGeometry x="30" y="334" width="200" height="62" as="geometry"/></mxCell>
+
+        <mxCell id="t-adapter-group" value="可替换适配器" style="swimlane;html=1;rounded=1;startSize=38;fillColor=#FFF7E6;strokeColor=#FF991F;fontColor=#172B4D;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="360" y="130" width="280" height="470" as="geometry"/></mxCell>
+        <mxCell id="t-plugin" value="轻量宿主插件&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;技能 / 钩子 / 权限&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;fontStyle=1;" vertex="1" parent="t-adapter-group"><mxGeometry x="30" y="82" width="220" height="78" as="geometry"/></mxCell>
+        <mxCell id="t-mcp" value="MCP 适配器&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;可选互操作层&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;fontStyle=1;" vertex="1" parent="t-adapter-group"><mxGeometry x="30" y="194" width="220" height="78" as="geometry"/></mxCell>
+        <mxCell id="t-cli" value="CLI / 本地 SDK&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;参考适配器&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;fontStyle=1;" vertex="1" parent="t-adapter-group"><mxGeometry x="30" y="306" width="220" height="78" as="geometry"/></mxCell>
+
+        <mxCell id="t-api-group" value="版本化接口" style="swimlane;html=1;rounded=1;startSize=38;fillColor=#EAE6FF;strokeColor=#6554C0;fontColor=#172B4D;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="700" y="130" width="270" height="470" as="geometry"/></mxCell>
+        <mxCell id="t-action" value="智能体动作接口&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;7 个以内的深动作&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAE6FF;strokeColor=#6554C0;fontStyle=1;" vertex="1" parent="t-api-group"><mxGeometry x="30" y="105" width="210" height="92" as="geometry"/></mxCell>
+        <mxCell id="t-operator" value="人工控制接口&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;审批 / 取消 / 接管&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAE6FF;strokeColor=#6554C0;fontStyle=1;" vertex="1" parent="t-api-group"><mxGeometry x="30" y="265" width="210" height="92" as="geometry"/></mxCell>
+
+        <mxCell id="t-core-group" value="协议中立的 SDLC 内核" style="swimlane;html=1;rounded=1;startSize=42;fillColor=#E3FCEF;strokeColor=#00875A;fontColor=#172B4D;fontStyle=1;fontSize=15;" vertex="1" parent="1"><mxGeometry x="1030" y="130" width="700" height="470" as="geometry"/></mxCell>
+        <mxCell id="t-app" value="应用用例" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontStyle=1;" vertex="1" parent="t-core-group"><mxGeometry x="30" y="65" width="300" height="64" as="geometry"/></mxCell>
+        <mxCell id="t-task" value="任务引擎" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="t-core-group"><mxGeometry x="30" y="160" width="190" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-context" value="上下文编译器" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="t-core-group"><mxGeometry x="250" y="160" width="190" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-policy" value="策略与门禁引擎" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="t-core-group"><mxGeometry x="470" y="160" width="190" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-failure" value="失败路由器" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="t-core-group"><mxGeometry x="30" y="255" width="190" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-facts" value="项目事实存储" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="t-core-group"><mxGeometry x="250" y="255" width="190" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-evidence" value="证据存储" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="t-core-group"><mxGeometry x="470" y="255" width="190" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-workspace" value="工作区端口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="t-core-group"><mxGeometry x="140" y="350" width="190" height="62" as="geometry"/></mxCell>
+        <mxCell id="t-template" value="模板端口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="t-core-group"><mxGeometry x="360" y="350" width="190" height="62" as="geometry"/></mxCell>
+
+        <mxCell id="t-packs" value="框架包&lt;br&gt;Electron · 假实现 · 后续框架" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6FCFF;strokeColor=#00A3BF;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1030" y="670" width="320" height="100" as="geometry"/></mxCell>
+        <mxCell id="t-project" value="项目边界&lt;br&gt;Git 仓库 · 任务工作树 · 应用/测试运行环境" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="1410" y="670" width="320" height="100" as="geometry"/></mxCell>
+        <mxCell id="t-note" value="P0 只选择一个最短宿主适配器；删除适配器后，内核、契约测试、动作结构仍必须独立通过。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBE6;strokeColor=#DE350B;fontColor=#BF2600;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="360" y="700" width="610" height="84" as="geometry"/></mxCell>
+
+        <mxCell id="te1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#7A869A;endArrow=block;" edge="1" parent="1" source="t-oc" target="t-plugin"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#7A869A;endArrow=block;dashed=1;" edge="1" parent="1" source="t-cc" target="t-mcp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#7A869A;endArrow=block;dashed=1;" edge="1" parent="1" source="t-cx" target="t-cli"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6554C0;endArrow=block;" edge="1" parent="1" source="t-plugin" target="t-action"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6554C0;endArrow=block;" edge="1" parent="1" source="t-mcp" target="t-action"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6554C0;endArrow=block;" edge="1" parent="1" source="t-cli" target="t-action"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00875A;endArrow=block;" edge="1" parent="1" source="t-action" target="t-app"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00875A;endArrow=block;" edge="1" parent="1" source="t-operator" target="t-app"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00A3BF;endArrow=block;" edge="1" parent="1" source="t-template" target="t-packs"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0052CC;endArrow=block;" edge="1" parent="1" source="t-workspace" target="t-project"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="te11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0052CC;endArrow=block;" edge="1" parent="1" source="t-packs" target="t-project"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="t-footer" value="可编辑源文件：SDLC-Pipeline-2.0-Architecture.drawio · 第 1 页" style="text;html=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#5E6C84;align=left;" vertex="1" parent="1"><mxGeometry x="50" y="1030" width="700" height="24" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="factory-system" name="02-项目软件工厂终局">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1200" math="0" shadow="0">
+      <root>
+        <mxCell id="f0"/>
+        <mxCell id="f1" parent="f0"/>
+        <mxCell id="f-title" value="终局：项目软件工厂系统" style="text;html=1;strokeColor=none;fillColor=none;fontSize=28;fontStyle=1;fontColor=#172B4D;align=left;" vertex="1" parent="f1"><mxGeometry x="50" y="30" width="800" height="40" as="geometry"/></mxCell>
+        <mxCell id="f-sub" value="平台拥有控制面、第一方智能体运行时和执行面；MCP 仅是可选的外部智能体网关" style="text;html=1;strokeColor=none;fillColor=none;fontSize=15;fontColor=#5E6C84;align=left;" vertex="1" parent="f1"><mxGeometry x="50" y="72" width="1100" height="30" as="geometry"/></mxCell>
+
+        <mxCell id="f-entry" value="软件工厂入口" style="swimlane;html=1;rounded=1;startSize=38;fillColor=#F4F5F7;strokeColor=#7A869A;fontStyle=1;" vertex="1" parent="f1"><mxGeometry x="50" y="120" width="1700" height="145" as="geometry"/></mxCell>
+        <mxCell id="f-portal" value="项目门户" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#7A869A;fontStyle=1;" vertex="1" parent="f-entry"><mxGeometry x="45" y="60" width="250" height="58" as="geometry"/></mxCell>
+        <mxCell id="f-api" value="平台 API / SDK" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#7A869A;fontStyle=1;" vertex="1" parent="f-entry"><mxGeometry x="355" y="60" width="250" height="58" as="geometry"/></mxCell>
+        <mxCell id="f-ci" value="CI / 事件触发器" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#7A869A;fontStyle=1;" vertex="1" parent="f-entry"><mxGeometry x="665" y="60" width="250" height="58" as="geometry"/></mxCell>
+        <mxCell id="f-external" value="外部智能体宿主" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#7A869A;fontStyle=1;" vertex="1" parent="f-entry"><mxGeometry x="975" y="60" width="250" height="58" as="geometry"/></mxCell>
+        <mxCell id="f-mcp" value="可选 MCP 网关" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;fontStyle=1;" vertex="1" parent="f-entry"><mxGeometry x="1285" y="60" width="300" height="58" as="geometry"/></mxCell>
+
+        <mxCell id="f-control" value="软件工厂控制面" style="swimlane;html=1;rounded=1;startSize=42;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;fontSize=15;" vertex="1" parent="f1"><mxGeometry x="50" y="310" width="820" height="340" as="geometry"/></mxCell>
+        <mxCell id="f-project" value="项目注册表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0052CC;" vertex="1" parent="f-control"><mxGeometry x="30" y="70" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-flow" value="流程编排器" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;" vertex="1" parent="f-control"><mxGeometry x="290" y="70" width="240" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-approval" value="审批服务" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0052CC;" vertex="1" parent="f-control"><mxGeometry x="570" y="70" width="210" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-template" value="模板注册表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0052CC;" vertex="1" parent="f-control"><mxGeometry x="30" y="165" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-policy" value="策略注册表" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0052CC;" vertex="1" parent="f-control"><mxGeometry x="290" y="165" width="240" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-release" value="发布与部署服务" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#0052CC;" vertex="1" parent="f-control"><mxGeometry x="570" y="165" width="210" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-audit" value="审计与项目组合投影" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6FCFF;strokeColor=#00A3BF;" vertex="1" parent="f-control"><mxGeometry x="160" y="260" width="500" height="58" as="geometry"/></mxCell>
+
+        <mxCell id="f-agent" value="第一方智能体运行时" style="swimlane;html=1;rounded=1;startSize=42;fillColor=#EAE6FF;strokeColor=#6554C0;fontStyle=1;fontSize=15;" vertex="1" parent="f1"><mxGeometry x="930" y="310" width="820" height="340" as="geometry"/></mxCell>
+        <mxCell id="f-scheduler" value="智能体调度器" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6554C0;" vertex="1" parent="f-agent"><mxGeometry x="30" y="70" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-model" value="模型网关" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6554C0;" vertex="1" parent="f-agent"><mxGeometry x="290" y="70" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-context" value="上下文编译器" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6554C0;" vertex="1" parent="f-agent"><mxGeometry x="550" y="70" width="230" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-tool" value="工具网关" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6554C0;" vertex="1" parent="f-agent"><mxGeometry x="30" y="165" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-budget" value="预算与护栏" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6554C0;" vertex="1" parent="f-agent"><mxGeometry x="290" y="165" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-review" value="评审与评测运行时" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6554C0;" vertex="1" parent="f-agent"><mxGeometry x="550" y="165" width="230" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-agent-note" value="外部宿主与第一方运行时共享智能体动作契约；宿主会话永远不是业务状态。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;" vertex="1" parent="f-agent"><mxGeometry x="110" y="260" width="600" height="58" as="geometry"/></mxCell>
+
+        <mxCell id="f-domain" value="软件工厂领域服务" style="swimlane;html=1;rounded=1;startSize=42;fillColor=#E3FCEF;strokeColor=#00875A;fontStyle=1;fontSize=15;" vertex="1" parent="f1"><mxGeometry x="50" y="700" width="820" height="300" as="geometry"/></mxCell>
+        <mxCell id="f-core" value="SDLC 领域内核" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontStyle=1;" vertex="1" parent="f-domain"><mxGeometry x="30" y="70" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-task" value="任务 / 尝试 / 门禁" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="f-domain"><mxGeometry x="290" y="70" width="240" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-fact" value="项目事实服务" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="f-domain"><mxGeometry x="570" y="70" width="210" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-evidence" value="证据服务" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="f-domain"><mxGeometry x="160" y="170" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-workspace" value="工作区服务" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00875A;" vertex="1" parent="f-domain"><mxGeometry x="440" y="170" width="220" height="62" as="geometry"/></mxCell>
+
+        <mxCell id="f-exec" value="执行面" style="swimlane;html=1;rounded=1;startSize=42;fillColor=#E6FCFF;strokeColor=#00A3BF;fontStyle=1;fontSize=15;" vertex="1" parent="f1"><mxGeometry x="930" y="700" width="820" height="300" as="geometry"/></mxCell>
+        <mxCell id="f-runner" value="隔离执行器池" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00A3BF;" vertex="1" parent="f-exec"><mxGeometry x="30" y="70" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-env" value="环境与设备实验室" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00A3BF;" vertex="1" parent="f-exec"><mxGeometry x="290" y="70" width="240" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-artifact" value="制品存储" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00A3BF;" vertex="1" parent="f-exec"><mxGeometry x="570" y="70" width="210" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-repo" value="项目 Git 仓库" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00A3BF;" vertex="1" parent="f-exec"><mxGeometry x="160" y="170" width="220" height="62" as="geometry"/></mxCell>
+        <mxCell id="f-packs" value="框架包与策略包" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#00A3BF;" vertex="1" parent="f-exec"><mxGeometry x="440" y="170" width="220" height="62" as="geometry"/></mxCell>
+
+        <mxCell id="fe1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0052CC;endArrow=block;" edge="1" parent="f1" source="f-portal" target="f-flow"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0052CC;endArrow=block;" edge="1" parent="f1" source="f-api" target="f-flow"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0052CC;endArrow=block;" edge="1" parent="f1" source="f-ci" target="f-flow"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#FF991F;endArrow=block;dashed=1;" edge="1" parent="f1" source="f-external" target="f-mcp"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#FF991F;endArrow=block;dashed=1;" edge="1" parent="f1" source="f-mcp" target="f-flow"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe6" value="调度" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6554C0;endArrow=block;fontColor=#6554C0;" edge="1" parent="f1" source="f-flow" target="f-scheduler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe7" value="受控动作" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00875A;endArrow=block;fontColor=#00875A;" edge="1" parent="f1" source="f-tool" target="f-core"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe8" value="执行" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00A3BF;endArrow=block;fontColor=#00A3BF;" edge="1" parent="f1" source="f-workspace" target="f-runner"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00A3BF;endArrow=block;" edge="1" parent="f1" source="f-release" target="f-artifact"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="fe10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00A3BF;endArrow=block;" edge="1" parent="f1" source="f-template" target="f-packs"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="f-footer" value="可编辑源文件：SDLC-Pipeline-2.0-Architecture.drawio · 第 2 页" style="text;html=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#5E6C84;align=left;" vertex="1" parent="f1"><mxGeometry x="50" y="1130" width="700" height="24" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="task-state" name="03-任务状态机">
+    <mxGraphModel dx="1700" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="s0"/>
+        <mxCell id="s1" parent="s0"/>
+        <mxCell id="s-title" value="任务状态机：事件驱动、受控返工、证据失效" style="text;html=1;strokeColor=none;fillColor=none;fontSize=28;fontStyle=1;fontColor=#172B4D;align=left;" vertex="1" parent="s1"><mxGeometry x="50" y="30" width="1000" height="40" as="geometry"/></mxCell>
+        <mxCell id="s-start" value="开始" style="ellipse;whiteSpace=wrap;html=1;fillColor=#F4F5F7;strokeColor=#7A869A;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="60" y="190" width="90" height="90" as="geometry"/></mxCell>
+        <mxCell id="s-draft" value="草稿&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;增量提案编辑/校验&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="210" y="180" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="s-spec" value="等待规格&lt;br&gt;批准" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="470" y="180" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="s-exec" value="执行中&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;实现 + 快速门禁&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAE6FF;strokeColor=#6554C0;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="730" y="180" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="s-review" value="等待人工评审&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;人工业务预览&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="990" y="180" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="s-accept" value="验收中&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;真实运行/功能门禁&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6FCFF;strokeColor=#00A3BF;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="1250" y="180" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="s-delivery" value="等待交付&lt;br&gt;批准" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="1250" y="430" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="s-final" value="已固化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="990" y="430" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="s-block" value="已阻塞&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;环境 / 预算 / 重复失败&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBE6;strokeColor=#DE350B;fontStyle=1;fontColor=#BF2600;" vertex="1" parent="s1"><mxGeometry x="730" y="430" width="190" height="110" as="geometry"/></mxCell>
+        <mxCell id="s-rule" value="内核守卫决定目标状态；模型只能提交事件和证据。返工保留历史证据，只失效受影响的下游门禁运行与批准。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F5F7;strokeColor=#7A869A;fontColor=#172B4D;fontStyle=1;" vertex="1" parent="s1"><mxGeometry x="210" y="680" width="1230" height="90" as="geometry"/></mxCell>
+        <mxCell id="se1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0052CC;endArrow=block;" edge="1" parent="s1" source="s-start" target="s-draft"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="se2" value="校验通过" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0052CC;endArrow=block;fontColor=#0052CC;" edge="1" parent="s1" source="s-draft" target="s-spec"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="se3" value="人工批准" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6554C0;endArrow=block;fontColor=#6554C0;" edge="1" parent="s1" source="s-spec" target="s-exec"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="se4" value="快速门禁通过" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6554C0;endArrow=block;fontColor=#6554C0;" edge="1" parent="s1" source="s-exec" target="s-review"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="se5" value="评审接受" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00A3BF;endArrow=block;fontColor=#00A3BF;" edge="1" parent="s1" source="s-review" target="s-accept"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="se6" value="强制门禁通过" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00A3BF;endArrow=block;fontColor=#00A3BF;" edge="1" parent="s1" source="s-accept" target="s-delivery"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="se7" value="人工批准" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00875A;endArrow=block;fontColor=#00875A;" edge="1" parent="s1" source="s-delivery" target="s-final"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="se8" value="实现问题反馈" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#DE350B;endArrow=block;fontColor=#BF2600;dashed=1;" edge="1" parent="s1" source="s-review" target="s-exec"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1085" y="350"/><mxPoint x="825" y="350"/></Array></mxGeometry></mxCell>
+        <mxCell id="se9" value="规格问题反馈" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#DE350B;endArrow=block;fontColor=#BF2600;dashed=1;" edge="1" parent="s1" source="s-accept" target="s-draft"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="1345" y="110"/><mxPoint x="305" y="110"/></Array></mxGeometry></mxCell>
+        <mxCell id="se10" value="环境 / 预算 / 重复失败" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#DE350B;endArrow=block;fontColor=#BF2600;exitX=0.75;exitY=1;entryX=0.75;entryY=0;" edge="1" parent="s1" source="s-exec" target="s-block"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="se11" value="人工决策后恢复" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6554C0;endArrow=block;fontColor=#6554C0;dashed=1;exitX=0.25;exitY=0;entryX=0.25;entryY=1;" edge="1" parent="s1" source="s-block" target="s-exec"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="s-footer" value="可编辑源文件：SDLC-Pipeline-2.0-Architecture.drawio · 第 3 页" style="text;html=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#5E6C84;align=left;" vertex="1" parent="s1"><mxGeometry x="50" y="930" width="700" height="24" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <diagram id="harness-loop" name="04-验证反馈闭环">
+    <mxGraphModel dx="1700" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="h0"/>
+        <mxCell id="h1" parent="h0"/>
+        <mxCell id="h-title" value="验证反馈闭环：新证据驱动下一轮，而不是无差别重试" style="text;html=1;strokeColor=none;fillColor=none;fontSize=28;fontStyle=1;fontColor=#172B4D;align=left;" vertex="1" parent="h1"><mxGeometry x="50" y="30" width="1100" height="40" as="geometry"/></mxCell>
+        <mxCell id="h-intent" value="目标 + 当前事实" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEEBFF;strokeColor=#0052CC;fontStyle=1;" vertex="1" parent="h1"><mxGeometry x="70" y="210" width="220" height="90" as="geometry"/></mxCell>
+        <mxCell id="h-context" value="上下文编译器&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;只取当前动作所需事实&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EAE6FF;strokeColor=#6554C0;fontStyle=1;" vertex="1" parent="h1"><mxGeometry x="350" y="210" width="240" height="90" as="geometry"/></mxCell>
+        <mxCell id="h-agent" value="智能体修改&lt;br&gt;提案 / 代码 / 测试" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFAE6;strokeColor=#FF991F;fontStyle=1;" vertex="1" parent="h1"><mxGeometry x="650" y="210" width="240" height="90" as="geometry"/></mxCell>
+        <mxCell id="h-gate" value="验证门禁&lt;br&gt;&lt;font color=&quot;#5E6C84&quot;&gt;框架包 + 内核执行器&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6FCFF;strokeColor=#00A3BF;fontStyle=1;" vertex="1" parent="h1"><mxGeometry x="950" y="210" width="250" height="90" as="geometry"/></mxCell>
+        <mxCell id="h-verdict" value="确定性&lt;br&gt;裁决" style="rhombus;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#172B4D;fontStyle=1;" vertex="1" parent="h1"><mxGeometry x="1280" y="195" width="160" height="120" as="geometry"/></mxCell>
+        <mxCell id="h-pass" value="通过&lt;br&gt;固化证据&lt;br&gt;推进状态" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E3FCEF;strokeColor=#00875A;fontStyle=1;" vertex="1" parent="h1"><mxGeometry x="1330" y="430" width="220" height="100" as="geometry"/></mxCell>
+        <mxCell id="h-router" value="失败路由器" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBE6;strokeColor=#DE350B;fontStyle=1;fontColor=#BF2600;" vertex="1" parent="h1"><mxGeometry x="980" y="430" width="220" height="100" as="geometry"/></mxCell>
+        <mxCell id="h-product" value="产品问题 → 代码" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DE350B;" vertex="1" parent="h1"><mxGeometry x="680" y="410" width="200" height="55" as="geometry"/></mxCell>
+        <mxCell id="h-spec" value="规格问题 → 提案" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DE350B;" vertex="1" parent="h1"><mxGeometry x="680" y="485" width="200" height="55" as="geometry"/></mxCell>
+        <mxCell id="h-test" value="测试契约问题 → 测试" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#DE350B;" vertex="1" parent="h1"><mxGeometry x="420" y="410" width="200" height="55" as="geometry"/></mxCell>
+        <mxCell id="h-block" value="环境 / 策略 / 预算&lt;br&gt;→ 阻塞并转人工" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFEBE6;strokeColor=#DE350B;fontStyle=1;fontColor=#BF2600;" vertex="1" parent="h1"><mxGeometry x="370" y="500" width="250" height="75" as="geometry"/></mxCell>
+        <mxCell id="h-evidence" value="下一次尝试必须有新的失败增量：新失败、新定位、新环境状态或新假设验证。相同指纹重复且无新证据时停止。" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F5F7;strokeColor=#7A869A;fontStyle=1;" vertex="1" parent="h1"><mxGeometry x="70" y="650" width="1480" height="85" as="geometry"/></mxCell>
+        <mxCell id="he1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#0052CC;endArrow=block;" edge="1" parent="h1" source="h-intent" target="h-context"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6554C0;endArrow=block;" edge="1" parent="h1" source="h-context" target="h-agent"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#FF991F;endArrow=block;" edge="1" parent="h1" source="h-agent" target="h-gate"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00A3BF;endArrow=block;" edge="1" parent="h1" source="h-gate" target="h-verdict"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he5" value="通过" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#00875A;endArrow=block;fontColor=#00875A;" edge="1" parent="h1" source="h-verdict" target="h-pass"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he6" value="失败" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#DE350B;endArrow=block;fontColor=#BF2600;" edge="1" parent="h1" source="h-verdict" target="h-router"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#DE350B;endArrow=block;" edge="1" parent="h1" source="h-router" target="h-product"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#DE350B;endArrow=block;" edge="1" parent="h1" source="h-router" target="h-spec"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#DE350B;endArrow=block;" edge="1" parent="h1" source="h-router" target="h-test"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="920" y="370"/><mxPoint x="650" y="370"/><mxPoint x="650" y="438"/></Array></mxGeometry></mxCell>
+        <mxCell id="he10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#DE350B;endArrow=block;" edge="1" parent="h1" source="h-router" target="h-block"><mxGeometry relative="1" as="geometry"><Array as="points"><mxPoint x="930" y="610"/><mxPoint x="650" y="610"/><mxPoint x="650" y="538"/></Array></mxGeometry></mxCell>
+        <mxCell id="he11" value="新的失败增量" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#FF991F;endArrow=block;fontColor=#FF991F;dashed=1;" edge="1" parent="h1" source="h-product" target="h-agent"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="he12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#FF991F;endArrow=block;dashed=1;" edge="1" parent="h1" source="h-spec" target="h-context"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="h-footer" value="可编辑源文件：SDLC-Pipeline-2.0-Architecture.drawio · 第 4 页" style="text;html=1;strokeColor=none;fillColor=none;fontSize=12;fontColor=#5E6C84;align=left;" vertex="1" parent="h1"><mxGeometry x="50" y="830" width="700" height="24" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

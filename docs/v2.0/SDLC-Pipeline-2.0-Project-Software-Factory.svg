@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1200" viewBox="0 0 1800 1200">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#172b4d"/></marker>
+    <marker id="ab" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#0052cc"/></marker>
+    <marker id="ap" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#6554c0"/></marker>
+    <marker id="ag" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#00875a"/></marker>
+    <marker id="at" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#00a3bf"/></marker>
+    <style>
+      text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif;fill:#172b4d}
+      .title{font-size:30px;font-weight:700}.sub{font-size:16px;fill:#5e6c84}.head{font-size:17px;font-weight:700}
+      .label{font-size:14px;font-weight:700;text-anchor:middle}.small{font-size:12px;fill:#5e6c84;text-anchor:middle}
+      .group{stroke-width:2;rx:16}.box{stroke-width:2;rx:10}.edge{fill:none;stroke-width:2.4;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect width="1800" height="1200" fill="#fff"/>
+  <text x="50" y="62" class="title">终局：项目软件工厂系统</text>
+  <text x="50" y="94" class="sub">平台拥有控制面、第一方智能体运行时和执行面；MCP 仅是可选的外部智能体网关</text>
+
+  <rect x="50" y="120" width="1700" height="145" class="group" fill="#f4f5f7" stroke="#7a869a"/>
+  <text x="90" y="156" class="head">软件工厂入口</text>
+  <g fill="#fff" stroke="#7a869a">
+    <rect x="95" y="180" width="250" height="58" class="box"/><rect x="405" y="180" width="250" height="58" class="box"/>
+    <rect x="715" y="180" width="250" height="58" class="box"/><rect x="1025" y="180" width="250" height="58" class="box"/>
+  </g>
+  <rect x="1335" y="180" width="300" height="58" class="box" fill="#fffae6" stroke="#ff991f"/>
+  <text x="220" y="216" class="label">项目门户</text><text x="530" y="216" class="label">平台 API / SDK</text>
+  <text x="840" y="216" class="label">CI / 事件触发器</text><text x="1150" y="216" class="label">外部智能体宿主</text>
+  <text x="1485" y="216" class="label">可选 MCP 网关</text>
+
+  <rect x="50" y="310" width="820" height="340" class="group" fill="#deebff" stroke="#0052cc"/>
+  <text x="460" y="348" class="head" text-anchor="middle">软件工厂控制面</text>
+  <g fill="#fff" stroke="#0052cc">
+    <rect x="80" y="380" width="220" height="62" class="box"/><rect x="340" y="380" width="240" height="62" class="box"/><rect x="620" y="380" width="210" height="62" class="box"/>
+    <rect x="80" y="475" width="220" height="62" class="box"/><rect x="340" y="475" width="240" height="62" class="box"/><rect x="620" y="475" width="210" height="62" class="box"/>
+  </g>
+  <rect x="210" y="570" width="500" height="58" class="box" fill="#e6fcff" stroke="#00a3bf"/>
+  <text x="190" y="418" class="label">项目注册表</text><text x="460" y="418" class="label">流程编排器</text><text x="725" y="418" class="label">审批服务</text>
+  <text x="190" y="513" class="label">模板注册表</text><text x="460" y="513" class="label">策略注册表</text><text x="725" y="503" class="label"><tspan x="725">发布与</tspan><tspan x="725" dy="19">部署服务</tspan></text>
+  <text x="460" y="606" class="label">审计与项目组合投影</text>
+
+  <rect x="930" y="310" width="820" height="340" class="group" fill="#eae6ff" stroke="#6554c0"/>
+  <text x="1340" y="348" class="head" text-anchor="middle">第一方智能体运行时</text>
+  <g fill="#fff" stroke="#6554c0">
+    <rect x="960" y="380" width="220" height="62" class="box"/><rect x="1220" y="380" width="220" height="62" class="box"/><rect x="1480" y="380" width="230" height="62" class="box"/>
+    <rect x="960" y="475" width="220" height="62" class="box"/><rect x="1220" y="475" width="220" height="62" class="box"/><rect x="1480" y="475" width="230" height="62" class="box"/>
+  </g>
+  <rect x="1040" y="570" width="600" height="58" class="box" fill="#fffae6" stroke="#ff991f"/>
+  <text x="1070" y="418" class="label">智能体调度器</text><text x="1330" y="418" class="label">模型网关</text><text x="1595" y="418" class="label">上下文编译器</text>
+  <text x="1070" y="513" class="label">工具网关</text><text x="1330" y="513" class="label">预算与护栏</text><text x="1595" y="513" class="label">评审与评测运行时</text>
+  <text x="1340" y="606" class="label">外部宿主与第一方运行时共享智能体动作契约</text>
+
+  <rect x="50" y="700" width="820" height="300" class="group" fill="#e3fcef" stroke="#00875a"/>
+  <text x="460" y="738" class="head" text-anchor="middle">软件工厂领域服务</text>
+  <g fill="#fff" stroke="#00875a">
+    <rect x="80" y="770" width="220" height="62" class="box"/><rect x="340" y="770" width="240" height="62" class="box"/><rect x="620" y="770" width="210" height="62" class="box"/>
+    <rect x="210" y="870" width="220" height="62" class="box"/><rect x="490" y="870" width="220" height="62" class="box"/>
+  </g>
+  <text x="190" y="808" class="label">SDLC 领域内核</text><text x="460" y="808" class="label">任务 / 尝试 / 门禁</text><text x="725" y="808" class="label">项目事实服务</text>
+  <text x="320" y="908" class="label">证据服务</text><text x="600" y="908" class="label">工作区服务</text>
+
+  <rect x="930" y="700" width="820" height="300" class="group" fill="#e6fcff" stroke="#00a3bf"/>
+  <text x="1340" y="738" class="head" text-anchor="middle">执行面</text>
+  <g fill="#fff" stroke="#00a3bf">
+    <rect x="960" y="770" width="220" height="62" class="box"/><rect x="1220" y="770" width="240" height="62" class="box"/><rect x="1500" y="770" width="210" height="62" class="box"/>
+    <rect x="1090" y="870" width="220" height="62" class="box"/><rect x="1370" y="870" width="220" height="62" class="box"/>
+  </g>
+  <text x="1070" y="808" class="label">隔离执行器池</text><text x="1340" y="798" class="label"><tspan x="1340">环境与</tspan><tspan x="1340" dy="19">设备实验室</tspan></text><text x="1605" y="808" class="label">制品存储</text>
+  <text x="1200" y="908" class="label">项目 Git 仓库</text><text x="1480" y="908" class="label">框架包与策略包</text>
+
+  <path d="M220 238 V280 H460 V380" class="edge" stroke="#0052cc" marker-end="url(#ab)"/>
+  <path d="M530 238 V280 H460 V380" class="edge" stroke="#0052cc" marker-end="url(#ab)"/>
+  <path d="M840 238 V280 H460 V380" class="edge" stroke="#0052cc" marker-end="url(#ab)"/>
+  <path d="M1150 238 H1335" class="edge" stroke="#ff991f" stroke-dasharray="7 6"/>
+  <path d="M1485 238 V282 H780 V380" class="edge" stroke="#ff991f" stroke-dasharray="7 6"/>
+  <path d="M580 411 H900 V411 H960" class="edge" stroke="#6554c0" marker-end="url(#ap)"/>
+  <text x="875" y="397" class="small">调度</text>
+  <path d="M1070 537 V670 H190 V770" class="edge" stroke="#00875a" marker-end="url(#ag)"/>
+  <text x="900" y="660" class="small">受控动作</text>
+  <path d="M600 932 V1040 H1070 V832" class="edge" stroke="#00a3bf" marker-end="url(#at)"/>
+  <path d="M725 537 V675 H1605 V770" class="edge" stroke="#00a3bf" marker-end="url(#at)"/>
+  <path d="M190 537 V670 H1480 V870" class="edge" stroke="#00a3bf" marker-end="url(#at)"/>
+
+  <g transform="translate(50 1040)">
+    <rect width="1700" height="80" rx="14" fill="#f4f5f7" stroke="#dfe1e6"/>
+    <text x="25" y="33" class="head">终局判断</text>
+    <text x="25" y="60" class="sub">这不是“云端 MCP 服务器”，而是可独立运行的项目软件工厂；MCP 可存在，也可完全不用。</text>
+  </g>
+  <text x="50" y="1160" class="sub">可编辑源文件：SDLC-Pipeline-2.0-Architecture.drawio · 第 2 页</text>
+</svg>

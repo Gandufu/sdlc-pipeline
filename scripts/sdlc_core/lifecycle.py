@@ -667,9 +667,6 @@ def compile_restart_verify(root: Path) -> dict[str, Any]:
     write_evidence_record(
         root, "code", evidence, state="passed", title="Code gate evidence"
     )
-    from .journal import advance_rework
-
-    advance_rework(root, "code_verified")
     return evidence
 
 
@@ -1086,13 +1083,6 @@ def verify_delivery(root: Path) -> dict[str, Any]:
     if cached and cached.get("ok") and cached.get("binding") == binding:
         result_path = root / cached.get("test_results", "")
         if result_path.is_file():
-            from .feedback import resolve_feedback
-
-            resolve_feedback(
-                root,
-                binding=binding,
-                test_results=cached["test_results"],
-            )
             return {**cached, "cached": True}
 
     code = read_evidence_record(root, "code")
@@ -1172,12 +1162,4 @@ def verify_delivery(root: Path) -> dict[str, Any]:
         state="passed" if evidence["ok"] else "failed",
         title="Delivery evidence",
     )
-    if evidence["ok"]:
-        from .feedback import resolve_feedback
-
-        resolve_feedback(
-            root,
-            binding=binding,
-            test_results=evidence["test_results"],
-        )
     return evidence

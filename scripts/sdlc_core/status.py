@@ -13,8 +13,6 @@ from .bootstrap import template_registry
 from .common import read_json
 from .common import sha256_file
 from .layout import contracts_root, lifecycle_path, runtime_root
-from .journal import journal_status, spec_work_index
-from .memory import memory_summary
 from .runs import active_identity_matches, pid_alive, read_active
 from .trace import verify_scaffold
 from .trace import (
@@ -23,14 +21,11 @@ from .trace import (
     worktree_fingerprint,
 )
 from .versions import current_version, parent_manifest
-from .spec_candidates import candidate_status
-from .spec_publisher import retry_publication_cleanup
 from .stores import read_evidence_record, read_work_record
-from .feedback import feedback_status
+from .task_state import task_status
 
 
 def status(root: Path) -> dict[str, Any]:
-    publication_cleanup = retry_publication_cleanup(root)
     gates: dict[str, bool] = {}
     missing: list[str] = []
     diagnostics: list[dict[str, str]] = []
@@ -67,21 +62,13 @@ def status(root: Path) -> dict[str, Any]:
         })
         gates["spec"] = False
         missing.append("requirements/design/test-plan")
-    current_rework = feedback_status(root)
-    active_rework = bool(
-        current_rework and current_rework.get("status") == "active"
-    )
     code = read_evidence_record(root, "code", required=False)
     base_code_gate = closed_baseline or bool(
         code and code.get("ok")
         and code.get("spec_hashes") == spec_hashes
         and code.get("source_fingerprint") == code_fingerprint
     )
-    gates["code"] = base_code_gate and not bool(
-        active_rework
-        and current_rework
-        and current_rework.get("stage") != "code_verified"
-    )
+    gates["code"] = base_code_gate
     if not gates["code"]:
         missing.append("compile/package/preview/health/artifact evidence")
     candidate = read_work_record(root, "version-candidate", required=False)
@@ -101,7 +88,7 @@ def status(root: Path) -> dict[str, Any]:
         candidate and candidate.get("status") in {"ready", "closed"}
         and candidate.get("binding") == expected_test_binding
         and gates["code"]
-    )) and not active_rework
+    ))
     if not gates["test"]:
         missing.append("mandatory test results")
     active = read_active(root)
@@ -204,14 +191,6 @@ def status(root: Path) -> dict[str, Any]:
         "active_rules": active_rules,
         "template_registry_error": template_error,
         "can_enter_next": prerequisites[stage],
-        "journal": journal_status(root),
-        "rework": current_rework,
-        "spec_work": {
-            "active": (spec_work := spec_work_index(root)) is not None,
-            **(spec_work or {}),
-        },
-        "spec_candidate": candidate_status(root),
-        "publication_cleanup": publication_cleanup,
-        "memory": memory_summary(root),
+        "task": task_status(root),
         "diagnostics": diagnostics,
     }

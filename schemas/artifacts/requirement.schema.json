@@ -4,7 +4,7 @@
   "type": "object",
   "required": [
     "schema_version", "id", "feature_id", "title", "goal", "actor",
-    "scope", "non_goals", "source_refs", "main_flow", "alternate_flows",
+    "scope", "non_goals", "main_flow", "alternate_flows",
     "acceptance_criteria"
   ],
   "properties": {
@@ -23,7 +23,6 @@
       "type": "array",
       "items": {"type": "string", "minLength": 1}
     },
-    "source_refs": {"$ref": "source-ref.schema.json#/$defs/source_refs"},
     "decision_ids": {
       "type": "array",
       "uniqueItems": true,
@@ -55,7 +54,7 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["id", "given", "when", "then", "source_refs"],
+        "required": ["id", "given", "when", "then"],
         "properties": {
           "id": {
             "type": "string",
@@ -63,8 +62,7 @@
           },
           "given": {"type": "string", "minLength": 1},
           "when": {"type": "string", "minLength": 1},
-          "then": {"type": "string", "minLength": 1},
-          "source_refs": {"$ref": "source-ref.schema.json#/$defs/source_refs"}
+          "then": {"type": "string", "minLength": 1}
         },
         "additionalProperties": false
       }

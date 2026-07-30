@@ -37,22 +37,12 @@ from .journal import (
     close_run,
     finish_attempt,
     heartbeat_attempt,
-    query_spec_work,
-    record_spec_work,
     running_attempt,
 )
 from .status import status
 from .versions import finalize
-from .sources import ingest_source, query_source
-from .feedback import authorize_coder_source_query, begin_rework
-from .spec_candidates import (
-    begin_candidate,
-    put_design,
-    put_requirement,
-    put_verification,
-    validate_candidate,
-)
-from .spec_publisher import approve_and_promote
+from .specs import approve_spec, prepare_spec
+from .task_state import record_input, task_status, transition
 
 
 def _input() -> dict[str, Any]:
@@ -67,77 +57,49 @@ def _input() -> dict[str, Any]:
 
 def _validate_request(operation: str, payload: dict[str, Any]) -> None:
     """Reject structurally incomplete requests before they can affect a Run."""
-    if operation != "spec-candidate" or payload.get("action") != "approve":
+    if operation != "spec" or payload.get("action") != "approve":
         return
     missing = [
         field
-        for field in ("candidate_id", "content_hash")
+        for field in ("content_hash",)
         if not isinstance(payload.get(field), str) or not payload[field].strip()
     ]
     if payload.get("confirmed") is not True:
         missing.append("confirmed=true")
     if missing:
         raise SdlcError(
-            "spec-candidate approve 缺少必填字段: " + ", ".join(missing)
+            "spec approve 缺少必填字段: " + ", ".join(missing)
         )
 
 
 def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
     if operation == "status":
         return status(root)
-    if operation == "source-query":
-        requester = payload.get("requester")
-        if requester == "sdlc-coder":
-            authorize_coder_source_query(
-                root,
-                payload["source_id"],
-                payload["anchor"],
-            )
-        elif requester not in {None, "sdlc-main"}:
-            raise SdlcError(
-                f"source-query 不允许 requester={requester}"
-            )
-        return query_source(root, payload["source_id"], payload["anchor"])
-    if operation == "spec-work-query":
-        return query_spec_work(root)
-    if operation == "rework":
-        return begin_rework(root, payload)
-    if operation == "spec-candidate":
+    if operation == "task-state":
         action = payload.get("action")
-        if action == "begin":
-            return begin_candidate(
-                root,
-                title=payload["title"],
-                source_refs=payload["source_refs"],
-            )
-        if action == "put-requirement":
-            return put_requirement(
-                root, payload["candidate_id"], payload["requirement"]
-            )
-        if action == "put-design":
-            return put_design(root, payload["candidate_id"], payload["design"])
-        if action == "put-verification":
-            return put_verification(
-                root, payload["candidate_id"], payload["verification"]
-            )
-        if action == "validate":
-            return validate_candidate(root, payload["candidate_id"])
+        if action == "status":
+            return {"ok": True, "task": task_status(root)}
+        if action == "record-input":
+            return record_input(root, payload["text"])
+        if action == "transition":
+            return transition(root, payload["event"])
+        raise SdlcError(f"不支持的 task-state action: {action}")
+    if operation == "spec":
+        action = payload.get("action")
+        if action == "prepare":
+            return prepare_spec(root, payload["spec"])
         if action == "approve":
-            return approve_and_promote(
+            return approve_spec(
                 root,
-                candidate_id=payload["candidate_id"],
+                payload["spec"],
                 content_hash=payload["content_hash"],
                 confirmed=bool(payload.get("confirmed")),
             )
-        raise SdlcError(f"不支持的 spec-candidate action: {action}")
+        raise SdlcError(f"不支持的 spec action: {action}")
     if operation == "publish":
         kind = payload.get("kind")
         if kind == "tokens":
             return record_tokens(root, **payload["payload"])
-        if kind == "spec-work":
-            return record_spec_work(root, payload["payload"])
-        if kind == "source":
-            return ingest_source(root, payload["payload"])
         raise SdlcError(f"不支持的 publish kind: {kind}")
     if operation == "lifecycle":
         action = payload.get("action")
@@ -273,8 +235,10 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
 
 
 def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
-    if operation == "spec-candidate":
-        return "spec", str(payload.get("action", "candidate"))
+    if operation == "spec":
+        return "spec", str(payload.get("action", "spec"))
+    if operation == "task-state":
+        return "unknown", str(payload.get("action", "task-state"))
     if operation == "publish":
         return "spec", str(payload.get("kind", "publish"))
     if operation == "lifecycle":
@@ -301,8 +265,6 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
 
 def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
     _validate_request(operation, payload)
-    if operation == "rework":
-        return _execute(root, operation, payload)
     if operation in {"task-heartbeat", "task-cancel"}:
         return _execute(root, operation, payload)
     if operation == "task-before":
@@ -343,9 +305,9 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         finish_attempt(root, attempt, state="succeeded", result=result)
         return result
     if operation in {
-        "status", "source-query", "spec-work-query", "path-check", "write-check",
+        "status", "task-state", "spec", "path-check", "write-check",
     } or (
-        operation == "publish" and payload.get("kind") in {"tokens", "spec-work"}
+        operation == "publish" and payload.get("kind") == "tokens"
     ):
         return _execute(root, operation, payload)
     effective_payload = dict(payload)
@@ -391,8 +353,7 @@ def main() -> int:
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
             "task-heartbeat", "task-cancel", "write-check", "path-check", "finalize",
-            "spec-candidate", "source-query", "spec-work-query",
-            "rework",
+            "spec", "task-state",
         ),
     )
     parser.add_argument("--root", help="项目根目录")

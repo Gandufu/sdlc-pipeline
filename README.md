@@ -1,191 +1,78 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.21.0`。
+面向 OpenCode 的轻量交付状态机。AI 负责需求、实现和测试判断；Python Core 只负责 Task 状态、
+正式 Spec、代码/测试门禁和最终固化。
 
-插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
-状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
-未来增加宿主时应复用同一 Core，而不是复制流程。
-
-## 安装与升级
-
-在目标项目根目录执行：
+## 安装
 
 ```powershell
-curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target .
+python scripts/install_project.py --target <project>
 ```
 
-开发阶段升级直接采用当前 Layout v3，不兼容旧布局：
+安装后重启 OpenCode，执行 `/sdlc-init`。
 
-```powershell
-curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target . --force
+## 最终流程
+
+```mermaid
+flowchart LR
+    N["Task Created"] --> S["Spec"]
+    S --> SA["Awaiting Spec Approval"]
+    SA --> C["Code"]
+    C --> R["Human Review"]
+    R -->|实现问题| C
+    R -->|需求问题| S
+    R -->|通过| T["Test"]
+    T -->|实现问题| C
+    T -->|测试实现问题| T
+    T -->|需求或验收错误| S
+    T -->|通过| RA["Awaiting Release Approval"]
+    RA --> F["Finalized"]
+    F -->|发现问题| NT["Linked New Task"]
 ```
 
-`--force` 会删除插件曾管理的旧 `.sdlc-pipeline/runs`、内层 `.opencode`、顶层
-`scripts/templates/rules/references/schemas`、旧合同和 Schema v2 文件。不要用它迁移需要保留的旧运行现场。
-安装器会准备 `@opencode-ai/plugin`、校验发行包 Schema/模板/rule policy，并更新常见
-Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未导入合同的新项目会先展示模板并停止等待
-用户下一轮明确选择；即使只有一个候选也不会自动初始化。
+用户命令：
 
-## 整体流程
+- `/sdlc-init`
+- `/sdlc-spec`
+- `/sdlc-code`
+- `/sdlc-test`
 
-1. `/sdlc-init`
-   选择 registry 中的脚手架，导入 `.sdlc-pipeline/contracts`，执行
-   install → compile → package → start → health → artifact → stop。init 只写 evidence，不创建
-   `docs/sdlc`。
-2. `/sdlc-spec`
-   摄取原型、协议和需求为 Source Markdown；一次只处理阻塞决策；按 R/D/T 分片构建 Candidate。
-   “采用推荐”只保存临时 spec work；validate 后展示 revision/hash；只有“确认发布”才按
-   `candidate_id + content_hash` 发布不可变 baseline。
-3. `/sdlc-code`
-   原生 task 只派发 `sdlc-coder`。coder 不使用固定秒数或 agent 轮次上限，读取一个渐进式 context manifest，
-   在 allowed paths 内只实现业务代码，禁止读取或修改测试脚本。task-after 校验真实 Git diff 和
-   handoff，Core 再执行 compile/package/lint/typecheck、启动与 readiness，并保留预览进程，
-   返回模板声明的访问地址供用户检查当前页面。
-   code 通过后的人工预览/验收缺陷，以及 `/sdlc-test` 的失败，都必须先登记结构化 Feedback：
-   expected、actual、复现步骤、受影响的 R/D/T/AC、Source/evidence 引用和
-   implementation/spec/test_contract 分类。Core 在同一 Run 中记录 `run.rework_started`、停止旧预览并
-   使既有 code/test gate 失效。implementation 重新进入 code；spec/test_contract 必须先发布修订 baseline。
-   首次 code gate 的确定性业务代码失败会保留错误 evidence，并允许一次同 phase 的聚焦 coder retry；第二次
-   相同失败或 Run blocked 必须停止报告。
-4. `/sdlc-test`
-   `sdlc-main` 只派发一次 `sdlc-tester` 子 agent；tester 仅在 Spec selector 声明的路径内编写
-   unit 或 functional 脚本并返回 handoff。plugin 校验 handoff 后，Core 停止 coder 预览并确认端口
-   释放，执行合同 `test_preflight`，再只为声明 `requires_runtime: true` 的测试套件启动运行时并完成
-   readiness。Core 记录每次测试、中间错误和 Delivery Trace；最终成功不能覆盖此前失败 attempt。
-
-Playwright MCP 不是 pipeline 的必需依赖。权威 gate 通过 lifecycle contract 直接调用项目已安装的
-Playwright package/CLI；MCP 仅适合未来可选的探索式浏览器交互，不能代替可重复执行的测试脚本。
-5. 用户确认后由 `sdlc_finalize` 固化版本、摘要、证据 commit 和 tag。
-
-相同输入指纹的成功 attempt 可幂等复用；同一失败连续出现两次时 Run 会进入 `blocked`，防止死循环。
-原始 OpenCode JSONL 应保存在目标项目的同级 evidence 目录，不写进项目工作树。
-
-## OpenCode 技能与命令
-
-项目安装以下技能：
-
-- `sdlc-pipeline`：init/spec/code/test 主流程、审批边界和恢复规则。
-- `extract-project-template`：提取独立脚手架仓库的合同与模板元数据。
-
-用户命令为 `/sdlc-init`、`/sdlc-spec`、`/sdlc-code`、`/sdlc-test`。插件提供的窄工具包括：
+插件工具：
 
 - `sdlc_status`
-- `sdlc_ingest_source` / `sdlc_query_source`
-- `sdlc_save_spec_work` / `sdlc_query_spec_work`
-- `sdlc_begin_rework`
-- `sdlc_begin_candidate`
-- `sdlc_put_requirement` / `sdlc_put_design` / `sdlc_put_verification`
-- `sdlc_validate_candidate` / `sdlc_approve_candidate`
+- `sdlc_task`
+- `sdlc_spec`
 - `sdlc_lifecycle`
 - `sdlc_finalize`
 
-模型不能编辑正式 baseline、构造 idempotency key 或绕过确认边界。
-
-### Source 文件与目录
-
-`sdlc_ingest_source` 同时支持 file 和 directory，并保持原格式。file 指向目录时 Core 会自动识别，
-但推荐显式使用 `source_type=directory`。受控 Source 结构为：
+## 存储
 
 ```text
-sources/SRC-XXXXXXXXXXXX/
-  index.json       # compact Source/anchor 索引
-  manifest.json    # 文件路径、媒体类型、大小和 hash
-  files/           # 原文件或原目录树，扩展名与字节不变
-  projection.md    # 仅在真实 extractor 明确提供文字投影时存在
-```
-
-文本文件的 anchor 直接绑定 `files/` 中原格式文件的字符偏移。PNG、PDF 等二进制使用 asset anchor；
-`sdlc_query_source` 返回 `asset_ref`、媒体类型和 hash，不产生伪造的 `content.md`。正式 Spec baseline
-会连同原格式 Source 文件树一起冻结。
-
-### 人工反馈与返工
-
-人工发现 bug 不是回滚已生成证据，也不是重复执行 `/sdlc-code`。主会话先补齐 Feedback 合同，再调用
-`sdlc_begin_rework`。Core 保留原 code/test evidence，以 `FB-xxxx` 建立独立证据，并把当前 Run 前向推进：
-
-- `implementation`：重新派发 coder，完整重跑 code gate，再由用户执行 `/sdlc-test`。
-- `spec` / `test_contract`：先执行 `/sdlc-spec`，经新的 Candidate hash 和明确发布确认形成修订 baseline，
-  然后重新 code/test。
-- delivery gate 成功后 Feedback 才变为 `resolved`；只通过 code gate 仍是 active。
-- 已 finalize 或结束的 Run 不原地改写历史，缺陷作为新的修复 Task/Run 处理。
-
-## 目录规范（Layout v3）
-
-```text
-.opencode/
-  plugins/                    # 唯一 OpenCode adapter
-  agents/                     # primary sdlc-main + coder/tester subagents
-  commands/                   # 四个用户命令
-  skills/                     # 项目技能
-
 .sdlc-pipeline/
-  installation.json           # 安装版本与 layout_version
-  runtime/
-    scripts/                  # Python Core 与验证脚本
-    schemas/                  # 当前 Schema；无 v2 兼容目录
-    rules/                    # 可选规则和 policy
-    references/               # spec 访谈等运行参考
-    templates/                # registry 与 R/D/T/Decision Markdown 模板
-  contracts/
-    lifecycle.json            # 脚手架生命周期合同
-    scaffold.json             # protected/allowed/extension points
-    active-rules.json         # 本项目启用规则的 hash 索引
-  state/                      # compact JSON 索引；含 publication receipt
-  work/                       # 原格式 Source、Candidate、temporary spec work/context/handoff
-  evidence/                   # init/code/test/error/log 等 Markdown 证据
+  state/task.json
+  work/input.md
+  evidence/task-events.jsonl
+  evidence/records/
 
 docs/sdlc/
-  current.json                # 只指向当前 baseline
-  baselines/<baseline-id>/
-    manifest.json             # compact 索引
-    spec.md                   # 从正式文档生成的评审汇总
-    candidate.md              # Candidate 标题正文
-    decisions/Q-xxxx.md       # 发布前阻塞决策的正式固化
-    sources/<source-id>/       # 已冻结来源 Markdown 与索引
-    requirements/R-xxxx.md
-    designs/D-xxxx.md
-    verification/T-xxxx.md
-  test-results/Vxxxx/
-    index.json                # compact 索引
-    result.md                 # 完整测试结果
-  versions/Vxxxx/
-    manifest.json             # compact 索引
-    details.md                # 完整版本证据
-    summary.md
+  current.json
+  baselines/<content-hash>/
+    manifest.json
+    spec.md
+    requirements/
+    designs/
+    verification/
 ```
 
-约束：
+- `input.md` 只追加用户原始需求、补充和缺陷反馈。
+- prepare 只在 `task.json` 保存待确认的 Spec hash，不保存临时正文。
+- approve 后直接发布正式 baseline。
+- JSON 只保存状态、ID、路径和 hash；需求正文在 Markdown。
+- 外部文件由 OpenCode 按用户授权直接读取，插件不摄取、不复制、不建立 Source。
+- 插件不负责会话恢复；会话上下文属于 OpenCode。
+- Git 保存正式代码和文档历史。
 
-- JSON 索引不得保存 title、prompt、answer、content、text、summary、result、error 等正文；单个索引上限
-  32 KiB，单字符串上限 512 字符。
-- Spec Work 只保存已解决决策和提炼后的事实、假设、风险，不保存聊天全文；validate 将 resolved
-  decision 冻结进 Candidate hash，发布后再清理 Spec Work 和 Candidate。
-- R/D/T 使用 frontmatter 加固定标题文法的原生 Markdown，不嵌入 JSON fenced block。
-- 同一内容只存一次；Candidate revision 引用 artifact Markdown，不复制完整目录。
-- `.sdlc-pipeline/state`、`work`、`evidence` 是本地现场并默认忽略；正式批准的 baseline 和版本文档进入
-  `docs/sdlc`。
-- 不存在 `.sdlc-pipeline/opencode`、`.sdlc-pipeline/runs` 或 `docs/sdlc/current/` 镜像。
-
-## 合同与门禁
-
-`lifecycle.json` 用 argv 数组分别声明 compile、package、start、health/artifact、test_preflight
-和测试套件。v1.1 的每个测试套件声明 `requires_runtime` 与 `selector_patterns`，使 Electron、Web 和
-未来 Spring Boot 都能作为同一 Core 的合同适配器。start 产生的后台进程由 Core 记录 PID 与创建身份
-并统一停止，模板不重复实现 stop/restart 脚本。code gate 执行 compile/package、lint、typecheck、
-启动与 readiness，并保持预览运行；test 阶段由 Core 清理预览端口、执行 tester 产出后的预检，再按
-suite 需求运行 unit 或 Playwright functional 测试。
-
-v1.0 继续支持默认 `functional` selector：省略时按最终 T-id 生成
-`tests/functional/T-xxxx.functional.ts`。v1.1 的 Verification 必须显式提供符合该 suite 路径模式的
-POSIX 项目内 selector；tester 仍只能修改已发布 Spec 声明的精确文件。
-`scaffold.json` 声明关键文件 fingerprint、protected paths、allowed paths 与 extension points。
-Design 只能引用已声明 extension point；实际代码文件由 code 后的 Git diff 推导。
-
-OpenCode 允许用户手动切换主代理或直接 `@` 调用 agent，这不是 permission 能彻底禁止的能力。活动
-Run 中不要切 agent、不要手动 `@` 子代理；团队边界见
-[docs/operational-boundaries.md](docs/operational-boundaries.md)。
-
-## 本地验证
+## 验证
 
 ```powershell
 $env:PYTHONDONTWRITEBYTECODE = "1"
@@ -193,10 +80,3 @@ python -X utf8 -m unittest discover -s tests -v
 node --check .opencode/plugins/sdlc-pipeline.js
 git diff --check
 ```
-
-设计细节见 [Storage Layout v3](docs/design/Storage-Layout-v3.md) 和
-[ADR-0003](docs/adr/0003-storage-layout-v3.md)。
-
-## License
-
-见 [LICENSE](LICENSE)。

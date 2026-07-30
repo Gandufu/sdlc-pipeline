@@ -131,7 +131,6 @@ def _render_requirement(value: dict[str, Any]) -> str:
         "type": "requirement",
         "id": value["id"],
         "feature_id": value["feature_id"],
-        "source_refs": value["source_refs"],
         "decision_ids": value.get("decision_ids", []),
         "supersedes": value.get("supersedes"),
     }
@@ -189,13 +188,6 @@ def _render_requirement(value: dict[str, Any]) -> str:
             "",
             criterion["then"],
             "",
-            "##### Source refs",
-            "",
-            *_bullets([
-                f"{item['source_id']}#{item['anchor']}"
-                for item in criterion["source_refs"]
-            ]),
-            "",
         ])
     return "\n".join(lines)
 
@@ -221,14 +213,13 @@ def _parse_requirement(text: str) -> dict[str, Any]:
         if identifier != expected_identifier:
             raise SdlcError(f"非法 Acceptance Criteria 标题: {identifier}")
         fields = _split_named_headings(
-            content, 5, ["Given", "When", "Then", "Source refs"]
+            content, 5, ["Given", "When", "Then"]
         )
         criteria.append({
             "id": identifier,
             "given": fields["Given"],
             "when": fields["When"],
             "then": fields["Then"],
-            "source_refs": _parse_source_ref_lines(fields["Source refs"]),
         })
     return {
         "schema_version": metadata["schema_version"],
@@ -239,7 +230,6 @@ def _parse_requirement(text: str) -> dict[str, Any]:
         "actor": sections["角色"],
         "scope": _parse_bullets(sections["范围"]),
         "non_goals": _parse_bullets(sections["非范围"]),
-        "source_refs": metadata["source_refs"],
         "decision_ids": metadata.get("decision_ids", []),
         "main_flow": _parse_numbered(sections["主流程"]),
         "alternate_flows": alternate_flows,
@@ -308,7 +298,6 @@ def _render_design(value: dict[str, Any]) -> str:
                     "",
                     f"- 类型：{field['type']}",
                     f"- 必填：{'true' if field['required'] else 'false'}",
-                    f"- 来源：{field.get('source_ref') or _NONE}",
                     "",
                 ])
     else:
@@ -358,7 +347,7 @@ def _parse_design(text: str) -> dict[str, Any]:
             for field_name, field_content in _split_subsections(content, 4):
                 lines = [line for line in field_content.splitlines() if line]
                 values = _parse_prefixed_lines(
-                    lines, {"类型": "type", "必填": "required", "来源": "source_ref"}
+                    lines, {"类型": "type", "必填": "required"}
                 )
                 if values["required"] not in {"true", "false"}:
                     raise SdlcError("数据契约字段的必填值只能是 true/false")
@@ -366,9 +355,6 @@ def _parse_design(text: str) -> dict[str, Any]:
                     "name": field_name,
                     "type": values["type"],
                     "required": values["required"] == "true",
-                    "source_ref": (
-                        None if values["source_ref"] == _NONE else values["source_ref"]
-                    ),
                 })
             data_contracts.append({"name": name, "fields": fields})
     return {

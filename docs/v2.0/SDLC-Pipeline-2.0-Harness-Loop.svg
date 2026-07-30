@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1700" height="900" viewBox="0 0 1700 900">
+  <defs>
+    <marker id="a" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#172b4d"/></marker>
+    <marker id="ar" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#de350b"/></marker>
+    <marker id="ag" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#00875a"/></marker>
+    <style>
+      text{font-family:"Microsoft YaHei","Noto Sans CJK SC",sans-serif;fill:#172b4d}
+      .title{font-size:30px;font-weight:700}.sub{font-size:15px;fill:#5e6c84}.label{font-size:15px;font-weight:700;text-anchor:middle}
+      .small{font-size:13px;fill:#5e6c84;text-anchor:middle}.box{stroke-width:2;rx:12}.edge{fill:none;stroke-width:2.4;marker-end:url(#a)}
+    </style>
+  </defs>
+  <rect width="1700" height="900" fill="#fff"/>
+  <text x="50" y="62" class="title">验证反馈闭环：新证据驱动下一轮，而不是无差别重试</text>
+  <text x="50" y="94" class="sub">每次尝试都必须携带新的失败增量，并受相同指纹与总预算限制</text>
+
+  <rect x="70" y="210" width="220" height="90" class="box" fill="#deebff" stroke="#0052cc"/>
+  <rect x="350" y="210" width="240" height="90" class="box" fill="#eae6ff" stroke="#6554c0"/>
+  <rect x="650" y="210" width="240" height="90" class="box" fill="#fffae6" stroke="#ff991f"/>
+  <rect x="950" y="210" width="250" height="90" class="box" fill="#e6fcff" stroke="#00a3bf"/>
+  <polygon points="1360,195 1440,255 1360,315 1280,255" fill="#fff" stroke="#172b4d" stroke-width="2"/>
+  <text x="180" y="250" class="label">目标 + 当前事实</text>
+  <text x="470" y="247" class="label">上下文编译器</text><text x="470" y="274" class="small">只取当前动作所需事实</text>
+  <text x="770" y="244" class="label"><tspan x="770">智能体修改</tspan><tspan x="770" dy="23">提案 / 代码 / 测试</tspan></text>
+  <text x="1075" y="247" class="label">验证门禁</text><text x="1075" y="274" class="small">框架包 + 内核执行器</text>
+  <text x="1360" y="250" class="label"><tspan x="1360">确定性</tspan><tspan x="1360" dy="22">裁决</tspan></text>
+
+  <rect x="1330" y="430" width="220" height="100" class="box" fill="#e3fcef" stroke="#00875a"/>
+  <rect x="980" y="430" width="220" height="100" class="box" fill="#ffebe6" stroke="#de350b"/>
+  <text x="1440" y="468" class="label">通过</text><text x="1440" y="495" class="small">固化证据 · 推进状态</text>
+  <text x="1090" y="488" class="label" fill="#bf2600">失败路由器</text>
+
+  <g fill="#fff" stroke="#de350b" stroke-width="2">
+    <rect x="680" y="400" width="200" height="55" rx="10"/><rect x="680" y="480" width="200" height="55" rx="10"/>
+    <rect x="420" y="400" width="200" height="55" rx="10"/>
+  </g>
+  <rect x="370" y="500" width="250" height="75" rx="10" fill="#ffebe6" stroke="#de350b" stroke-width="2"/>
+  <text x="780" y="434" class="label">产品问题 → 代码</text><text x="780" y="514" class="label">规格问题 → 提案</text>
+  <text x="520" y="434" class="label">测试契约问题 → 测试</text>
+  <text x="495" y="530" class="label" fill="#bf2600"><tspan x="495">环境 / 策略 / 预算</tspan><tspan x="495" dy="22">→ 阻塞并转人工</tspan></text>
+
+  <path d="M290 255 H350" class="edge"/><path d="M590 255 H650" class="edge"/><path d="M890 255 H950" class="edge"/><path d="M1200 255 H1280" class="edge"/>
+  <path d="M1360 315 V430" class="edge" stroke="#00875a" marker-end="url(#ag)"/><text x="1400" y="375" class="small">通过</text>
+  <path d="M1280 255 H1240 V480 H1200" class="edge" stroke="#de350b" marker-end="url(#ar)"/><text x="1235" y="390" class="small" fill="#bf2600">失败</text>
+  <path d="M980 460 H880" class="edge" stroke="#de350b" marker-end="url(#ar)"/>
+  <path d="M980 490 H920 V508 H880" class="edge" stroke="#de350b" marker-end="url(#ar)"/>
+  <path d="M980 475 H920 V370 H650 V427 H620" class="edge" stroke="#de350b" marker-end="url(#ar)"/>
+  <path d="M980 510 H930 V610 H650 V538 H620" class="edge" stroke="#de350b" marker-end="url(#ar)"/>
+  <path d="M780 400 V350 H770 V300" class="edge" stroke="#ff991f" stroke-dasharray="7 6"/><text x="850" y="345" class="small">新的失败增量</text>
+  <path d="M680 508 H640 V340 H470 V300" class="edge" stroke="#ff991f" stroke-dasharray="7 6"/>
+
+  <rect x="70" y="650" width="1480" height="90" rx="14" fill="#f4f5f7" stroke="#7a869a" stroke-width="2"/>
+  <text x="810" y="687" class="label">下一次尝试的准入条件</text>
+  <text x="810" y="717" class="sub" text-anchor="middle">新失败、新堆栈、新定位、新环境状态或新假设验证；相同指纹重复且无新证据时停止。</text>
+  <text x="50" y="855" class="sub">可编辑源文件：SDLC-Pipeline-2.0-Architecture.drawio · 第 4 页</text>
+</svg>

@@ -14,7 +14,6 @@ from .records import (
     write_markdown_record,
 )
 from .schema_validation import validate_schema_instance
-from .sources import load_indexed_source
 
 
 def lifecycle_test_commands(root: Path) -> dict[str, dict[str, Any]]:
@@ -137,22 +136,6 @@ def load_current_spec(root: Path) -> dict[str, Any]:
         item["id"]: item["path"]
         for item in scaffold.get("extension_points", [])
     }
-    source_ids = sorted({
-        ref["source_id"]
-        for requirement in requirements
-        for ref in requirement["source_refs"]
-    })
-    source_indexes = {
-        item["source_id"]: baseline / item["index_ref"]
-        for item in manifest.get("sources", [])
-    }
-    missing_sources = sorted(set(source_ids) - set(source_indexes))
-    if missing_sources:
-        raise SdlcError(f"Spec baseline 缺少来源: {missing_sources}")
-    sources = [
-        load_indexed_source(root, source_indexes[source_id])
-        for source_id in source_ids
-    ]
     runtime_requirements = [
         {
             **item,
@@ -208,7 +191,7 @@ def load_current_spec(root: Path) -> dict[str, Any]:
         "baseline_id": manifest["baseline_id"],
         "feature_map": feature_map,
         "requirements": {
-            "source_inputs": sources,
+            "source_inputs": [],
             "analysis": {
                 "confirmed_facts": [],
                 "impact_scope": sorted({
