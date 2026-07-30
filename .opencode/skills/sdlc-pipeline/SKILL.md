@@ -38,6 +38,9 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
 硬事实交给 Core：Schema、anchor、allowed/protected path、Git evidence、PID identity、policy、
 原子产物、失败熔断和最终交付验证。
 
+file/directory 来源保持原格式：受控存储复制原字节和相对目录树，`manifest.json` 只做索引。文本 anchor
+返回受限正文；asset anchor 返回 `asset_ref`。不得把 PNG/PDF 等二进制解码成 Markdown 或伪造内容。
+
 code gate 通过后发现缺陷时，不直接重复派发 coder，也不做 Git 回滚。主会话先收集 expected、actual、
 复现步骤、受影响 R/D/T/AC、Source 和 evidence，调用 `sdlc_begin_rework`。implementation 在同一 Run
 中重新完成 code/test；spec 或 test_contract 先发布修订 baseline。只有重新通过 delivery gate 后

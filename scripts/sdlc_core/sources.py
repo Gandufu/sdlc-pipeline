@@ -1,142 +1,62 @@
 from __future__ import annotations
 
 import hashlib
+import mimetypes
+import os
 import shutil
 from pathlib import Path
 from typing import Any
 
-from .common import SdlcError, atomic_write, sha256_file, utc_now
-from .layout import evidence_root, relative_to_project, work_root
+from .common import (
+    SdlcError,
+    atomic_write,
+    read_json,
+    sha256_file,
+    sha256_json,
+    utc_now,
+    write_json,
+)
+from .layout import relative_to_project, work_root
 from .records import read_compact_index, write_compact_index
 
 
 MAX_EXTERNAL_SOURCE_BYTES = 10 * 1024 * 1024
+MAX_DIRECTORY_SOURCE_BYTES = 32 * 1024 * 1024
+MAX_DIRECTORY_SOURCE_FILES = 64
+MAX_DIRECTORY_SOURCE_ANCHORS = 128
 MAX_SOURCE_SEGMENT_CHARS = 8_000
-_SOURCE_BEGIN = "<!-- sdlc-source:begin -->"
-_SOURCE_END = "<!-- sdlc-source:end -->"
+DIRECTORY_SOURCE_MEDIA_TYPE = "application/vnd.sdlc.source-directory"
+TEXT_SOURCE_SUFFIXES = {
+    ".conf", ".css", ".csv", ".go", ".graphql", ".html", ".ini", ".java",
+    ".js", ".json", ".jsx", ".kt", ".md", ".mjs", ".ps1", ".py", ".rs",
+    ".sh", ".sql", ".svelte", ".svg", ".toml", ".ts", ".tsv", ".tsx",
+    ".txt", ".vue", ".xml", ".yaml", ".yml",
+}
 
 
 def ingest_source(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
-    """Persist source prose once in Markdown and return only a bounded receipt."""
-    kind = payload.get("kind", "inline")
+    """Copy a source without changing its format and return a bounded receipt."""
+    requested_kind = str(payload.get("kind", "inline")).strip() or "inline"
     source = str(payload.get("source", "")).strip()
-    media_type = str(payload.get("media_type", "text/plain")).strip()
-    extractor = payload.get("extractor") or {
-        "name": "sdlc-inline",
-        "version": "1.0",
-    }
-    content = payload.get("content")
     uri = payload.get("uri")
-    asset: dict[str, Any] | None = None
-    if kind == "file" and (not isinstance(uri, str) or not uri.strip()) and source:
-        uri = source
-        source = ""
-    if kind == "file":
-        if not isinstance(uri, str) or not uri.strip():
-            raise SdlcError(
-                "file source 必须提供 uri（项目内路径，或显式允许的外部路径）"
-            )
-        candidate = Path(uri).expanduser()
-        if not candidate.is_absolute():
-            candidate = root / candidate
-        candidate = candidate.resolve()
-        if not candidate.is_file():
-            raise SdlcError(f"来源文件不存在: {uri}")
-        try:
-            project_relative = candidate.relative_to(root.resolve())
-            source = source or project_relative.as_posix()
-        except ValueError as exc:
-            if payload.get("allow_external_copy") is not True:
-                raise SdlcError(
-                    f"来源文件越出项目: {uri}；受控摄取必须显式设置 "
-                    "allow_external_copy=true"
-                ) from exc
-            source = source or str(candidate)
-        size = candidate.stat().st_size
-        if size > MAX_EXTERNAL_SOURCE_BYTES:
-            raise SdlcError(
-                f"外部来源文件超过 {MAX_EXTERNAL_SOURCE_BYTES} bytes: {uri}"
-            )
-        binary = (
-            not media_type.startswith("text/")
-            and candidate.suffix.lower()
-            not in {".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".tsv", ".html", ".css"}
+    if requested_kind in {"file", "directory"}:
+        if (not isinstance(uri, str) or not uri.strip()) and source:
+            uri = source
+            source = ""
+        return _ingest_path_source(
+            root,
+            requested_kind=requested_kind,
+            uri=uri,
+            source=source,
+            payload=payload,
         )
-        if binary:
-            blob_sha = sha256_file(candidate)
-            blob = evidence_root(root) / "blobs" / f"{blob_sha}{candidate.suffix.lower()}"
-            blob.parent.mkdir(parents=True, exist_ok=True)
-            if not blob.is_file() or sha256_file(blob) != blob_sha:
-                shutil.copy2(candidate, blob)
-            asset = {
-                "original_uri": str(candidate),
-                "blob_ref": relative_to_project(root, blob),
-                "sha256": blob_sha,
-                "size": size,
-            }
-            if not isinstance(content, str) or not content.strip():
-                extractor = {
-                    "name": "sdlc-binary-metadata",
-                    "version": "1.0",
-                }
-                content = _binary_asset_metadata(
-                    candidate,
-                    media_type=media_type,
-                    sha256=blob_sha,
-                    size=size,
-                )
-        else:
-            content = candidate.read_text(encoding="utf-8", errors="replace")
-            asset = {
-                "original_uri": str(candidate),
-                "size": size,
-            }
-    if not isinstance(content, str) or not content.strip():
-        raise SdlcError("source content 必须是非空文本")
-    if not source:
-        source = str(uri or "inline")
-
-    raw_segments = payload.get("segments")
-    segments = (
-        _default_segment_spans(content)
-        if raw_segments is None
-        else _locate_segment_spans(content, raw_segments)
+    return _ingest_text_source(
+        root,
+        kind=requested_kind,
+        source=source,
+        uri=uri,
+        payload=payload,
     )
-    content_sha = _sha256_text(content)
-    source_id = f"SRC-{content_sha[:12].upper()}"
-    directory = work_root(root) / "sources" / source_id
-    content_path = directory / "content.md"
-    index_path = directory / "index.json"
-    rendered = (
-        f"# Source {source_id}\n\n"
-        f"- Kind: `{kind}`\n"
-        f"- Media type: `{media_type}`\n"
-        f"- SHA-256: `{content_sha}`\n\n"
-        f"{_SOURCE_BEGIN}\n{content}\n{_SOURCE_END}\n"
-    )
-    if content_path.is_file():
-        existing_content = _read_source_content(content_path)
-        if _sha256_text(existing_content) != content_sha:
-            raise SdlcError(f"Source ID 冲突: {source_id}")
-    else:
-        atomic_write(content_path, rendered)
-    index = {
-        "schema_version": "3.0",
-        "source_id": source_id,
-        "state": "available",
-        "kind": kind,
-        "source_ref": source,
-        "media_type": media_type,
-        "content_ref": relative_to_project(root, content_path),
-        "sha256": content_sha,
-        "extractor": extractor,
-        "anchors": segments,
-        "ingested_at": utc_now(),
-    }
-    if asset is not None:
-        index["asset"] = asset
-    write_compact_index(index_path, index)
-    return _source_receipt(root, index, content)
 
 
 def validate_source_envelopes(root: Path, sources: list[dict[str, Any]]) -> None:
@@ -146,13 +66,20 @@ def validate_source_envelopes(root: Path, sources: list[dict[str, Any]]) -> None
         if not isinstance(identifier, str) or identifier in seen:
             raise SdlcError(f"重复或非法 source: {identifier}")
         seen.add(identifier)
-        content = source.get("content")
-        if not isinstance(content, str) or _sha256_text(content) != source.get("sha256"):
-            raise SdlcError(f"{identifier} content SHA-256 不匹配")
         for segment in source.get("segments", []):
-            if _sha256_text(segment["text"]) != segment["sha256"]:
+            if segment.get("kind") == "text":
+                text = segment.get("text")
+                if (
+                    not isinstance(text, str)
+                    or _sha256_text(text) != segment.get("sha256")
+                ):
+                    raise SdlcError(
+                        f"{identifier} segment {segment.get('anchor')} "
+                        "SHA-256 不匹配"
+                    )
+            elif segment.get("kind") != "asset":
                 raise SdlcError(
-                    f"{identifier} segment {segment['anchor']} SHA-256 不匹配"
+                    f"{identifier} segment {segment.get('anchor')} 类型非法"
                 )
 
 
@@ -164,39 +91,82 @@ def source_index(sources: list[dict[str, Any]]) -> dict[str, set[str]]:
 
 
 def load_source(root: Path, source_id: str) -> dict[str, Any]:
-    directory = work_root(root) / "sources" / source_id
-    index_path = directory / "index.json"
-    index = read_compact_index(index_path, required=False)
-    if index is None:
+    index_path = work_root(root) / "sources" / source_id / "index.json"
+    if not index_path.is_file():
         raise SdlcError(f"未知 source: {source_id}")
     return load_indexed_source(root, index_path)
 
 
 def load_indexed_source(root: Path, index_path: Path) -> dict[str, Any]:
-    """Load a source through its compact index, from work or a formal baseline."""
+    """Load and verify a source from work storage or a formal baseline."""
     index = read_compact_index(index_path)
     source_id = index["source_id"]
-    content_path = root / index["content_ref"]
-    content = _read_source_content(content_path)
-    if _sha256_text(content) != index["sha256"]:
-        raise SdlcError(f"{source_id} content SHA-256 不匹配")
-    segments = []
+    source_root = index_path.parent
+    manifest_path = source_root / index["manifest_ref"]
+    if (
+        not manifest_path.is_file()
+        or sha256_file(manifest_path) != index["manifest_sha256"]
+    ):
+        raise SdlcError(f"{source_id} manifest 缺失或 SHA-256 不匹配")
+    manifest = read_json(manifest_path)
+    entries = {
+        item["path"]: item
+        for item in manifest.get("files", [])
+    }
+    for entry in entries.values():
+        controlled = source_root / entry["file_ref"]
+        if (
+            not controlled.is_file()
+            or sha256_file(controlled) != entry["sha256"]
+        ):
+            raise SdlcError(
+                f"{source_id} 原始来源缺失或 SHA-256 不匹配: "
+                f"{entry['path']}"
+            )
+
+    segments: list[dict[str, Any]] = []
     for item in index["anchors"]:
-        text = content[item["start"]:item["end"]]
-        if _sha256_text(text) != item["sha256"]:
-            raise SdlcError(f"{source_id} anchor {item['anchor']} SHA-256 不匹配")
+        controlled = source_root / item["file_ref"]
+        if item["kind"] == "asset":
+            segments.append({
+                "anchor": item["anchor"],
+                "kind": "asset",
+                "media_type": item["media_type"],
+                "sha256": item["sha256"],
+                "size": item["size"],
+                "asset_ref": relative_to_project(root, controlled),
+            })
+            continue
+        text = controlled.read_text(encoding="utf-8", errors="replace")
+        selected = text[item["start"]:item["end"]]
+        if _sha256_text(selected) != item["sha256"]:
+            raise SdlcError(
+                f"{source_id} anchor {item['anchor']} SHA-256 不匹配"
+            )
         segments.append({
             "anchor": item["anchor"],
-            "text": text,
+            "kind": "text",
+            "text": selected,
             "sha256": item["sha256"],
+            "content_ref": relative_to_project(root, controlled),
         })
-    source = {
+    source: dict[str, Any] = {
         **index,
         "source": index["source_ref"],
-        "uri": index["content_ref"],
+        "uri": relative_to_project(root, source_root),
         "segments": segments,
-        "content": content,
+        "manifest": manifest,
     }
+    content_ref = index.get("content_ref")
+    if isinstance(content_ref, str):
+        source["content"] = (
+            source_root / content_ref
+        ).read_text(encoding="utf-8", errors="replace")
+    projection_ref = index.get("projection_ref")
+    if isinstance(projection_ref, str):
+        source["content"] = (
+            source_root / projection_ref
+        ).read_text(encoding="utf-8", errors="replace")
     validate_source_envelopes(root, [source])
     return source
 
@@ -215,66 +185,537 @@ def query_source(
     )
     if segment is None:
         raise SdlcError(f"未知来源 anchor: {source_id}#{anchor}")
+    if segment["kind"] == "asset":
+        return {
+            "ok": True,
+            "source_id": source_id,
+            "anchor": anchor,
+            "kind": "asset",
+            "media_type": segment["media_type"],
+            "sha256": segment["sha256"],
+            "size": segment["size"],
+            "asset_ref": segment["asset_ref"],
+            "canonical_path": segment["asset_ref"],
+            "next_action": (
+                "这是保持原格式的受控二进制资产；使用支持该媒体类型的"
+                "视觉或文档工具读取 asset_ref，不得把二进制解码为文本。"
+            ),
+        }
     text = segment["text"]
     return {
         "ok": True,
         "source_id": source_id,
         "anchor": anchor,
+        "kind": "text",
         "sha256": segment["sha256"],
         "text": text[:max_chars],
         "truncated": len(text) > max_chars,
-        "canonical_path": source["content_ref"],
+        "canonical_path": segment["content_ref"],
     }
 
 
-def _source_receipt(
-    root: Path, index: dict[str, Any], content: str
+def _ingest_path_source(
+    root: Path,
+    *,
+    requested_kind: str,
+    uri: Any,
+    source: str,
+    payload: dict[str, Any],
 ) -> dict[str, Any]:
-    anchors = []
-    for item in index["anchors"]:
-        text = content[item["start"]:item["end"]]
-        anchors.append({
-            "anchor": item["anchor"],
-            "characters": len(text),
+    if not isinstance(uri, str) or not uri.strip():
+        raise SdlcError(
+            "file/directory source 必须提供 uri"
+            "（项目内路径，或显式允许的外部路径）"
+        )
+    candidate = Path(uri).expanduser()
+    if not candidate.is_absolute():
+        candidate = root / candidate
+    candidate = candidate.resolve()
+    if not candidate.exists():
+        raise SdlcError(f"来源路径不存在: {uri}")
+    if not candidate.is_file() and not candidate.is_dir():
+        raise SdlcError(f"来源路径既不是文件也不是目录: {uri}")
+    if requested_kind == "directory" and candidate.is_file():
+        raise SdlcError(f"directory source 要求目录路径，实际为文件: {uri}")
+    source = _authorize_source_path(
+        root,
+        candidate,
+        source=source,
+        original_uri=uri,
+        allow_external_copy=payload.get("allow_external_copy") is True,
+    )
+    if candidate.is_dir():
+        descriptors = _scan_directory(candidate)
+        kind = "directory"
+        media_type = DIRECTORY_SOURCE_MEDIA_TYPE
+    else:
+        descriptors = [
+            _file_descriptor(
+                candidate,
+                candidate.name,
+                declared_media_type=payload.get("media_type"),
+            )
+        ]
+        kind = "file"
+        media_type = descriptors[0]["media_type"]
+    projection = _projection(payload, descriptors, kind=kind)
+    identity = [
+        {
+            "path": item["path"],
             "sha256": item["sha256"],
-            "preview": text[:160],
+            "size": item["size"],
+        }
+        for item in descriptors
+    ]
+    if projection is not None:
+        identity.append({
+            "path": "projection.md",
+            "sha256": _sha256_text(projection["content"]),
+            "size": len(projection["content"].encode("utf-8")),
         })
-    return {
-        "ok": True,
-        "source_id": index["source_id"],
-        "kind": index["kind"],
-        "source": index["source_ref"],
-        "media_type": index["media_type"],
-        "sha256": index["sha256"],
+    source_sha = sha256_json(identity)
+    source_id = f"SRC-{source_sha[:12].upper()}"
+    source_root = work_root(root) / "sources" / source_id
+    manifest, anchors = _copy_source_files(
+        source_root,
+        descriptors,
+        directory_kind=kind == "directory",
+    )
+    projection_ref = None
+    if projection is not None:
+        projection_ref = "projection.md"
+        projection_path = source_root / projection_ref
+        atomic_write(projection_path, projection["content"])
+        projection_spans = _text_spans(
+            projection["content"],
+            raw_segments=projection["segments"],
+            anchor_prefix="projection",
+        )
+        anchors.extend([
+            {
+                **item,
+                "kind": "text",
+                "file_ref": projection_ref,
+            }
+            for item in projection_spans
+        ])
+        manifest["projection"] = {
+            "file_ref": projection_ref,
+            "media_type": "text/markdown",
+            "sha256": sha256_file(projection_path),
+            "size": projection_path.stat().st_size,
+        }
+    return _persist_source(
+        root,
+        source_root,
+        source_id=source_id,
+        kind=kind,
+        source=source,
+        media_type=media_type,
+        source_sha=source_sha,
+        manifest=manifest,
+        anchors=anchors,
+        extractor=(
+            projection["extractor"]
+            if projection is not None
+            else {
+                "name": (
+                    "sdlc-directory-copy"
+                    if kind == "directory"
+                    else "sdlc-file-copy"
+                ),
+                "version": "1.0",
+            }
+        ),
+        content_ref=(
+            descriptors[0]["controlled_ref"]
+            if kind == "file" and descriptors[0]["kind"] == "text"
+            else None
+        ),
+        asset_ref=(
+            descriptors[0]["controlled_ref"]
+            if kind == "file" and descriptors[0]["kind"] == "asset"
+            else None
+        ),
+        projection_ref=projection_ref,
+        bundle=(
+            {
+                "root_name": candidate.name,
+                "file_count": len(descriptors),
+                "total_bytes": sum(item["size"] for item in descriptors),
+                "tree_sha256": source_sha,
+            }
+            if kind == "directory"
+            else None
+        ),
+    )
+
+
+def _ingest_text_source(
+    root: Path,
+    *,
+    kind: str,
+    source: str,
+    uri: Any,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    content = payload.get("content")
+    if not isinstance(content, str) or not content.strip():
+        raise SdlcError("source content 必须是非空文本")
+    media_type = str(payload.get("media_type") or "text/markdown").strip()
+    suffix = _text_suffix(media_type)
+    file_name = f"content{suffix}"
+    source_sha = sha256_json([{
+        "path": file_name,
+        "sha256": _sha256_text(content),
+        "size": len(content.encode("utf-8")),
+    }])
+    source_id = f"SRC-{source_sha[:12].upper()}"
+    source_root = work_root(root) / "sources" / source_id
+    controlled_ref = file_name
+    controlled = source_root / controlled_ref
+    atomic_write(controlled, content)
+    spans = _text_spans(
+        content,
+        raw_segments=payload.get("segments"),
+        anchor_prefix="text",
+    )
+    anchors = [
+        {
+            **item,
+            "kind": "text",
+            "file_ref": controlled_ref,
+        }
+        for item in spans
+    ]
+    manifest = {
+        "schema_version": "1.0",
+        "files": [{
+            "path": file_name,
+            "file_ref": controlled_ref,
+            "kind": "text",
+            "media_type": media_type,
+            "sha256": sha256_file(controlled),
+            "size": controlled.stat().st_size,
+        }],
+    }
+    return _persist_source(
+        root,
+        source_root,
+        source_id=source_id,
+        kind=kind,
+        source=source or str(uri or "inline"),
+        media_type=media_type,
+        source_sha=source_sha,
+        manifest=manifest,
+        anchors=anchors,
+        extractor=payload.get("extractor") or {
+            "name": "sdlc-inline",
+            "version": "1.0",
+        },
+        content_ref=controlled_ref,
+    )
+
+
+def _persist_source(
+    root: Path,
+    source_root: Path,
+    *,
+    source_id: str,
+    kind: str,
+    source: str,
+    media_type: str,
+    source_sha: str,
+    manifest: dict[str, Any],
+    anchors: list[dict[str, Any]],
+    extractor: dict[str, Any],
+    content_ref: str | None = None,
+    asset_ref: str | None = None,
+    projection_ref: str | None = None,
+    bundle: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if len(anchors) > MAX_DIRECTORY_SOURCE_ANCHORS:
+        raise SdlcError(
+            f"来源 anchor 数超过 {MAX_DIRECTORY_SOURCE_ANCHORS}"
+        )
+    manifest_path = source_root / "manifest.json"
+    write_json(manifest_path, manifest)
+    index: dict[str, Any] = {
+        "schema_version": "3.0",
+        "source_id": source_id,
+        "state": "available",
+        "kind": kind,
+        "source_ref": source,
+        "media_type": media_type,
+        "sha256": source_sha,
+        "manifest_ref": "manifest.json",
+        "manifest_sha256": sha256_file(manifest_path),
+        "extractor": extractor,
         "anchors": anchors,
-        "canonical_path": relative_to_project(
-            root, work_root(root) / "sources" / index["source_id"] / "index.json"
-        ),
-        "content_ref": index["content_ref"],
-        "asset": index.get("asset"),
-        "extractor": index["extractor"],
-        "next_action": (
-            "Use only source_id/anchor. Query sdlc_query_source for bounded text; "
-            "do not read the original external path."
-        ),
+        "ingested_at": utc_now(),
+    }
+    if content_ref is not None:
+        index["content_ref"] = content_ref
+    if asset_ref is not None:
+        index["asset_ref"] = asset_ref
+    if projection_ref is not None:
+        index["projection_ref"] = projection_ref
+    if bundle is not None:
+        index["bundle"] = bundle
+    index_path = source_root / "index.json"
+    write_compact_index(index_path, index)
+    return _source_receipt(root, index_path)
+
+
+def _copy_source_files(
+    source_root: Path,
+    descriptors: list[dict[str, Any]],
+    *,
+    directory_kind: bool,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    manifest_files: list[dict[str, Any]] = []
+    anchors: list[dict[str, Any]] = []
+    for descriptor in descriptors:
+        controlled_ref = (
+            f"files/{descriptor['path']}"
+            if directory_kind
+            else f"files/{Path(descriptor['path']).name}"
+        )
+        descriptor["controlled_ref"] = controlled_ref
+        controlled = source_root / controlled_ref
+        controlled.parent.mkdir(parents=True, exist_ok=True)
+        if controlled.is_file():
+            if sha256_file(controlled) != descriptor["sha256"]:
+                raise SdlcError(
+                    f"Source ID 冲突，受控原文件 hash 不匹配: "
+                    f"{descriptor['path']}"
+                )
+        else:
+            shutil.copy2(descriptor["original_path"], controlled)
+        entry = {
+            "path": descriptor["path"],
+            "file_ref": controlled_ref,
+            "kind": descriptor["kind"],
+            "media_type": descriptor["media_type"],
+            "sha256": descriptor["sha256"],
+            "size": descriptor["size"],
+        }
+        manifest_files.append(entry)
+        if descriptor["kind"] == "asset":
+            anchors.append({
+                "anchor": f"asset:{_anchor_path(descriptor['path'])}",
+                "kind": "asset",
+                "file_ref": controlled_ref,
+                "media_type": descriptor["media_type"],
+                "sha256": descriptor["sha256"],
+                "size": descriptor["size"],
+            })
+            continue
+        text = controlled.read_text(encoding="utf-8", errors="replace")
+        prefix = (
+            f"file:{_anchor_path(descriptor['path'])}"
+            if directory_kind
+            else "text"
+        )
+        anchors.extend([
+            {
+                **item,
+                "kind": "text",
+                "file_ref": controlled_ref,
+            }
+            for item in _text_spans(
+                text,
+                raw_segments=None,
+                anchor_prefix=prefix,
+            )
+        ])
+    return {
+        "schema_version": "1.0",
+        "files": manifest_files,
+    }, anchors
+
+
+def _scan_directory(directory: Path) -> list[dict[str, Any]]:
+    files: list[Path] = []
+
+    def visit(current: Path) -> None:
+        with os.scandir(current) as entries:
+            children = sorted(entries, key=lambda item: item.name)
+        for entry in children:
+            path = Path(entry.path)
+            relative = path.relative_to(directory).as_posix()
+            if entry.is_symlink() or _is_link(path):
+                raise SdlcError(
+                    f"目录来源禁止符号链接或 junction: {relative}"
+                )
+            if entry.is_dir(follow_symlinks=False):
+                visit(path)
+                continue
+            if entry.is_file(follow_symlinks=False):
+                files.append(path)
+                continue
+            raise SdlcError(f"目录来源包含不支持的文件类型: {relative}")
+
+    visit(directory)
+    files.sort(key=lambda item: item.relative_to(directory).as_posix())
+    if not files:
+        raise SdlcError(f"目录来源不包含文件: {directory}")
+    if len(files) > MAX_DIRECTORY_SOURCE_FILES:
+        raise SdlcError(
+            f"目录来源文件数超过 {MAX_DIRECTORY_SOURCE_FILES}: {directory}"
+        )
+    total_bytes = sum(path.stat().st_size for path in files)
+    if total_bytes > MAX_DIRECTORY_SOURCE_BYTES:
+        raise SdlcError(
+            f"目录来源总大小超过 {MAX_DIRECTORY_SOURCE_BYTES} bytes: "
+            f"{directory}"
+        )
+    return [
+        _file_descriptor(
+            path,
+            path.relative_to(directory).as_posix(),
+            declared_media_type=None,
+        )
+        for path in files
+    ]
+
+
+def _file_descriptor(
+    path: Path,
+    relative_path: str,
+    *,
+    declared_media_type: Any,
+) -> dict[str, Any]:
+    size = path.stat().st_size
+    if size > MAX_EXTERNAL_SOURCE_BYTES:
+        raise SdlcError(
+            f"来源单文件超过 {MAX_EXTERNAL_SOURCE_BYTES} bytes: "
+            f"{relative_path}"
+        )
+    if len(relative_path) > 240:
+        raise SdlcError(f"来源相对路径超过 240 chars: {relative_path}")
+    media_type = _media_type(path, declared_media_type)
+    return {
+        "path": relative_path,
+        "original_path": path,
+        "kind": "text" if _is_text_source(path, media_type) else "asset",
+        "media_type": media_type,
+        "sha256": sha256_file(path),
+        "size": size,
     }
 
 
-def _binary_asset_metadata(
+def _projection(
+    payload: dict[str, Any],
+    descriptors: list[dict[str, Any]],
+    *,
+    kind: str,
+) -> dict[str, Any] | None:
+    content = payload.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return None
+    if kind == "directory":
+        raise SdlcError("directory source 不接受单一 content projection")
+    if descriptors[0]["kind"] != "asset":
+        raise SdlcError("文本文件必须使用原文件正文，不能用 content 覆盖")
+    return {
+        "content": content,
+        "segments": payload.get("segments"),
+        "extractor": payload.get("extractor") or {
+            "name": "sdlc-controlled-projection",
+            "version": "1.0",
+        },
+    }
+
+
+def _authorize_source_path(
+    root: Path,
     candidate: Path,
     *,
-    media_type: str,
-    sha256: str,
-    size: int,
+    source: str,
+    original_uri: str,
+    allow_external_copy: bool,
 ) -> str:
-    return (
-        "受控二进制资产元数据\n"
-        f"- 文件名: {candidate.name}\n"
-        f"- 媒体类型: {media_type}\n"
-        f"- SHA-256: {sha256}\n"
-        f"- 字节数: {size}\n"
-        "- 说明: 此来源只记录受控元数据，不包含视觉语义或文档正文。"
-    )
+    try:
+        project_relative = candidate.relative_to(root.resolve())
+        return source or project_relative.as_posix()
+    except ValueError as exc:
+        if not allow_external_copy:
+            raise SdlcError(
+                f"来源路径越出项目: {original_uri}；受控摄取必须显式设置 "
+                "allow_external_copy=true"
+            ) from exc
+        return source or str(candidate)
+
+
+def _source_receipt(root: Path, index_path: Path) -> dict[str, Any]:
+    source = load_indexed_source(root, index_path)
+    anchors = []
+    for item in source["segments"]:
+        if item["kind"] == "asset":
+            anchors.append({
+                "anchor": item["anchor"],
+                "kind": "asset",
+                "media_type": item["media_type"],
+                "sha256": item["sha256"],
+                "size": item["size"],
+                "asset_ref": item["asset_ref"],
+            })
+        else:
+            anchors.append({
+                "anchor": item["anchor"],
+                "kind": "text",
+                "characters": len(item["text"]),
+                "sha256": item["sha256"],
+                "preview": item["text"][:160],
+                "content_ref": item["content_ref"],
+            })
+    result: dict[str, Any] = {
+        "ok": True,
+        "source_id": source["source_id"],
+        "kind": source["kind"],
+        "source": source["source_ref"],
+        "media_type": source["media_type"],
+        "sha256": source["sha256"],
+        "anchors": anchors,
+        "canonical_path": relative_to_project(root, index_path),
+        "manifest_ref": source["manifest_ref"],
+        "extractor": source["extractor"],
+        "next_action": (
+            "文本 anchor 使用 sdlc_query_source 查询；asset anchor 返回保持"
+            "原格式的受控 asset_ref，必须用支持对应媒体类型的工具读取。"
+        ),
+    }
+    source_root = index_path.parent
+    if source.get("content_ref"):
+        result["content_ref"] = relative_to_project(
+            root, source_root / source["content_ref"]
+        )
+    if source.get("asset_ref"):
+        result["asset_ref"] = relative_to_project(
+            root, source_root / source["asset_ref"]
+        )
+    if source.get("projection_ref"):
+        result["projection_ref"] = relative_to_project(
+            root, source_root / source["projection_ref"]
+        )
+    if source.get("bundle"):
+        result["bundle"] = source["bundle"]
+    return result
+
+
+def _text_spans(
+    content: str,
+    *,
+    raw_segments: Any,
+    anchor_prefix: str,
+) -> list[dict[str, Any]]:
+    if raw_segments is not None:
+        return _locate_segment_spans(content, raw_segments)
+    spans = _default_segment_spans(content)
+    for number, item in enumerate(spans, 1):
+        item["anchor"] = f"{anchor_prefix}:{number}"
+    return spans
 
 
 def _default_segment_spans(content: str) -> list[dict[str, Any]]:
@@ -318,7 +759,8 @@ def _locate_segment_spans(
             start = content.find(text)
         if start < 0:
             raise SdlcError(
-                f"source segment[{index}] 不是 content 的原文片段，不能建立无复制 anchor"
+                f"source segment[{index}] 不是 content 的原文片段，"
+                "不能建立无复制 anchor"
             )
         end = start + len(text)
         spans.append({
@@ -331,20 +773,44 @@ def _locate_segment_spans(
     return spans
 
 
-def _read_source_content(path: Path) -> str:
-    if not path.is_file():
-        raise SdlcError(f"来源正文缺失: {path}")
-    rendered = path.read_text(encoding="utf-8")
-    start = rendered.find(_SOURCE_BEGIN)
-    end = rendered.rfind(_SOURCE_END)
-    if start < 0 or end < 0 or end <= start:
-        raise SdlcError(f"来源 Markdown 标记缺失: {path}")
-    content = rendered[start + len(_SOURCE_BEGIN):end]
-    if content.startswith("\n"):
-        content = content[1:]
-    if content.endswith("\n"):
-        content = content[:-1]
-    return content
+def _media_type(path: Path, declared: Any) -> str:
+    guessed = mimetypes.guess_type(path.name)[0]
+    if path.suffix.lower() in TEXT_SOURCE_SUFFIXES:
+        return guessed or (
+            str(declared).strip()
+            if isinstance(declared, str) and declared.strip()
+            else "text/plain"
+        )
+    if guessed:
+        return guessed
+    if isinstance(declared, str) and declared.strip():
+        return declared.strip()
+    return "application/octet-stream"
+
+
+def _is_text_source(path: Path, media_type: str) -> bool:
+    return (
+        path.suffix.lower() in TEXT_SOURCE_SUFFIXES
+        or media_type.startswith("text/")
+    )
+
+
+def _text_suffix(media_type: str) -> str:
+    return {
+        "text/html": ".html",
+        "application/json": ".json",
+        "text/css": ".css",
+        "text/csv": ".csv",
+    }.get(media_type, ".md")
+
+
+def _is_link(path: Path) -> bool:
+    is_junction = getattr(path, "is_junction", None)
+    return path.is_symlink() or bool(is_junction and is_junction())
+
+
+def _anchor_path(relative_path: str) -> str:
+    return relative_path.replace("%", "%25").replace("#", "%23")
 
 
 def _sha256_text(text: str) -> str:

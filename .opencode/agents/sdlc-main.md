@@ -45,6 +45,9 @@ validate 后展示 preview 路径、revision 与 hash。只有收到明确“确
 `stage`、`decisions` 或 `notes` 这类自定义字段。
 临时 spec work 的 `source_refs` 使用 `SRC-XXXXXXXXXXXX#anchor` 字符串；若已持有 `{source_id, anchor}`
 对象也可直接传入，Core 会规范化，但不得杜撰来源。
+摄取 file/directory 时必须保持原格式和相对目录树。目录使用 `source_type=directory`；Core 兼容
+file 指向目录并自动识别。text anchor 可查询受限正文；asset anchor 只返回受控 `asset_ref`，必须交给
+支持对应媒体类型的工具，严禁把 PNG、PDF 等二进制按 `text/plain` 解码或写成 `content.md`。
 写 Design 前读取 `.sdlc-pipeline/contracts/scaffold.json`，其 `extension_points` 只能逐字使用已声明的 ID；
 不得以泛称或模块名替代 extension point。
 写 Requirement 时，`acceptance_criteria` 是**必填且非空**数组；每条都必须携带 `given`、`when`、`then`

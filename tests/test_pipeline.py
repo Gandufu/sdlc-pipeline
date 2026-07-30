@@ -26,6 +26,7 @@ from sdlc_core.adapter import (  # noqa: E402
     validate_write_path,
 )
 from sdlc_core.artifacts import load_current_spec, load_test_results  # noqa: E402
+from sdlc_core.artifact_store import current_baseline  # noqa: E402
 from sdlc_core.common import (  # noqa: E402
     SdlcError,
     read_json,
@@ -1989,7 +1990,9 @@ class ReliabilityTests(unittest.TestCase):
         self.assertEqual(loaded["requirements"]["items"][0]["id"], "R-0001")
         self.assertFalse(mirror.exists())
 
-    def test_external_binary_source_uses_controlled_metadata_extractor(self) -> None:
+    def test_external_binary_source_preserves_original_format_without_fake_text(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             external = Path(temporary) / "system-info.png"
             external.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
@@ -1997,20 +2000,32 @@ class ReliabilityTests(unittest.TestCase):
             ingested = ingest_source(self.fixture.root, {
                 "kind": "file",
                 "uri": str(external),
-                "media_type": "image/png",
                 "allow_external_copy": True,
             })
 
-        self.assertEqual(ingested["extractor"]["name"], "sdlc-binary-metadata")
-        self.assertIn("blob_ref", ingested["asset"])
-        metadata = query_source(
+        self.assertEqual(ingested["media_type"], "image/png")
+        self.assertNotIn("content_ref", ingested)
+        self.assertTrue(ingested["asset_ref"].endswith("system-info.png"))
+        controlled = self.fixture.root / ingested["asset_ref"]
+        self.assertEqual(controlled.read_bytes(), b"\x89PNG\r\n\x1a\nfixture")
+        asset = query_source(
             self.fixture.root,
             ingested["source_id"],
             ingested["anchors"][0]["anchor"],
         )
-        self.assertIn("不包含视觉语义", metadata["text"])
+        self.assertEqual(asset["kind"], "asset")
+        self.assertEqual(asset["media_type"], "image/png")
+        self.assertNotIn("text", asset)
+        self.assertEqual(
+            (self.fixture.root / asset["asset_ref"]).read_bytes(),
+            b"\x89PNG\r\n\x1a\nfixture",
+        )
+        source_root = self.fixture.root / ingested["canonical_path"]
+        self.assertFalse((source_root.parent / "content.md").exists())
 
-    def test_external_text_source_is_ingested_once_as_markdown(self) -> None:
+    def test_external_text_source_preserves_original_extension_and_content(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             external = Path(temporary) / "prototype.html"
             external.write_text("<main>Home prototype</main>\n", encoding="utf-8")
@@ -2022,12 +2037,182 @@ class ReliabilityTests(unittest.TestCase):
                 "allow_external_copy": True,
             })
 
-        asset = ingested["asset"]
         copied = self.fixture.root / ingested["content_ref"]
         self.assertTrue(copied.is_file())
-        self.assertEqual(asset["original_uri"], str(external.resolve()))
-        self.assertNotIn("blob_ref", asset)
+        self.assertEqual(copied.suffix, ".html")
+        self.assertEqual(
+            copied.read_text(encoding="utf-8"),
+            "<main>Home prototype</main>\n",
+        )
         self.assertTrue(ingested["canonical_path"].endswith("index.json"))
+
+    def test_external_directory_source_is_ingested_as_deterministic_bundle(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            external = Path(temporary) / "prototype"
+            (external / "assets").mkdir(parents=True)
+            (external / "images").mkdir()
+            (external / "index.html").write_text(
+                "<main>目录原型</main>\n",
+                encoding="utf-8",
+            )
+            (external / "assets" / "app.js").write_text(
+                "console.log('prototype')\n",
+                encoding="utf-8",
+            )
+            (external / "images" / "home.png").write_bytes(b"\x89PNG\r\n")
+
+            with self.assertRaisesRegex(SdlcError, "来源路径越出项目"):
+                ingest_source(self.fixture.root, {
+                    "kind": "directory",
+                    "uri": str(external),
+                })
+            ingested = ingest_source(self.fixture.root, {
+                "kind": "file",
+                "uri": str(external),
+                "allow_external_copy": True,
+            })
+            reingested = ingest_source(self.fixture.root, {
+                "kind": "directory",
+                "uri": str(external),
+                "allow_external_copy": True,
+            })
+
+        self.assertEqual(ingested["kind"], "directory")
+        self.assertEqual(reingested["source_id"], ingested["source_id"])
+        self.assertEqual(
+            reingested["bundle"]["tree_sha256"],
+            ingested["bundle"]["tree_sha256"],
+        )
+        self.assertEqual(
+            ingested["media_type"],
+            "application/vnd.sdlc.source-directory",
+        )
+        self.assertEqual(ingested["bundle"]["file_count"], 3)
+        anchors = {item["anchor"] for item in ingested["anchors"]}
+        self.assertIn("file:assets/app.js:1", anchors)
+        self.assertIn("file:index.html:1", anchors)
+        self.assertIn("asset:images/home.png", anchors)
+        text = query_source(
+            self.fixture.root,
+            ingested["source_id"],
+            "file:index.html:1",
+        )
+        self.assertIn("目录原型", text["text"])
+        source_root = (self.fixture.root / ingested["canonical_path"]).parent
+        manifest = read_json(source_root / ingested["manifest_ref"])
+        self.assertEqual(
+            [item["path"] for item in manifest["files"]],
+            ["assets/app.js", "images/home.png", "index.html"],
+        )
+        self.assertEqual(
+            (source_root / "files" / "images" / "home.png").read_bytes(),
+            b"\x89PNG\r\n",
+        )
+        self.assertFalse((source_root / "content.md").exists())
+        self.assertFalse((source_root / "bundle.md").exists())
+
+    def test_source_path_errors_distinguish_missing_file_and_directory(self) -> None:
+        missing = self.fixture.root / "missing-source"
+        with self.assertRaisesRegex(SdlcError, "来源路径不存在"):
+            ingest_source(self.fixture.root, {
+                "kind": "file",
+                "uri": str(missing),
+            })
+
+        source_file = self.fixture.root / "protocol.md"
+        source_file.write_text("协议\n", encoding="utf-8")
+        with self.assertRaisesRegex(
+            SdlcError,
+            "directory source 要求目录路径，实际为文件",
+        ):
+            ingest_source(self.fixture.root, {
+                "kind": "directory",
+                "uri": str(source_file),
+            })
+
+    def test_directory_source_enforces_bounded_file_count(self) -> None:
+        directory = self.fixture.root / "too-many-source-files"
+        directory.mkdir()
+        for index in range(65):
+            (directory / f"{index:02d}.txt").write_text(
+                str(index),
+                encoding="utf-8",
+            )
+
+        with self.assertRaisesRegex(SdlcError, "目录来源文件数超过 64"):
+            ingest_source(self.fixture.root, {
+                "kind": "directory",
+                "uri": str(directory),
+            })
+
+    def test_directory_source_rejects_links_before_copying_tree(self) -> None:
+        directory = self.fixture.root / "linked-source"
+        outside = self.fixture.root / "outside-source"
+        directory.mkdir()
+        outside.mkdir()
+        (outside / "secret.txt").write_text("outside\n", encoding="utf-8")
+        link = directory / "escape"
+        try:
+            os.symlink(outside, link, target_is_directory=True)
+        except OSError as exc:
+            self.skipTest(f"当前 Windows 环境不能创建符号链接: {exc}")
+
+        with self.assertRaisesRegex(
+            SdlcError,
+            "目录来源禁止符号链接或 junction",
+        ):
+            ingest_source(self.fixture.root, {
+                "kind": "directory",
+                "uri": str(directory),
+            })
+
+    def test_published_directory_source_keeps_bundle_index_without_local_blobs(
+        self,
+    ) -> None:
+        directory = self.fixture.root / "directory-source"
+        directory.mkdir()
+        (directory / "protocol.md").write_text("目录协议\n", encoding="utf-8")
+        (directory / "screen.png").write_bytes(b"\x89PNG\r\n")
+        ingested = ingest_source(self.fixture.root, {
+            "kind": "directory",
+            "uri": str(directory),
+        })
+        blueprint = spec_payload()
+        blueprint["requirements"]["source_inputs"] = [ingested]
+
+        published = publish_spec(self.fixture.root, blueprint)
+
+        source_index = read_json(
+            self.fixture.root
+            / "docs"
+            / "sdlc"
+            / "baselines"
+            / published["baseline_id"]
+            / "sources"
+            / ingested["source_id"]
+            / "index.json"
+        )
+        encoded = json.dumps(source_index, ensure_ascii=False)
+        self.assertEqual(source_index["kind"], "directory")
+        self.assertEqual(source_index["bundle"]["file_count"], 2)
+        self.assertNotIn("asset", source_index)
+        self.assertNotIn("blob_ref", encoded)
+        self.assertNotIn(".sdlc-pipeline/evidence", encoded)
+        preserved = (
+            self.fixture.root
+            / "docs"
+            / "sdlc"
+            / "baselines"
+            / published["baseline_id"]
+            / "sources"
+            / ingested["source_id"]
+            / "files"
+            / "screen.png"
+        )
+        self.assertEqual(preserved.read_bytes(), b"\x89PNG\r\n")
+        preserved.write_bytes(b"drifted")
+        with self.assertRaisesRegex(SdlcError, "source 原文件缺失或漂移"):
+            current_baseline(self.fixture.root)
 
     def test_file_source_path_alias_is_normalized_to_uri(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

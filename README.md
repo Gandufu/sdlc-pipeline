@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.20.0`。
+OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.21.0`。
 
 插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
 状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
@@ -81,6 +81,23 @@ Playwright package/CLI；MCP 仅适合未来可选的探索式浏览器交互，
 
 模型不能编辑正式 baseline、构造 idempotency key 或绕过确认边界。
 
+### Source 文件与目录
+
+`sdlc_ingest_source` 同时支持 file 和 directory，并保持原格式。file 指向目录时 Core 会自动识别，
+但推荐显式使用 `source_type=directory`。受控 Source 结构为：
+
+```text
+sources/SRC-XXXXXXXXXXXX/
+  index.json       # compact Source/anchor 索引
+  manifest.json    # 文件路径、媒体类型、大小和 hash
+  files/           # 原文件或原目录树，扩展名与字节不变
+  projection.md    # 仅在真实 extractor 明确提供文字投影时存在
+```
+
+文本文件的 anchor 直接绑定 `files/` 中原格式文件的字符偏移。PNG、PDF 等二进制使用 asset anchor；
+`sdlc_query_source` 返回 `asset_ref`、媒体类型和 hash，不产生伪造的 `content.md`。正式 Spec baseline
+会连同原格式 Source 文件树一起冻结。
+
 ### 人工反馈与返工
 
 人工发现 bug 不是回滚已生成证据，也不是重复执行 `/sdlc-code`。主会话先补齐 Feedback 合同，再调用
@@ -114,7 +131,7 @@ Playwright package/CLI；MCP 仅适合未来可选的探索式浏览器交互，
     scaffold.json             # protected/allowed/extension points
     active-rules.json         # 本项目启用规则的 hash 索引
   state/                      # compact JSON 索引；含 publication receipt
-  work/                       # Source/Candidate/temporary spec work/context/handoff Markdown
+  work/                       # 原格式 Source、Candidate、temporary spec work/context/handoff
   evidence/                   # init/code/test/error/log 等 Markdown 证据
 
 docs/sdlc/

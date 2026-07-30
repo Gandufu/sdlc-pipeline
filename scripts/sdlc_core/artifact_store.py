@@ -9,7 +9,7 @@ from typing import Any
 from .artifact_documents import (
     markdown_file_sha256,
 )
-from .common import SdlcError, sha256_file, sha256_json, utc_now
+from .common import SdlcError, read_json, sha256_file, sha256_json, utc_now
 from .layout import work_root
 from .records import read_compact_index, write_compact_index
 
@@ -118,31 +118,26 @@ def publish_baseline(
                 source_index = read_compact_index(
                     source_directory / "index.json"
                 )
-                source_content = root / source_index["content_ref"]
-                if not source_content.is_file():
-                    raise SdlcError(f"source Markdown 缺失: {source_id}")
                 target_directory = temporary / "sources" / source_id
-                target_directory.mkdir(parents=True, exist_ok=True)
-                target_content = target_directory / "content.md"
-                shutil.copy2(source_content, target_content)
-                formal_index = {
-                    key: value
-                    for key, value in source_index.items()
-                    if key != "asset"
-                }
+                shutil.copytree(source_directory, target_directory)
+                formal_index = dict(source_index)
                 formal_index["state"] = "published"
-                formal_index["content_ref"] = (
-                    f"docs/sdlc/baselines/{baseline_id}/sources/"
-                    f"{source_id}/content.md"
-                )
                 target_index = target_directory / "index.json"
                 write_compact_index(target_index, formal_index)
+                target_manifest = _verify_source_bundle(
+                    target_directory,
+                    formal_index,
+                    source_id,
+                )
                 sources.append({
                     "source_id": source_id,
                     "index_ref": f"sources/{source_id}/index.json",
                     "index_sha256": sha256_file(target_index),
-                    "content_ref": f"sources/{source_id}/content.md",
-                    "content_sha256": sha256_file(target_content),
+                    "manifest_ref": (
+                        f"sources/{source_id}/"
+                        f"{formal_index['manifest_ref']}"
+                    ),
+                    "manifest_sha256": sha256_file(target_manifest),
                 })
             preview = candidate.get("preview")
             if not isinstance(preview, dict):
@@ -260,7 +255,7 @@ def _verify_baseline(path: Path) -> dict[str, Any]:
     for source in manifest.get("sources", []):
         for field, hash_field in (
             ("index_ref", "index_sha256"),
-            ("content_ref", "content_sha256"),
+            ("manifest_ref", "manifest_sha256"),
         ):
             artifact = path / source[field]
             if (
@@ -270,7 +265,43 @@ def _verify_baseline(path: Path) -> dict[str, Any]:
                 raise SdlcError(
                     f"baseline source 缺失或 hash 漂移: {source[field]}"
                 )
+        source_index_path = path / source["index_ref"]
+        source_index = read_compact_index(source_index_path)
+        _verify_source_bundle(
+            source_index_path.parent,
+            source_index,
+            source["source_id"],
+        )
     spec = path / manifest["spec_ref"]
     if not spec.is_file() or sha256_file(spec) != manifest["spec_sha256"]:
         raise SdlcError("baseline spec.md 缺失或 hash 漂移")
     return manifest
+
+
+def _verify_source_bundle(
+    source_directory: Path,
+    source_index: dict[str, Any],
+    source_id: str,
+) -> Path:
+    manifest_path = source_directory / source_index["manifest_ref"]
+    if (
+        not manifest_path.is_file()
+        or sha256_file(manifest_path) != source_index["manifest_sha256"]
+    ):
+        raise SdlcError(f"source manifest 缺失或漂移: {source_id}")
+    manifest = read_json(manifest_path)
+    entries = list(manifest.get("files", []))
+    projection = manifest.get("projection")
+    if isinstance(projection, dict):
+        entries.append(projection)
+    for entry in entries:
+        artifact = source_directory / entry["file_ref"]
+        if (
+            not artifact.is_file()
+            or sha256_file(artifact) != entry["sha256"]
+        ):
+            raise SdlcError(
+                f"source 原文件缺失或漂移: "
+                f"{source_id}#{entry['file_ref']}"
+            )
+    return manifest_path

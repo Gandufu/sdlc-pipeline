@@ -25,5 +25,9 @@ spec work，禁止发送缺失 `acceptance_criteria` 的请求；这种可预防
 $ARGUMENTS
 </user-input>
 
-项目外文件必须先经 `sdlc_ingest_source(allow_external_copy=true)` 摄取。摄取 receipt 已给出可引用的
-`source_id/anchor`；只可通过 `sdlc_query_source` 读取受限片段，绝不再用 read、grep 等工具读取原外部路径。
+项目外文件或目录必须先经 `sdlc_ingest_source(allow_external_copy=true)` 摄取；目录显式使用
+`source_type=directory`，误传为 file 时 Core 也会自动识别。受控副本必须保持原格式与相对目录树：
+HTML 仍是 HTML、Markdown 仍是 Markdown、PNG 仍是 PNG，禁止把二进制写成 `content.md`。
+receipt 中的 text anchor 可通过 `sdlc_query_source` 读取受限原文；asset anchor 查询后返回
+`asset_ref`，只能交给支持对应媒体类型的视觉/文档工具，不得按文本读取或臆造语义。后续引用只使用
+`source_id/anchor`，绝不再读取项目外原路径。

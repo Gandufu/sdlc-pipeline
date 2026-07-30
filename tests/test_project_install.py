@@ -765,6 +765,50 @@ class InstallerTests(unittest.TestCase):
             "uri": "C:/TEMP/protocol.md",
             "allow_external_copy": True,
         })
+        directory_script = (
+            "import(process.argv[1]).then(m => console.log(JSON.stringify("
+            "m.sourcePayload({source_type:'directory',"
+            "source:'C:/TEMP/prototype',allow_external_copy:true}))))"
+        )
+        directory_result = subprocess.run(
+            ["node", "-e", directory_script, plugin.as_uri()],
+            check=False,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        self.assertEqual(directory_result.returncode, 0, directory_result.stderr)
+        self.assertEqual(json.loads(directory_result.stdout), {
+            "kind": "directory",
+            "uri": "C:/TEMP/prototype",
+            "allow_external_copy": True,
+        })
+        self.assertIn(
+            '["inline", "file", "directory", "url", "document"]',
+            plugin.read_text(encoding="utf-8"),
+        )
+
+    def test_source_guidance_preserves_file_formats_and_directory_bundles(
+        self,
+    ) -> None:
+        plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+        command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(
+            encoding="utf-8"
+        )
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(
+            encoding="utf-8"
+        )
+        readme = (REPO / "README.md").read_text(encoding="utf-8")
+
+        for text in (plugin, command, main, readme):
+            self.assertIn("保持原格式", text)
+            self.assertIn("directory", text)
+        self.assertIn("asset_ref", plugin)
+        self.assertIn("asset anchor", command)
+        self.assertIn("manifest.json", readme)
+        self.assertNotIn("图片等二进制文件默认保存受控元数据和原件", plugin)
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_plugin_rejects_incomplete_approval_before_core_invocation(self) -> None:

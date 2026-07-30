@@ -42,9 +42,12 @@ export function sourceReceipt(result) {
   const anchors = Array.isArray(envelope.segments)
     ? envelope.segments.map((segment) => ({
       anchor: segment.anchor,
+      kind: segment.kind || (typeof segment.text === "string" ? "text" : "asset"),
       characters: typeof segment.text === "string" ? segment.text.length : 0,
       sha256: segment.sha256,
       preview: typeof segment.text === "string" ? segment.text.slice(0, 160) : "",
+      asset_ref: segment.asset_ref,
+      media_type: segment.media_type,
     }))
     : []
   return {
@@ -59,24 +62,24 @@ export function sourceReceipt(result) {
     canonical_path: typeof sourceId === "string"
       ? `.sdlc-pipeline/work/sources/${sourceId}/index.json`
       : undefined,
-    asset: envelope.asset ? {
-      uri: envelope.asset.uri,
-      sha256: envelope.asset.sha256,
-      size: envelope.asset.size,
-    } : undefined,
+    asset_ref: envelope.asset_ref,
+    manifest_ref: envelope.manifest_ref,
+    bundle: envelope.bundle,
     extractor: envelope.extractor,
-    next_action: "Use only source_id/anchor above. Query sdlc_query_source for bounded text; do not read the original external path.",
+    next_action: "Use only source_id/anchor above; do not read uncontrolled paths. Query text anchors with sdlc_query_source. Asset anchors return a controlled asset_ref that keeps the original format; never decode binary as text.",
   }
 }
 
 export function sourcePayload(args) {
   const kind = args.source_type
-  const sourceIsFilePath = kind === "file" && !args.uri && args.source
+  const sourceIsPath = ["file", "directory"].includes(kind)
+    && !args.uri
+    && args.source
   return {
     kind,
     content: args.content,
-    source: sourceIsFilePath ? undefined : args.source,
-    uri: args.uri || (sourceIsFilePath ? args.source : undefined),
+    source: sourceIsPath ? undefined : args.source,
+    uri: args.uri || (sourceIsPath ? args.source : undefined),
     media_type: args.media_type,
     allow_external_copy: args.allow_external_copy,
   }
@@ -297,12 +300,12 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_ingest_source: tool({
-        description: "摄取一份原始需求来源为 Source Markdown，并返回有界 receipt。file 必须提供 uri；source 中的 file 路径会安全规范化为 uri。图片等二进制文件默认保存受控元数据和原件，不伪造视觉语义。只使用返回的 source_id/anchor；需要正文时调用 sdlc_query_source，绝不再读取项目外原路径。",
+        description: "受控摄取 inline/file/directory 来源并保持原格式。file 指向目录时 Core 自动按 directory 处理；文件和目录树原字节复制到 Source files/，manifest.json 只保存路径/hash/media 索引。文本生成可查询 anchor；PNG 等二进制生成 asset anchor，查询后返回受控 asset_ref，绝不把二进制解码成 content.md 或伪造视觉语义。项目外路径必须 allow_external_copy=true。",
         args: {
-          source_type: tool.schema.enum(["inline", "file", "url", "document"]),
+          source_type: tool.schema.enum(["inline", "file", "directory", "url", "document"]),
           content: tool.schema.string().optional(),
-          source: tool.schema.string().optional().describe("来源标签；file 的路径兼容为 uri。"),
-          uri: tool.schema.string().optional().describe("file 路径、URL 或受控来源 URI。"),
+          source: tool.schema.string().optional().describe("来源标签；file/directory 的路径兼容为 uri。"),
+          uri: tool.schema.string().optional().describe("文件、目录、URL 或受控来源 URI。"),
           media_type: tool.schema.string().optional(),
           allow_external_copy: tool.schema.boolean().optional(),
         },
@@ -316,7 +319,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_query_source: tool({
-        description: "按 source_id 和 anchor 读取一段已摄取原文。只返回受限片段与 hash。",
+        description: "按 source_id 和 anchor 查询受控来源。文本 anchor 返回有界原文；asset anchor 返回保持原格式的 asset_ref、媒体类型与 hash，不把二进制转换为文本。",
         args: {
           source_id: tool.schema.string(),
           anchor: tool.schema.string(),

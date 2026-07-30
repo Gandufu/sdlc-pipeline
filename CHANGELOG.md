@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Source 摄取同时支持文件和目录，且受控副本保持原扩展名、原字节与相对目录树；新增
+  `manifest.json` 文件索引和 directory tree hash，正式 baseline 同步冻结原始文件树。
+- 修复未显式提供 media type 的 PNG 被默认当作 `text/plain` 解码并生成巨型乱码 `content.md`；
+  二进制现在使用 asset anchor/`asset_ref`，只有真实 extractor 输出才允许独立 `projection.md`。
+- 旧版错误 Source 不做不可验证的原地转换；升级后从权威原路径重新摄取并替换未发布的 Source 引用，
+  旧目录继续保留为审计证据，避免静默覆盖。
+- `source_type=file` 指向目录时自动识别为 directory，同时提供显式 directory 类型、数量/大小限制、
+  符号链接拒绝和准确的“路径不存在/类型错误”诊断。
 - 新增统一 Feedback/Rework 生命周期：人工预览、人工验收和自动测试失败都先写入 `FB-xxxx` 结构化证据，
   再按 implementation/spec/test_contract 在同一 Run 中前向返工；旧的自由文本 Spec-rework 分叉已删除。
 - code/test gate 在 active Feedback 期间失效；Spec 类返工必须先发布修订 baseline，implementation 类返工
