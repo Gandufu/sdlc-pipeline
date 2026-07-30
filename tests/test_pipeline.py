@@ -85,6 +85,10 @@ class TaskFlowTests(unittest.TestCase):
         with self.assertRaises(SdlcError):
             transition(self.root, "review_passed")
 
+    def test_missing_spec_diagnostic_does_not_reference_removed_layout(self) -> None:
+        with self.assertRaisesRegex(SdlcError, "^没有已发布的 Spec baseline$"):
+            load_current_spec(self.root)
+
     def test_finalized_input_creates_linked_task(self) -> None:
         record_input(self.root, "任务一")
         for event in (

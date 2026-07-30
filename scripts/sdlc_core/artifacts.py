@@ -51,7 +51,7 @@ def unresolved_blocking_questions(spec: dict[str, Any]) -> list[dict[str, Any]]:
 
 def require_code_ready(spec: dict[str, Any]) -> None:
     if spec.get("schema_version") != "3.0":
-        raise SdlcError("code 门禁只接受已发布的 Storage Layout v3 Spec")
+        raise SdlcError("code 门禁只接受已发布的 Spec baseline")
 
 
 def render_test_results(data: dict[str, Any]) -> str:
@@ -214,7 +214,7 @@ def load_current_spec(root: Path) -> dict[str, Any]:
 def _baseline(root: Path) -> tuple[Path, dict[str, Any]]:
     selected = current_baseline(root)
     if not selected:
-        raise SdlcError("没有已发布的 Storage Layout v3 Spec baseline")
+        raise SdlcError("没有已发布的 Spec baseline")
     baseline, manifest = selected
     for group in ("requirements", "designs", "verification"):
         if not manifest.get(group):
