@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- 新增统一 Feedback/Rework 生命周期：人工预览、人工验收和自动测试失败都先写入 `FB-xxxx` 结构化证据，
+  再按 implementation/spec/test_contract 在同一 Run 中前向返工；旧的自由文本 Spec-rework 分叉已删除。
+- code/test gate 在 active Feedback 期间失效；Spec 类返工必须先发布修订 baseline，implementation 类返工
+  必须重新通过完整 code gate，最终 delivery 成功后 Feedback 才 resolved。
+- `sdlc-coder` 可在 active coder attempt 中按当前 Spec/Feedback 引用查询受限 Source anchor；其他来源、
+  非活动 coder 和 tester 均被拒绝。
 - 当 OpenCode 丢失 tester 的最终 JSON 时，Core 只在独立验证到非空、受限测试 diff 且所有 Spec selector
   存在后写入带 `output_recovery` 的透明 receipt，并继续唯一一次权威验证；缺少/越界改动仍 fail-closed。
 - 强化 tester 上下文与 handoff 契约：Verification 必须记录既有外部服务的固定值和错误情境；主会话

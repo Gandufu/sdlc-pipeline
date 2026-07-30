@@ -644,6 +644,106 @@ class InstallerTests(unittest.TestCase):
         self.assertIn("do not read", receipt["next_action"])
 
     @unittest.skipUnless(shutil.which("node"), "node is not installed")
+    def test_plugin_allows_coder_bounded_source_query_but_rejects_tester(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            target = Path(temporary).resolve()
+            plugin_path = target / ".opencode" / "plugins" / "sdlc-pipeline.js"
+            plugin_path.parent.mkdir(parents=True)
+            shutil.copy2(REPO / ".opencode/plugins/sdlc-pipeline.js", plugin_path)
+            core = (
+                target
+                / ".sdlc-pipeline"
+                / "runtime"
+                / "scripts"
+                / "sdlc.py"
+            )
+            core.parent.mkdir(parents=True)
+            core.write_text(
+                "import json, sys\n"
+                "payload = json.load(sys.stdin)\n"
+                "print(json.dumps({"
+                "'ok': True, 'operation': sys.argv[1], **payload, "
+                "'text': 'bounded source text'"
+                "}))\n",
+                encoding="utf-8",
+            )
+            sdk = target / ".opencode" / "node_modules" / "@opencode-ai" / "plugin"
+            sdk.mkdir(parents=True)
+            (sdk / "package.json").write_text(
+                json.dumps({
+                    "name": "@opencode-ai/plugin",
+                    "type": "module",
+                    "exports": "./index.js",
+                }),
+                encoding="utf-8",
+            )
+            (sdk / "index.js").write_text(
+                "const schema = () => ({ optional() { return this }, describe() { return this } })\n"
+                "export const tool = (input) => input\n"
+                "tool.schema = { enum: schema, string: schema, boolean: schema, "
+                "object: schema, array: schema }\n",
+                encoding="utf-8",
+            )
+            script = (
+                "import(process.argv[1]).then(async m => {"
+                "const plugin = await m.SdlcPipelinePlugin({"
+                "directory: process.argv[2], worktree: process.argv[2]"
+                "});"
+                "const query = plugin.tool.sdlc_query_source;"
+                "const coder = JSON.parse(await query.execute("
+                "{source_id: 'SRC-000000000001', anchor: 'text:1'}, "
+                "{agent: 'sdlc-coder', directory: process.argv[2]}"
+                "));"
+                "let testerError = '';"
+                "try {"
+                "await query.execute("
+                "{source_id: 'SRC-000000000001', anchor: 'text:1'}, "
+                "{agent: 'sdlc-tester', directory: process.argv[2]}"
+                ");"
+                "} catch (error) { testerError = String(error.message || error); }"
+                "const begin = plugin.tool.sdlc_begin_rework;"
+                "const reworkArgs = {origin: 'manual_preview', "
+                "classification: 'implementation', summary: 'bug', "
+                "expected: 'expected', actual: 'actual', "
+                "reproduction_steps: ['open preview'], affected_ids: ['R-0001'], "
+                "source_refs: [{source_id: 'SRC-000000000001', anchor: 'text:1'}], "
+                "evidence_refs: []};"
+                "const rework = JSON.parse(await begin.execute(reworkArgs, "
+                "{agent: 'sdlc-main', directory: process.argv[2]}));"
+                "let coderReworkError = '';"
+                "try { await begin.execute(reworkArgs, "
+                "{agent: 'sdlc-coder', directory: process.argv[2]}); "
+                "} catch (error) { coderReworkError = String(error.message || error); }"
+                "console.log(JSON.stringify({coder, testerError, rework, coderReworkError}));"
+                "}).catch(e => { console.error(e); process.exit(1) })"
+            )
+            result = subprocess.run(
+                ["node", "-e", script, plugin_path.as_uri(), str(target)],
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        output = json.loads(result.stdout)
+        self.assertEqual(output["coder"]["requester"], "sdlc-coder")
+        self.assertEqual(output["coder"]["text"], "bounded source text")
+        self.assertEqual(output["rework"]["operation"], "rework")
+        self.assertEqual(
+            output["rework"]["source_refs"],
+            ["SRC-000000000001#text:1"],
+        )
+        self.assertIn(
+            "sdlc_begin_rework is not available to agent sdlc-coder",
+            output["coderReworkError"],
+        )
+        self.assertIn(
+            "sdlc_query_source is not available to agent sdlc-tester",
+            output["testerError"],
+        )
+
+    @unittest.skipUnless(shutil.which("node"), "node is not installed")
     def test_plugin_normalizes_file_source_path_alias(self) -> None:
         plugin = REPO / ".opencode/plugins/sdlc-pipeline.js"
         script = (
@@ -695,6 +795,7 @@ class InstallerTests(unittest.TestCase):
         for name in (
             "sdlc_status", "sdlc_ingest_source", "sdlc_save_spec_work",
             "sdlc_query_spec_work",
+            "sdlc_begin_rework",
             "sdlc_begin_candidate", "sdlc_put_requirement", "sdlc_put_design",
             "sdlc_put_verification", "sdlc_validate_candidate",
             "sdlc_approve_candidate",
@@ -707,6 +808,34 @@ class InstallerTests(unittest.TestCase):
         self.assertNotIn("config.skills.paths", text)
         self.assertIn("sdlc-tester", text)
 
+    def test_rework_tool_exposes_complete_feedback_contract_to_main_only(self) -> None:
+        plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+        main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
+        coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
+        tester = (REPO / ".opencode/agents/sdlc-tester.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("sdlc_begin_rework: allow", main)
+        self.assertNotIn("sdlc_begin_rework: allow", coder)
+        self.assertNotIn("sdlc_begin_rework: allow", tester)
+        self.assertIn('sdlc_begin_rework: tool({', plugin)
+        for field in (
+            "origin",
+            "classification",
+            "summary",
+            "expected",
+            "actual",
+            "reproduction_steps",
+            "affected_ids",
+            "source_refs",
+            "evidence_refs",
+        ):
+            self.assertIn(f"{field}:", plugin)
+        self.assertIn('"rework"', plugin)
+
     def test_agent_permission_matrix(self) -> None:
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
         coder = (REPO / ".opencode/agents/sdlc-coder.md").read_text(encoding="utf-8")
@@ -714,6 +843,7 @@ class InstallerTests(unittest.TestCase):
         test_command = (REPO / ".opencode/commands/sdlc-test.md").read_text(encoding="utf-8")
         plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
         self.assertIn('"sdlc-coder": allow', main)
+        self.assertIn("sdlc_query_source: allow", main)
         self.assertIn('"*": allow', coder)
         self.assertIn('"tests/**": deny', coder)
         self.assertGreaterEqual(coder.count('"tests/**": deny'), 2)
@@ -781,11 +911,11 @@ class InstallerTests(unittest.TestCase):
         main = (REPO / ".opencode/agents/sdlc-main.md").read_text(encoding="utf-8")
 
         self.assertIn("$ARGUMENTS", command)
-        self.assertIn("journal.state=failed", command)
-        self.assertIn("journal.phase=test", command)
-        self.assertIn("返工", command)
-        self.assertIn("run.rework_started", command)
-        self.assertIn("state=failed, phase=test", main)
+        self.assertIn("sdlc_begin_rework", command)
+        self.assertIn("automated_test", command)
+        self.assertIn("implementation", command)
+        self.assertIn("run.rework_started", main)
+        self.assertIn("结构化 Feedback", main)
         self.assertIn("完整 code gate", main)
 
     def test_spec_command_requires_controlled_rework_after_failed_test(self) -> None:
@@ -796,9 +926,11 @@ class InstallerTests(unittest.TestCase):
         plugin = (REPO / ".opencode/plugins/sdlc-pipeline.js").read_text(
             encoding="utf-8"
         )
-        self.assertIn("sdlc_rework_spec_after_test_failure", command)
-        self.assertIn("run.spec_rework_started", main)
-        self.assertIn('"spec-rework"', plugin)
+        self.assertIn("sdlc_begin_rework", command)
+        self.assertIn("test_contract", command)
+        self.assertIn("spec_published", main)
+        self.assertNotIn("sdlc_rework_spec_after_test_failure", plugin)
+        self.assertNotIn('"spec-rework"', plugin)
 
     def test_spec_guidance_requires_complete_acceptance_criteria_payload(self) -> None:
         command = (REPO / ".opencode/commands/sdlc-spec.md").read_text(

@@ -26,6 +26,7 @@ from .versions import current_version, parent_manifest
 from .spec_candidates import candidate_status
 from .spec_publisher import retry_publication_cleanup
 from .stores import read_evidence_record, read_work_record
+from .feedback import feedback_status
 
 
 def status(root: Path) -> dict[str, Any]:
@@ -66,11 +67,20 @@ def status(root: Path) -> dict[str, Any]:
         })
         gates["spec"] = False
         missing.append("requirements/design/test-plan")
+    current_rework = feedback_status(root)
+    active_rework = bool(
+        current_rework and current_rework.get("status") == "active"
+    )
     code = read_evidence_record(root, "code", required=False)
-    gates["code"] = closed_baseline or bool(
+    base_code_gate = closed_baseline or bool(
         code and code.get("ok")
         and code.get("spec_hashes") == spec_hashes
         and code.get("source_fingerprint") == code_fingerprint
+    )
+    gates["code"] = base_code_gate and not bool(
+        active_rework
+        and current_rework
+        and current_rework.get("stage") != "code_verified"
     )
     if not gates["code"]:
         missing.append("compile/package/preview/health/artifact evidence")
@@ -87,11 +97,11 @@ def status(root: Path) -> dict[str, Any]:
         "source_fingerprint": (code or {}).get("source_fingerprint"),
         "test_source_fingerprint": test_source_fingerprint(root),
     }
-    gates["test"] = closed_baseline or bool(
+    gates["test"] = (closed_baseline or bool(
         candidate and candidate.get("status") in {"ready", "closed"}
         and candidate.get("binding") == expected_test_binding
         and gates["code"]
-    )
+    )) and not active_rework
     if not gates["test"]:
         missing.append("mandatory test results")
     active = read_active(root)
@@ -195,6 +205,7 @@ def status(root: Path) -> dict[str, Any]:
         "template_registry_error": template_error,
         "can_enter_next": prerequisites[stage],
         "journal": journal_status(root),
+        "rework": current_rework,
         "spec_work": {
             "active": (spec_work := spec_work_index(root)) is not None,
             **(spec_work or {}),

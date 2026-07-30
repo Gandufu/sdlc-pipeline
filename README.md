@@ -1,6 +1,6 @@
 # SDLC Pipeline
 
-OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.19.2`。
+OpenCode-first、Windows 友好的确定性交付编排器。当前版本：`0.20.0`。
 
 插件采用薄宿主 adapter + Python Core：OpenCode JavaScript 只注册工具、执行 hook 和记录宿主事件；
 状态机、审批、路径门禁、进程、测试与证据校验都由 Python Core 负责。Core 不依赖 OpenCode 会话模型，
@@ -41,9 +41,10 @@ Vitest/ESLint ignore。安装后重启 OpenCode，只执行 `/sdlc-init`。未�
    在 allowed paths 内只实现业务代码，禁止读取或修改测试脚本。task-after 校验真实 Git diff 和
    handoff，Core 再执行 compile/package/lint/typecheck、启动与 readiness，并保留预览进程，
    返回模板声明的访问地址供用户检查当前页面。
-   若 `/sdlc-test` 的已记录失败明确归因为业务代码，用户可显式执行 `/sdlc-code 返工 <原因>`；Core 会
-   记录 `run.rework_started` 并重新完成完整 code gate。该入口不能用于跳过测试、修改测试脚本或重复已通过的
-   普通 code 阶段。
+   code 通过后的人工预览/验收缺陷，以及 `/sdlc-test` 的失败，都必须先登记结构化 Feedback：
+   expected、actual、复现步骤、受影响的 R/D/T/AC、Source/evidence 引用和
+   implementation/spec/test_contract 分类。Core 在同一 Run 中记录 `run.rework_started`、停止旧预览并
+   使既有 code/test gate 失效。implementation 重新进入 code；spec/test_contract 必须先发布修订 baseline。
    首次 code gate 的确定性业务代码失败会保留错误 evidence，并允许一次同 phase 的聚焦 coder retry；第二次
    相同失败或 Run blocked 必须停止报告。
 4. `/sdlc-test`
@@ -71,6 +72,7 @@ Playwright package/CLI；MCP 仅适合未来可选的探索式浏览器交互，
 - `sdlc_status`
 - `sdlc_ingest_source` / `sdlc_query_source`
 - `sdlc_save_spec_work` / `sdlc_query_spec_work`
+- `sdlc_begin_rework`
 - `sdlc_begin_candidate`
 - `sdlc_put_requirement` / `sdlc_put_design` / `sdlc_put_verification`
 - `sdlc_validate_candidate` / `sdlc_approve_candidate`
@@ -78,6 +80,17 @@ Playwright package/CLI；MCP 仅适合未来可选的探索式浏览器交互，
 - `sdlc_finalize`
 
 模型不能编辑正式 baseline、构造 idempotency key 或绕过确认边界。
+
+### 人工反馈与返工
+
+人工发现 bug 不是回滚已生成证据，也不是重复执行 `/sdlc-code`。主会话先补齐 Feedback 合同，再调用
+`sdlc_begin_rework`。Core 保留原 code/test evidence，以 `FB-xxxx` 建立独立证据，并把当前 Run 前向推进：
+
+- `implementation`：重新派发 coder，完整重跑 code gate，再由用户执行 `/sdlc-test`。
+- `spec` / `test_contract`：先执行 `/sdlc-spec`，经新的 Candidate hash 和明确发布确认形成修订 baseline，
+  然后重新 code/test。
+- delivery gate 成功后 Feedback 才变为 `resolved`；只通过 code gate 仍是 active。
+- 已 finalize 或结束的 Run 不原地改写历史，缺陷作为新的修复 Task/Run 处理。
 
 ## 目录规范（Layout v3）
 

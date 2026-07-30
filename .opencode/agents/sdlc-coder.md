@@ -16,6 +16,7 @@ permission:
   task: deny
   sdlc_status: allow
   sdlc_ingest_source: deny
+  sdlc_query_source: allow
   sdlc_save_spec_work: deny
   sdlc_query_spec_work: deny
   sdlc_begin_candidate: deny

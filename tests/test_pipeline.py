@@ -857,6 +857,279 @@ class ClosedLoopTests(unittest.TestCase):
             json.dumps({"summary": "测试脚本已准备", "open_issues": []}),
         )
 
+    def test_manual_preview_feedback_invalidates_code_until_reverified(self) -> None:
+        self._through_code()
+        before = status(self.fixture.root)
+        source_ref = load_current_spec(
+            self.fixture.root,
+        )["requirements"]["items"][0]["source_refs"][0]
+
+        self.assertTrue(before["gates"]["code"])
+        feedback = execute(self.fixture.root, "rework", {
+            "origin": "manual_preview",
+            "classification": "implementation",
+            "summary": "人工预览发现健康接口返回错误",
+            "expected": "返回已发布 AC 声明的健康状态",
+            "actual": "返回与 AC 不一致的错误状态",
+            "reproduction_steps": ["启动预览", "访问健康接口", "观察返回值"],
+            "affected_ids": ["R-0001", "D-0001"],
+            "source_refs": [
+                f"{source_ref['source_id']}#{source_ref['anchor']}",
+            ],
+            "evidence_refs": [],
+        })
+
+        reported = status(self.fixture.root)
+        self.assertEqual(feedback["feedback_id"], "FB-0001")
+        self.assertEqual(feedback["target_phase"], "code")
+        self.assertFalse(reported["gates"]["code"])
+        self.assertFalse(reported["gates"]["test"])
+        self.assertEqual(reported["rework"]["feedback_id"], "FB-0001")
+        self.assertEqual(reported["rework"]["stage"], "reported")
+
+        dispatched = before_task(self.fixture.root, "coder")
+        manifest = read_markdown_record(
+            self.fixture.root / dispatched["context_pack"]["paths"][0]
+        )
+        self.assertEqual(manifest["brief"]["rework"]["feedback_id"], "FB-0001")
+        self.assertEqual(
+            manifest["brief"]["rework"]["actual"],
+            "返回与 AC 不一致的错误状态",
+        )
+
+        feature = self.fixture.root / "src" / "feature.py"
+        feature.write_text(
+            "def feature(): return 'reverified'\n",
+            encoding="utf-8",
+        )
+        validate_coder_handoff(self.fixture.root, json.dumps({
+            "summary": "修复人工反馈",
+            "open_issues": [],
+            "full_scan": False,
+            "full_scan_reason": None,
+        }))
+        compile_restart_verify(self.fixture.root)
+
+        reverified = status(self.fixture.root)
+        self.assertTrue(reverified["gates"]["code"])
+        self.assertFalse(reverified["gates"]["test"])
+        self.assertEqual(reverified["rework"]["stage"], "code_verified")
+
+    def test_passed_code_rejects_repeat_coder_without_feedback(self) -> None:
+        self._through_code()
+
+        with self.assertRaisesRegex(
+            SdlcError,
+            "code gate 已通过；再次派发 coder 必须先记录结构化 Feedback",
+        ):
+            before_task(self.fixture.root, "coder")
+
+    def test_coder_source_query_is_limited_to_active_context_references(self) -> None:
+        self._through_code()
+        source_ref = load_current_spec(
+            self.fixture.root,
+        )["requirements"]["items"][0]["source_refs"][0]
+        unrelated = ingest_source(self.fixture.root, {
+            "kind": "inline",
+            "source": "unrelated",
+            "content": "不属于当前已发布 Spec 或 Feedback 的来源",
+        })
+        execute(self.fixture.root, "rework", {
+            "origin": "manual_preview",
+            "classification": "implementation",
+            "summary": "人工发现实现与来源不一致",
+            "expected": "实现遵循当前来源",
+            "actual": "实现偏离当前来源",
+            "reproduction_steps": ["启动预览", "执行功能", "观察偏差"],
+            "affected_ids": ["R-0001"],
+            "source_refs": [
+                f"{source_ref['source_id']}#{source_ref['anchor']}",
+            ],
+            "evidence_refs": [],
+        })
+        with self.assertRaisesRegex(
+            SdlcError,
+            "coder Source 查询要求 active coder attempt",
+        ):
+            execute(self.fixture.root, "source-query", {
+                "source_id": source_ref["source_id"],
+                "anchor": source_ref["anchor"],
+                "requester": "sdlc-coder",
+            })
+        execute(self.fixture.root, "task-before", {
+            "role": "coder",
+            "owner_pid": os.getpid(),
+        })
+
+        allowed = execute(self.fixture.root, "source-query", {
+            "source_id": source_ref["source_id"],
+            "anchor": source_ref["anchor"],
+            "requester": "sdlc-coder",
+        })
+        self.assertEqual(allowed["source_id"], source_ref["source_id"])
+
+        with self.assertRaisesRegex(
+            SdlcError,
+            "coder 只能查询当前 Spec/Feedback context 声明的 Source anchor",
+        ):
+            execute(self.fixture.root, "source-query", {
+                "source_id": unrelated["source_id"],
+                "anchor": unrelated["anchors"][0]["anchor"],
+                "requester": "sdlc-coder",
+            })
+
+    def test_manual_feedback_resolves_only_after_reverified_delivery(self) -> None:
+        self._through_code()
+        source_ref = load_current_spec(
+            self.fixture.root,
+        )["requirements"]["items"][0]["source_refs"][0]
+        execute(self.fixture.root, "rework", {
+            "origin": "manual_preview",
+            "classification": "implementation",
+            "summary": "人工预览发现行为缺陷",
+            "expected": "功能返回 ok",
+            "actual": "功能返回错误值",
+            "reproduction_steps": ["启动预览", "执行功能", "观察返回值"],
+            "affected_ids": ["R-0001", "T-0001"],
+            "source_refs": [
+                f"{source_ref['source_id']}#{source_ref['anchor']}",
+            ],
+            "evidence_refs": [],
+        })
+        before_task(self.fixture.root, "coder")
+        feature = self.fixture.root / "src" / "feature.py"
+        feature.write_text(
+            "def feature(): return 'ok'  # feedback fix\n",
+            encoding="utf-8",
+        )
+        validate_coder_handoff(self.fixture.root, json.dumps({
+            "summary": "修复人工反馈",
+            "open_issues": [],
+            "full_scan": False,
+            "full_scan_reason": None,
+        }))
+        compile_restart_verify(self.fixture.root)
+
+        code_verified = status(self.fixture.root)
+        self.assertEqual(code_verified["rework"]["status"], "active")
+        self.assertEqual(code_verified["rework"]["stage"], "code_verified")
+        self.assertFalse(code_verified["gates"]["test"])
+
+        self._through_tester()
+        delivery = verify_delivery(self.fixture.root)
+
+        completed = status(self.fixture.root)
+        self.assertTrue(delivery["ok"])
+        self.assertTrue(completed["gates"]["test"])
+        self.assertEqual(completed["rework"]["status"], "resolved")
+        self.assertEqual(completed["rework"]["stage"], "verified")
+
+    def test_automated_test_failure_requires_structured_feedback_before_code(self) -> None:
+        self._through_code()
+        source_ref = load_current_spec(
+            self.fixture.root,
+        )["requirements"]["items"][0]["source_refs"][0]
+        failed = begin_attempt(
+            self.fixture.root,
+            phase="test",
+            step="verify_delivery",
+            operation="lifecycle",
+            payload={"action": "verify_delivery"},
+        )
+        finish_attempt(
+            self.fixture.root,
+            failed,
+            state="failed",
+            error="functional assertion failed",
+        )
+
+        with self.assertRaisesRegex(
+            SdlcError,
+            "禁止通过切换阶段清除失败状态",
+        ):
+            begin_attempt(
+                self.fixture.root,
+                phase="code",
+                step="task-before:coder",
+                operation="task-before",
+                payload={"role": "coder"},
+            )
+
+        feedback = execute(self.fixture.root, "rework", {
+            "origin": "automated_test",
+            "classification": "implementation",
+            "summary": "T-0001 functional assertion failed",
+            "expected": "功能测试通过",
+            "actual": "functional assertion failed",
+            "reproduction_steps": ["执行 T-0001"],
+            "affected_ids": ["R-0001", "T-0001"],
+            "source_refs": [
+                f"{source_ref['source_id']}#{source_ref['anchor']}",
+            ],
+            "evidence_refs": [
+                status(self.fixture.root)["journal"]["last_error_ref"],
+            ],
+        })
+
+        current = status(self.fixture.root)
+        self.assertEqual(feedback["target_phase"], "code")
+        self.assertEqual(current["journal"]["phase"], "code")
+        self.assertEqual(current["journal"]["state"], "running")
+        self.assertFalse(current["gates"]["code"])
+        self.assertEqual(before_task(self.fixture.root, "coder")["role"], "coder")
+
+    def test_spec_feedback_blocks_coder_until_revised_spec_is_published(self) -> None:
+        self._through_code()
+        publication = read_json(next(
+            (
+                self.fixture.root
+                / ".sdlc-pipeline"
+                / "state"
+                / "publications"
+            ).glob("*.json")
+        ))
+        source_ref = load_current_spec(
+            self.fixture.root,
+        )["requirements"]["items"][0]["source_refs"][0]
+        feedback = execute(self.fixture.root, "rework", {
+            "origin": "manual_preview",
+            "classification": "spec",
+            "summary": "人工确认已发布 AC 缺少错误场景",
+            "expected": "AC 声明错误场景",
+            "actual": "AC 只声明成功场景",
+            "reproduction_steps": ["评审人工预览结果", "对照固定来源"],
+            "affected_ids": ["R-0001"],
+            "source_refs": [
+                f"{source_ref['source_id']}#{source_ref['anchor']}",
+            ],
+            "evidence_refs": [],
+        })
+
+        self.assertEqual(feedback["target_phase"], "spec")
+        approve_and_promote(
+            self.fixture.root,
+            candidate_id=publication["candidate_id"],
+            content_hash=publication["content_hash"],
+            confirmed=True,
+        )
+        self.assertEqual(status(self.fixture.root)["rework"]["stage"], "reported")
+        with self.assertRaisesRegex(
+            SdlcError,
+            "Feedback 要求先发布修订后的 Spec baseline",
+        ):
+            before_task(self.fixture.root, "coder")
+
+        revised = spec_payload()
+        revised["requirements"]["items"][0]["acceptance_criteria"].append(
+            "错误场景返回明确状态"
+        )
+        publish_spec(self.fixture.root, revised)
+
+        published = status(self.fixture.root)
+        self.assertEqual(published["rework"]["stage"], "spec_published")
+        self.assertFalse(published["gates"]["code"])
+        self.assertEqual(before_task(self.fixture.root, "coder")["role"], "coder")
+
     def test_declared_test_script_can_be_added_after_code_gate(self) -> None:
         self._through_code()
         self._through_tester()
@@ -994,6 +1267,22 @@ class ClosedLoopTests(unittest.TestCase):
             "task/tester-before",
         )
 
+        source_ref = load_current_spec(
+            self.fixture.root,
+        )["requirements"]["items"][0]["source_refs"][0]
+        execute(self.fixture.root, "rework", {
+            "origin": "manual_preview",
+            "classification": "implementation",
+            "summary": "人工复核发现实现需要返工",
+            "expected": "实现符合 R-0001",
+            "actual": "实现行为与 R-0001 不一致",
+            "reproduction_steps": ["打开预览", "执行功能", "观察不一致行为"],
+            "affected_ids": ["R-0001", "T-0001"],
+            "source_refs": [
+                f"{source_ref['source_id']}#{source_ref['anchor']}",
+            ],
+            "evidence_refs": [],
+        })
         before_task(self.fixture.root, "coder")
         feature = self.fixture.root / "src" / "feature.py"
         feature.write_text("def feature(): return 'reworked'\n", encoding="utf-8")
@@ -1277,6 +1566,26 @@ class ClosedLoopTests(unittest.TestCase):
         final_status = status(self.fixture.root)
         self.assertEqual(final_status["current_version"], "V0001")
         self.assertEqual(final_status["stage"], "version")
+        source_ref = load_current_spec(
+            self.fixture.root,
+        )["requirements"]["items"][0]["source_refs"][0]
+        with self.assertRaisesRegex(
+            SdlcError,
+            "已结束的 Run 不能原地返工",
+        ):
+            execute(self.fixture.root, "rework", {
+                "origin": "manual_acceptance",
+                "classification": "implementation",
+                "summary": "已固化版本发现缺陷",
+                "expected": "行为符合 R-0001",
+                "actual": "行为不符合 R-0001",
+                "reproduction_steps": ["安装已固化版本", "执行功能"],
+                "affected_ids": ["R-0001"],
+                "source_refs": [
+                    f"{source_ref['source_id']}#{source_ref['anchor']}",
+                ],
+                "evidence_refs": [],
+            })
 
     def test_verify_delivery_reuses_success_for_same_fingerprint(self) -> None:
         self._through_code()
@@ -1462,55 +1771,17 @@ class ReliabilityTests(unittest.TestCase):
             error="functional assertion failed",
         )
 
-        rework = begin_attempt(
-            self.fixture.root,
-            phase="code",
-            step="compile_restart_verify",
-            operation="lifecycle",
-            payload={"action": "compile_restart_verify"},
-        )
-
-        current = journal_status(self.fixture.root)
-        self.assertEqual(rework["phase"], "code")
-        self.assertEqual(current["phase"], "code")
-        self.assertEqual(current["state"], "running")
-        self.assertEqual(current["last_failure"]["repeat_count"], 1)
-
-    def test_failed_test_run_requires_explicit_reason_for_spec_rework(self) -> None:
-        failed = begin_attempt(
-            self.fixture.root,
-            phase="test",
-            step="verify_delivery",
-            operation="lifecycle",
-            payload={"action": "verify_delivery"},
-        )
-        finish_attempt(
-            self.fixture.root,
-            failed,
-            state="failed",
-            error="published verification expects an invalid device envelope",
-        )
-
-        with self.assertRaisesRegex(SdlcError, "禁止通过切换阶段清除失败状态"):
+        with self.assertRaisesRegex(
+            SdlcError,
+            "禁止通过切换阶段清除失败状态",
+        ):
             begin_attempt(
                 self.fixture.root,
-                phase="spec",
-                step="source",
-                operation="publish",
-                payload={"kind": "source"},
+                phase="code",
+                step="compile_restart_verify",
+                operation="lifecycle",
+                payload={"action": "compile_restart_verify"},
             )
-        with self.assertRaisesRegex(SdlcError, "spec-rework 必须携带非空 reason"):
-            execute(self.fixture.root, "spec-rework", {"reason": ""})
-
-        rework = execute(self.fixture.root, "spec-rework", {
-            "reason": "T-0001 与固定服务 envelope 不一致",
-        })
-
-        current = journal_status(self.fixture.root)
-        self.assertTrue(rework["ok"])
-        self.assertEqual(current["phase"], "spec")
-        self.assertEqual(current["state"], "running")
-        self.assertEqual(current["last_failure"]["repeat_count"], 1)
 
     def test_status_reconciles_abandoned_attempt_without_next_action(self) -> None:
         abandoned = begin_attempt(

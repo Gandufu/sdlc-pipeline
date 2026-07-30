@@ -15,12 +15,25 @@ compile/package/lint/typecheck、启动与 readiness，并保留预览进程供�
 Core 会保留失败 evidence 并在同一 code phase 创建下一 attempt，重新执行完整 code gate。若重复次数不是
 1 或 Run 已 blocked，则报告并停止，禁止重试。
 
-在不满足上述 code failure retry 条件的常规情况下，当 `sdlc_status.gates.code=true` 时，立即报告 code
-阶段完成并停止本会话。唯一例外是：
-`sdlc_status.journal.state=failed`、`journal.phase=test`，并且本次 `$ARGUMENTS` 明确要求“返工”或
-“修复代码”。此时先读取失败 evidence，确认是业务代码问题后，只派发一次聚焦的 `sdlc-coder` 修复已发布
-范围内的代码；不得修改测试、配置或 Spec。该 task 会由 Core 以 `code` phase 原子记录
-`run.rework_started`，并重新执行完整 code gate。没有这三个条件时不得借由 `/sdlc-code` 重复构建。
+当用户在 code gate 通过后的人工预览/验收中报告缺陷，或 test attempt 已失败时，不得直接重复派发 coder。
+先把用户已明确提供的事实和现有 evidence 整理为完整 Feedback，并调用一次 `sdlc_begin_rework`：
+`origin` 区分 `manual_preview`、`manual_acceptance`、`automated_test`；`classification` 必须判断为
+`implementation`、`spec` 或 `test_contract`；同时提供 `summary`、`expected`、`actual`、非空
+`reproduction_steps`、当前 Spec 中的 `affected_ids`，以及可为空的 `source_refs`、`evidence_refs`。
+不能从现有信息确定预期、实际结果、复现步骤或影响范围时，先向用户补问，禁止编造后调用。
+
+只有工具返回 `target_phase=code` 时，才派发一次聚焦 `sdlc-coder`，修复 Feedback 指向的业务代码并重新执行
+完整 code gate。若返回 `target_phase=spec`，立即报告需要执行 `/sdlc-spec` 发布修订 baseline，不得派发
+coder。已有 active rework 时继续恢复该 rework，禁止为同一缺陷重复登记 Feedback。
+
+在不满足 code failure retry 且没有 active rework 的情况下，`sdlc_status.gates.code=true` 表示 code
+阶段已完成，应报告预览入口并停止本会话，不得借由 `/sdlc-code` 重复构建。
+
+本次命令参数可能包含人工反馈、复现信息或修复意图，必须按上述 Feedback 合同处理，不得丢弃：
+
+<user-input>
+$ARGUMENTS
+</user-input>
 
 无论常规 code 阶段还是上述 retry/返工，都不得调用任何 `sdlc_lifecycle` action（特别是
 `verify_delivery`），不得自行进入 test 阶段；测试只能由用户后续明确执行 `/sdlc-test`。

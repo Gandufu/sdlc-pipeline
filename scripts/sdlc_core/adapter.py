@@ -223,6 +223,7 @@ def _context_resources(root: Path, role: str) -> list[dict[str, Any]]:
 
 def build_context_pack(root: Path, role: str) -> dict[str, Any]:
     from .memory import delivery_memory
+    from .feedback import active_feedback
 
     spec = load_current_spec(root)
     requirements = spec["requirements"]["items"]
@@ -267,6 +268,18 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
         }),
         "confirmed_decisions": delivery_memory(root)["decisions"],
     }
+    if role == "coder":
+        feedback = active_feedback(root)
+        if feedback is not None:
+            brief["rework"] = {
+                key: feedback[key]
+                for key in (
+                    "feedback_id", "origin", "classification", "summary",
+                    "expected", "actual", "reproduction_steps",
+                    "affected_ids", "source_refs", "evidence_refs",
+                    "target_phase", "stage",
+                )
+            }
     if role == "tester":
         brief.update({
             "test_ids": [item["id"] for item in tests],
@@ -323,6 +336,20 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         current["gates"]["init"] and current["gates"]["spec"]
     ):
         raise SdlcError("coder 门禁要求 init 与 spec 均通过")
+    if role == "coder" and current["gates"]["code"]:
+        raise SdlcError(
+            "code gate 已通过；再次派发 coder 必须先记录结构化 Feedback"
+        )
+    rework = current.get("rework") or {}
+    if (
+        role == "coder"
+        and rework.get("status") == "active"
+        and rework.get("target_phase") == "spec"
+        and rework.get("stage") != "spec_published"
+    ):
+        raise SdlcError(
+            "Feedback 要求先发布修订后的 Spec baseline，再派发 coder"
+        )
     if role == "tester" and not current["gates"]["code"]:
         raise SdlcError("tester 门禁要求 code gate 已通过")
     if role == "coder":

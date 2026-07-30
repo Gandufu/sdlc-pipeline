@@ -36,32 +36,110 @@ def active_run(root: Path) -> dict[str, Any] | None:
     )
 
 
+def start_rework(
+    root: Path,
+    *,
+    feedback_id: str,
+    target_phase: str,
+    origin: str,
+    classification: str,
+) -> dict[str, Any]:
+    run = active_run(root)
+    if not run or run.get("state") in {"succeeded", "aborted"}:
+        run = ensure_run(root, target_phase)
+    if run.get("state") == "blocked":
+        raise SdlcError("当前 Run 已 blocked，不能原地开始返工")
+    current = run.get("rework")
+    if isinstance(current, dict) and current.get("status") == "active":
+        raise SdlcError(f"已有未完成返工 {current.get('feedback_id')}")
+    previous_phase = run.get("phase")
+    previous_state = run.get("state")
+    rework = {
+        "feedback_id": feedback_id,
+        "target_phase": target_phase,
+        "origin": origin,
+        "classification": classification,
+        "status": "active",
+        "stage": "reported",
+        "started_at": utc_now(),
+        "updated_at": utc_now(),
+    }
+    run.update({
+        "phase": target_phase,
+        "state": "running",
+        "rework": rework,
+        "updated_at": utc_now(),
+    })
+    write_compact_index(_run_dir(root, run["run_id"]) / "index.json", run)
+    append_event(
+        root,
+        run["run_id"],
+        "run.rework_started",
+        phase=target_phase,
+        data={
+            "feedback_id": feedback_id,
+            "previous_phase": previous_phase,
+            "previous_state": previous_state,
+            "phase": target_phase,
+            "origin": origin,
+            "classification": classification,
+        },
+    )
+    return rework
+
+
+def advance_rework(root: Path, stage: str) -> dict[str, Any] | None:
+    run = active_run(root)
+    rework = (run or {}).get("rework")
+    if not isinstance(rework, dict) or rework.get("status") != "active":
+        return None
+    rework = {**rework, "stage": stage, "updated_at": utc_now()}
+    run["rework"] = rework
+    run["updated_at"] = utc_now()
+    write_compact_index(_run_dir(root, run["run_id"]) / "index.json", run)
+    append_event(
+        root,
+        run["run_id"],
+        f"feedback.{stage}",
+        phase=run.get("phase"),
+        data={"feedback_id": rework["feedback_id"]},
+    )
+    return rework
+
+
+def resolve_rework(root: Path) -> dict[str, Any] | None:
+    run = active_run(root)
+    rework = (run or {}).get("rework")
+    if not isinstance(rework, dict) or rework.get("status") != "active":
+        return None
+    rework = {
+        **rework,
+        "status": "resolved",
+        "stage": "verified",
+        "resolved_at": utc_now(),
+        "updated_at": utc_now(),
+    }
+    run["rework"] = rework
+    run["updated_at"] = utc_now()
+    write_compact_index(_run_dir(root, run["run_id"]) / "index.json", run)
+    append_event(
+        root,
+        run["run_id"],
+        "feedback.resolved",
+        phase=run.get("phase"),
+        data={"feedback_id": rework["feedback_id"]},
+    )
+    return rework
+
+
 def ensure_run(
     root: Path,
     phase: str,
-    *,
-    spec_rework_reason: str | None = None,
 ) -> dict[str, Any]:
     run = active_run(root)
     if run and run.get("state") not in {"succeeded", "aborted"}:
         if run.get("phase") != phase:
-            rework_from_failed_test = (
-                run.get("state") == "failed"
-                and run.get("phase") == "test"
-                and phase == "code"
-            )
-            rework_spec_from_failed_test = (
-                run.get("state") == "failed"
-                and run.get("phase") == "test"
-                and phase == "spec"
-                and isinstance(spec_rework_reason, str)
-                and bool(spec_rework_reason.strip())
-            )
-            if (
-                run.get("state") in {"failed", "blocked"}
-                and not rework_from_failed_test
-                and not rework_spec_from_failed_test
-            ):
+            if run.get("state") in {"failed", "blocked"}:
                 raise SdlcError(
                     f"Run {run['run_id']} 在 {run['phase']} 阶段失败；"
                     "禁止通过切换阶段清除失败状态"
@@ -75,25 +153,12 @@ def ensure_run(
             append_event(
                 root,
                 run["run_id"],
-                (
-                    "run.rework_started"
-                    if rework_from_failed_test
-                    else (
-                        "run.spec_rework_started"
-                        if rework_spec_from_failed_test
-                        else "run.phase_changed"
-                    )
-                ),
+                "run.phase_changed",
                 phase=phase,
                 data={
                     "previous_phase": previous,
                     "previous_state": previous_state,
                     "phase": phase,
-                    **(
-                        {"reason": spec_rework_reason.strip()}
-                        if rework_spec_from_failed_test
-                        else {}
-                    ),
                 },
             )
         return run
@@ -127,9 +192,8 @@ def begin_attempt(
     payload: dict[str, Any],
     idempotency_key: str | None = None,
     owner_pid: int | None = None,
-    spec_rework_reason: str | None = None,
 ) -> dict[str, Any]:
-    run = ensure_run(root, phase, spec_rework_reason=spec_rework_reason)
+    run = ensure_run(root, phase)
     if run.get("state") == "blocked":
         raise SdlcError(
             "Run 已进入 BLOCKED；请处理最近失败后显式开始新 Run"
@@ -596,6 +660,7 @@ def journal_status(root: Path) -> dict[str, Any]:
         "last_error": _error_message(root, run.get("last_error_ref")),
         "last_error_ref": run.get("last_error_ref"),
         "last_failure": run.get("last_failure"),
+        "rework": run.get("rework"),
         "updated_at": run["updated_at"],
         "session_ref": run["session_ref"],
         "running_attempts": [

@@ -322,11 +322,18 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           anchor: tool.schema.string(),
         },
         async execute(args, context) {
-          requireAgent(context, ["sdlc-main"], "sdlc_query_source")
+          requireAgent(
+            context,
+            ["sdlc-main", "sdlc-coder"],
+            "sdlc_query_source",
+          )
           return JSON.stringify(await invoke(
             rootOf(context, fallbackRoot),
             "source-query",
-            args,
+            {
+              ...args,
+              requester: context.agent,
+            },
             { signal: context.abort },
           ))
         },
@@ -498,15 +505,30 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           ))
         },
       }),
-      sdlc_rework_spec_after_test_failure: tool({
-        description: "受控规格返工：仅在 test 阶段失败且失败证据确认存在已发布 Spec 偏移时，带简短原因原子切回 spec。它保留失败证据，普通 spec 调用不能替代此入口。",
+      sdlc_begin_rework: tool({
+        description: "登记结构化 Feedback 并开始受控返工。人工预览/验收缺陷或自动测试失败都必须先走此入口；Core 根据分类路由到 code 或 spec，并使既有通过门禁失效，直到重新验证。",
         args: {
-          reason: tool.schema.string(),
+          origin: tool.schema.enum([
+            "manual_preview", "manual_acceptance", "automated_test",
+          ]),
+          classification: tool.schema.enum([
+            "implementation", "spec", "test_contract",
+          ]),
+          summary: tool.schema.string(),
+          expected: tool.schema.string(),
+          actual: tool.schema.string(),
+          reproduction_steps: tool.schema.array(tool.schema.string()),
+          affected_ids: tool.schema.array(tool.schema.string()),
+          source_refs: tool.schema.array(sourceRef),
+          evidence_refs: tool.schema.array(tool.schema.string()),
         },
         async execute(args, context) {
-          requireAgent(context, ["sdlc-main"], "sdlc_rework_spec_after_test_failure")
-          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec-rework", {
-            reason: args.reason,
+          requireAgent(context, ["sdlc-main"], "sdlc_begin_rework")
+          return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "rework", {
+            ...args,
+            source_refs: args.source_refs.map(
+              (reference) => `${reference.source_id}#${reference.anchor}`,
+            ),
           }, { signal: context.abort }))
         },
       }),

@@ -25,6 +25,8 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
 - `sdlc_query_source`：按 source_id + anchor 查询受限原文片段；
 - `sdlc_save_spec_work`：保存可恢复的临时决策内容；
 - `sdlc_query_spec_work`：按需恢复临时决策内容；
+- `sdlc_begin_rework`：将人工预览/验收缺陷或自动测试失败登记为结构化 Feedback，并按
+  implementation/spec/test_contract 路由返工；
 - `sdlc_begin_candidate`：创建可恢复候选；
 - `sdlc_put_requirement|design|verification`：逐个写入小 artifact；
 - `sdlc_validate_candidate`：生成 diagnostics、preview 和冻结 hash；
@@ -35,3 +37,8 @@ description: OpenCode-first 轻量交付状态机；处理 init/spec/code/test�
 判断交给 AI：是否需要额外阻塞问题、模块实现、读取哪些业务资源。
 硬事实交给 Core：Schema、anchor、allowed/protected path、Git evidence、PID identity、policy、
 原子产物、失败熔断和最终交付验证。
+
+code gate 通过后发现缺陷时，不直接重复派发 coder，也不做 Git 回滚。主会话先收集 expected、actual、
+复现步骤、受影响 R/D/T/AC、Source 和 evidence，调用 `sdlc_begin_rework`。implementation 在同一 Run
+中重新完成 code/test；spec 或 test_contract 先发布修订 baseline。只有重新通过 delivery gate 后
+Feedback 才 resolved；已结束 Run 的缺陷另建修复 Task/Run。

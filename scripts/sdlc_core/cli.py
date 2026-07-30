@@ -44,6 +44,7 @@ from .journal import (
 from .status import status
 from .versions import finalize
 from .sources import ingest_source, query_source
+from .feedback import authorize_coder_source_query, begin_rework
 from .spec_candidates import (
     begin_candidate,
     put_design,
@@ -66,11 +67,6 @@ def _input() -> dict[str, Any]:
 
 def _validate_request(operation: str, payload: dict[str, Any]) -> None:
     """Reject structurally incomplete requests before they can affect a Run."""
-    if operation == "spec-rework":
-        reason = payload.get("reason")
-        if not isinstance(reason, str) or not reason.strip():
-            raise SdlcError("spec-rework 必须携带非空 reason")
-        return
     if operation != "spec-candidate" or payload.get("action") != "approve":
         return
     missing = [
@@ -90,11 +86,22 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
     if operation == "status":
         return status(root)
     if operation == "source-query":
+        requester = payload.get("requester")
+        if requester == "sdlc-coder":
+            authorize_coder_source_query(
+                root,
+                payload["source_id"],
+                payload["anchor"],
+            )
+        elif requester not in {None, "sdlc-main"}:
+            raise SdlcError(
+                f"source-query 不允许 requester={requester}"
+            )
         return query_source(root, payload["source_id"], payload["anchor"])
     if operation == "spec-work-query":
         return query_spec_work(root)
-    if operation == "spec-rework":
-        return {"ok": True, "reason": payload["reason"].strip()}
+    if operation == "rework":
+        return begin_rework(root, payload)
     if operation == "spec-candidate":
         action = payload.get("action")
         if action == "begin":
@@ -266,8 +273,6 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
 
 
 def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
-    if operation == "spec-rework":
-        return "spec", "spec-rework"
     if operation == "spec-candidate":
         return "spec", str(payload.get("action", "candidate"))
     if operation == "publish":
@@ -296,6 +301,8 @@ def _phase_step(operation: str, payload: dict[str, Any]) -> tuple[str, str]:
 
 def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, Any]:
     _validate_request(operation, payload)
+    if operation == "rework":
+        return _execute(root, operation, payload)
     if operation in {"task-heartbeat", "task-cancel"}:
         return _execute(root, operation, payload)
     if operation == "task-before":
@@ -355,11 +362,6 @@ def execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, An
         operation=operation,
         payload=effective_payload,
         idempotency_key=idempotency_key,
-        spec_rework_reason=(
-            effective_payload["reason"]
-            if operation == "spec-rework"
-            else None
-        ),
     )
     if attempt.get("cached"):
         return attempt["result"]
@@ -389,7 +391,8 @@ def main() -> int:
         choices=(
             "status", "publish", "lifecycle", "task-before", "task-after",
             "task-heartbeat", "task-cancel", "write-check", "path-check", "finalize",
-            "spec-candidate", "spec-rework", "source-query", "spec-work-query",
+            "spec-candidate", "source-query", "spec-work-query",
+            "rework",
         ),
     )
     parser.add_argument("--root", help="项目根目录")

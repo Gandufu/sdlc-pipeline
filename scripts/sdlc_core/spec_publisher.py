@@ -72,6 +72,7 @@ def approve_and_promote(
                 root, "publication-receipt.schema.json", receipt
             )
             write_compact_index(receipt_path, receipt)
+        _mark_rework_spec_published(root)
         return {
             "ok": True,
             "candidate_id": candidate_id,
@@ -156,6 +157,7 @@ def approve_and_promote(
     receipt["updated_at"] = utc_now()
     validate_schema_instance(root, "publication-receipt.schema.json", receipt)
     write_compact_index(receipt_path, receipt)
+    _mark_rework_spec_published(root)
     return {
         "ok": True,
         "candidate_id": candidate_id,
@@ -165,6 +167,25 @@ def approve_and_promote(
         "candidate_cleanup": cleanup,
         "spec_work_cleanup": spec_work_cleanup,
     }
+
+
+def _mark_rework_spec_published(root: Path) -> None:
+    from .journal import active_run, advance_rework
+    from .feedback import active_feedback
+
+    rework = (active_run(root) or {}).get("rework")
+    if (
+        isinstance(rework, dict)
+        and rework.get("status") == "active"
+        and rework.get("target_phase") == "spec"
+    ):
+        feedback = active_feedback(root)
+        current = read_compact_index(root / "docs" / "sdlc" / "current.json")
+        if (
+            feedback is not None
+            and current.get("baseline_id") != feedback.get("reported_baseline_id")
+        ):
+            advance_rework(root, "spec_published")
 
 
 def _publication_receipt_path(root: Path, candidate_id: str) -> Path:

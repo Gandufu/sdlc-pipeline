@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sdlc-pipeline.local/schemas/interactions/rework.schema.json",
+  "type": "object",
+  "required": [
+    "origin",
+    "classification",
+    "summary",
+    "expected",
+    "actual",
+    "reproduction_steps",
+    "affected_ids",
+    "source_refs",
+    "evidence_refs"
+  ],
+  "properties": {
+    "origin": {
+      "enum": ["manual_preview", "manual_acceptance", "automated_test"]
+    },
+    "classification": {
+      "enum": ["implementation", "spec", "test_contract"]
+    },
+    "summary": {"type": "string", "minLength": 1},
+    "expected": {"type": "string", "minLength": 1},
+    "actual": {"type": "string", "minLength": 1},
+    "reproduction_steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "affected_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(R|D|T)-[0-9]{4}$|^AC-R-[0-9]{4}-[0-9]{2}$"
+      }
+    },
+    "source_refs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^SRC-[A-F0-9]{12}#[^#]+$"
+      }
+    },
+    "evidence_refs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    }
+  },
+  "additionalProperties": false
+}
