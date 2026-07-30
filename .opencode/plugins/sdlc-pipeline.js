@@ -143,7 +143,6 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
     })),
   })
   const requirement = tool.schema.object({
-    id: tool.schema.string().optional(),
     feature_id: tool.schema.string(),
     title: tool.schema.string(),
     goal: tool.schema.string(),
@@ -162,7 +161,6 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
     })),
   })
   const design = tool.schema.object({
-    id: tool.schema.string().optional(),
     title: tool.schema.string(),
     requirement_ids: tool.schema.array(tool.schema.string()),
     modules: tool.schema.array(moduleSpec),
@@ -172,13 +170,8 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
     decisions: tool.schema.array(tool.schema.string()),
   })
   const verification = tool.schema.object({
-    id: tool.schema.string().optional(),
     requirement_ids: tool.schema.array(tool.schema.string()),
-    design_ids: tool.schema.array(tool.schema.string()),
-    acceptance_criteria_ids: tool.schema.array(tool.schema.string()),
     level: tool.schema.enum(["unit", "functional"]),
-    test_key: tool.schema.string(),
-    selector: tool.schema.string().optional(),
     preconditions: tool.schema.string(),
     expected: tool.schema.string(),
     mandatory: tool.schema.boolean(),
@@ -222,7 +215,13 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_spec: tool({
-        description: "一次性校验完整 Spec，或在用户确认后直接发布正式 baseline；未发布正文不落盘。",
+        description: [
+          "一次性校验完整 Spec，或在用户确认后直接发布正式 baseline；未发布正文不落盘。",
+          "不要提交 R/D/T/AC 的 id、design_ids、acceptance_criteria_ids、test_key 或 selector；它们全部由 Core 分配。",
+          "designs/verification 的 requirement_ids 可引用输入中的 Requirement 临时名称，Core 会重写为 R-0001 格式。",
+          "extension_points 只使用 sdlc_status.spec_contract 中列出的值；无法匹配时 Core 使用脚手架受控范围。",
+          "校验失败后立即向用户报告原始错误并停止，本轮不得猜测格式、搜索插件文件或自动重试。",
+        ].join(" "),
         args: {
           action: tool.schema.enum(["prepare", "approve"]),
           spec,

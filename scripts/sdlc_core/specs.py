@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import uuid
 from pathlib import Path
@@ -17,13 +16,6 @@ from .lifecycle_contract import normalize_test_selector
 from .records import write_compact_index
 from .schema_validation import validate_schema_instance
 from .task_state import set_pending_spec, task_status, transition
-
-
-_ID_PATTERNS = {
-    "requirements": re.compile(r"^R-[0-9]{4}$"),
-    "designs": re.compile(r"^D-[0-9]{4}$"),
-    "verification": re.compile(r"^T-[0-9]{4}$"),
-}
 
 
 def prepare_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
@@ -72,11 +64,21 @@ def _normalize_and_validate(root: Path, payload: dict[str, Any]) -> dict[str, An
     title = str(payload.get("title", "")).strip()
     if not title:
         raise SdlcError("Spec title 不能为空")
-    requirements = _numbered(payload.get("requirements"), "requirements")
-    designs = _numbered(payload.get("designs"), "designs")
-    verification = _numbered(payload.get("verification"), "verification")
+    requirements, requirement_aliases = _numbered(
+        payload.get("requirements"), "requirements"
+    )
+    designs, design_aliases = _numbered(payload.get("designs"), "designs")
+    verification, _ = _numbered(payload.get("verification"), "verification")
+    feature_aliases: dict[str, str] = {}
+    for index, requirement in enumerate(requirements, 1):
+        alias = str(requirement.get("feature_id", "")).strip() or f"feature-{index}"
+        requirement["feature_id"] = feature_aliases.setdefault(
+            alias, f"F-{len(feature_aliases) + 1:04d}"
+        )
     normalized_requirements = []
+    criterion_aliases: dict[str, str] = {}
     for requirement in requirements:
+        original_requirement_id = requirement.pop("_input_id", "")
         value = {
             **requirement,
             "schema_version": "3.0",
@@ -84,7 +86,16 @@ def _normalize_and_validate(root: Path, payload: dict[str, Any]) -> dict[str, An
             "supersedes": requirement.get("supersedes"),
         }
         value["acceptance_criteria"] = [
-            {**criterion, "id": f"AC-{value['id']}-{index:02d}"}
+            {
+                **criterion,
+                "id": _criterion_id(
+                    criterion_aliases,
+                    criterion,
+                    value["id"],
+                    original_requirement_id,
+                    index,
+                ),
+            }
             for index, criterion in enumerate(
                 requirement.get("acceptance_criteria", []), 1
             )
@@ -93,21 +104,62 @@ def _normalize_and_validate(root: Path, payload: dict[str, Any]) -> dict[str, An
         normalized_requirements.append(value)
     normalized_designs = []
     for design in designs:
+        design.pop("_input_id", None)
         value = {
             **design,
             "schema_version": "3.0",
             "decision_ids": design.get("decision_ids", []),
+            "requirement_ids": _rewrite_refs(
+                design.get("requirement_ids"),
+                requirement_aliases,
+                "Requirement",
+            ),
         }
+        value["extension_points"] = _normalize_extension_points(root, value)
         validate_schema_instance(root, "artifacts/design.schema.json", value)
         normalized_designs.append(value)
     lifecycle = read_json(lifecycle_path(root))
     normalized_verification = []
     for item in verification:
-        value = {**item, "schema_version": "3.0"}
+        item.pop("_input_id", None)
+        requirement_ids = _rewrite_refs(
+            item.get("requirement_ids"),
+            requirement_aliases,
+            "Requirement",
+        )
+        design_ids = [
+            design["id"]
+            for design in normalized_designs
+            if set(design["requirement_ids"]) & set(requirement_ids)
+        ]
+        acceptance_criteria_ids = [
+            criterion["id"]
+            for requirement in normalized_requirements
+            if requirement["id"] in requirement_ids
+            for criterion in requirement["acceptance_criteria"]
+        ]
+        level = item.get("level")
+        if level not in {"unit", "functional"}:
+            raise SdlcError(f"{item['id']} level 必须是 unit 或 functional")
+        test_key = level
+        selector = (
+            f"tests/{item['id']}.test.ts"
+            if level == "unit"
+            else f"tests/functional/{item['id']}.functional.ts"
+        )
+        value = {
+            **item,
+            "schema_version": "3.0",
+            "requirement_ids": requirement_ids,
+            "design_ids": design_ids,
+            "acceptance_criteria_ids": acceptance_criteria_ids,
+            "test_key": test_key,
+            "selector": selector,
+        }
         value["selector"] = normalize_test_selector(
             lifecycle,
-            value["test_key"],
-            value.get("selector"),
+            test_key,
+            selector,
             test_id=value["id"],
         )
         validate_schema_instance(root, "artifacts/verification.schema.json", value)
@@ -122,22 +174,80 @@ def _normalize_and_validate(root: Path, payload: dict[str, Any]) -> dict[str, An
     }
 
 
-def _numbered(value: Any, group: str) -> list[dict[str, Any]]:
+def _numbered(
+    value: Any, group: str
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
     if not isinstance(value, list) or not value:
         raise SdlcError(f"Spec {group} 至少包含一项")
-    result = []
-    pattern = _ID_PATTERNS[group]
+    result: list[dict[str, Any]] = []
+    aliases: dict[str, str] = {}
     prefix = {"requirements": "R", "designs": "D", "verification": "T"}[group]
     for index, item in enumerate(value, 1):
         if not isinstance(item, dict):
             raise SdlcError(f"Spec {group}[{index}] 必须是对象")
-        identifier = str(item.get("id", "")).strip() or f"{prefix}-{index:04d}"
-        if not pattern.fullmatch(identifier):
-            raise SdlcError(f"非法 {group} ID: {identifier}")
-        result.append({**item, "id": identifier})
-    if len({item["id"] for item in result}) != len(result):
-        raise SdlcError(f"Spec {group} ID 重复")
+        identifier = f"{prefix}-{index:04d}"
+        input_id = str(item.get("id", "")).strip()
+        if input_id:
+            if input_id in aliases:
+                raise SdlcError(f"Spec {group} 输入 ID 重复: {input_id}")
+            aliases[input_id] = identifier
+        aliases[identifier] = identifier
+        result.append({**item, "id": identifier, "_input_id": input_id})
+    return result, aliases
+
+
+def _criterion_id(
+    aliases: dict[str, str],
+    criterion: dict[str, Any],
+    requirement_id: str,
+    input_requirement_id: str,
+    index: int,
+) -> str:
+    identifier = f"AC-{requirement_id}-{index:02d}"
+    input_id = str(criterion.get("id", "")).strip()
+    for alias in (
+        input_id,
+        f"{input_requirement_id}-AC{index}" if input_requirement_id else "",
+        identifier,
+    ):
+        if alias:
+            aliases[alias] = identifier
+    return identifier
+
+
+def _rewrite_refs(
+    values: Any,
+    aliases: dict[str, str],
+    label: str,
+) -> list[str]:
+    if not isinstance(values, list) or not values:
+        raise SdlcError(f"{label} 引用至少包含一项")
+    result = []
+    for value in values:
+        alias = str(value).strip()
+        if alias not in aliases:
+            raise SdlcError(f"未知 {label} 引用: {alias}")
+        canonical = aliases[alias]
+        if canonical not in result:
+            result.append(canonical)
     return result
+
+
+def _normalize_extension_points(
+    root: Path,
+    design: dict[str, Any],
+) -> list[str]:
+    allowed = [
+        item["id"]
+        for item in read_json(scaffold_path(root)).get("extension_points", [])
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    ]
+    selected = [
+        value
+        for value in design.get("extension_points", [])
+        if value in allowed
+    ]
+    return list(dict.fromkeys(selected)) or allowed
 
 
 def _validate_relations(

@@ -126,6 +126,43 @@ class TaskFlowTests(unittest.TestCase):
         loaded = load_current_spec(self.root)
         self.assertEqual(loaded["requirements"]["items"][0]["id"], "R-0001")
 
+    def test_core_canonicalizes_agent_generated_spec_identifiers(self) -> None:
+        record_input(self.root, "实现设备管理")
+        spec = _spec()
+        spec["requirements"][0]["id"] = "REQ-DEVICE"
+        spec["requirements"][0]["feature_id"] = "FEATURE-DEVICE"
+        spec["designs"][0]["id"] = "DESIGN-DEVICE"
+        spec["designs"][0]["requirement_ids"] = ["REQ-DEVICE"]
+        spec["designs"][0]["extension_points"] = ["semantic renderer description"]
+        spec["verification"][0].update({
+            "id": "VERIFY-DEVICE",
+            "requirement_ids": ["REQ-DEVICE"],
+            "design_ids": ["DESIGN-DEVICE"],
+            "acceptance_criteria_ids": ["REQ-DEVICE-AC1"],
+            "test_key": "invented-suite",
+            "selector": "invented/path.test.ts",
+        })
+        ready = prepare_spec(self.root, spec)
+        self.assertEqual(
+            ready["affected_ids"],
+            {"R": ["R-0001"], "D": ["D-0001"], "T": ["T-0001"]},
+        )
+        published = approve_spec(
+            self.root,
+            spec,
+            content_hash=ready["content_hash"],
+            confirmed=True,
+        )
+        loaded = load_current_spec(self.root)
+        self.assertEqual(loaded["requirements"]["items"][0]["feature_id"], "F-0001")
+        self.assertEqual(loaded["design"]["items"][0]["requirement_ids"], ["R-0001"])
+        self.assertEqual(loaded["test_plan"]["items"][0]["command"], "unit")
+        self.assertEqual(
+            loaded["test_plan"]["items"][0]["selector"],
+            "tests/T-0001.test.ts",
+        )
+        self.assertTrue(published["baseline_id"])
+
     def test_approve_rejects_changed_or_unconfirmed_spec(self) -> None:
         record_input(self.root, "实现设备管理")
         spec = _spec()
@@ -183,6 +220,8 @@ class TaskFlowTests(unittest.TestCase):
         self.assertEqual(len(tools), 5)
         for removed in ("sdlc_ingest_source", "sdlc_begin_candidate", "sdlc_begin_rework"):
             self.assertNotIn(removed, plugin)
+        self.assertNotIn("id: tool.schema.string().optional()", plugin)
+        self.assertIn("校验失败后立即向用户报告原始错误并停止", plugin)
 
 
 def _spec() -> dict:

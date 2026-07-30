@@ -185,6 +185,23 @@ def status(root: Path) -> dict[str, Any]:
             for item in blocking_questions
         ],
         "scaffold": {"ok": drift["ok"], "drift": drift["drift"]},
+        "spec_contract": {
+            "core_assigned_fields": [
+                "requirements[].id",
+                "requirements[].acceptance_criteria[].id",
+                "designs[].id",
+                "verification[].id",
+                "verification[].design_ids",
+                "verification[].acceptance_criteria_ids",
+                "verification[].test_key",
+                "verification[].selector",
+            ],
+            "extension_points": [
+                item["id"]
+                for item in scaffold_contract.get("extension_points", [])
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            ],
+        },
         "lifecycle_tests": lifecycle_tests,
         "init_state": init_state,
         "templates": templates,

@@ -35,6 +35,12 @@ Spec 最多询问真正阻塞范围或验收的一项问题。信息充分后一
 才以完全相同的 spec 正文和 hash 调用 `sdlc_spec(approve, ..., confirmed=true)`。
 未发布正文不落盘；发布后只保留正式 baseline。
 
+Spec 输入不得提交 R/D/T/AC ID、`design_ids`、`acceptance_criteria_ids`、`test_key` 或
+`selector`，这些字段全部由 Core 生成。Requirement 可使用临时名称供 Design/Verification
+的 `requirement_ids` 引用，Core 会统一重写。extension point 只使用
+`sdlc_status.spec_contract.extension_points`。`sdlc_spec` 一旦失败，原样报告错误并停止；
+不得在同一轮猜测 ID、搜索插件实现或自动重试。
+
 Code 只派发 `sdlc-coder`；hook 完成 handoff、compile/package/start/readiness 后自动进入
 Human Review。Human Review 通过后，先调用 `review_passed` 再派发 `sdlc-tester`。
 tester 只修改声明的测试脚本；hook 完成权威测试后自动进入 Awaiting Release Approval。

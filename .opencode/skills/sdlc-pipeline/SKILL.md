@@ -26,3 +26,7 @@ description: OpenCode-first 轻量 Task 状态机；处理 spec/code/review/test
 - `sdlc_spec(prepare|approve)`
 - `sdlc_lifecycle(init)`
 - `sdlc_finalize`
+
+`sdlc_spec` 输入不携带 R/D/T/AC ID、测试命令或测试路径；Core 统一分配并重写关联。
+extension point 只从 `sdlc_status.spec_contract` 选择。首次校验失败后报告并停止，
+不得搜索插件实现或猜格式重试。
