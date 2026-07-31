@@ -223,9 +223,11 @@ def record_tokens(
     *,
     input_tokens: int = 0,
     output_tokens: int = 0,
+    reasoning_tokens: int = 0,
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
     repeated_chars: int = 0,
+    cost: float = 0,
     source: str = "opencode",
 ) -> dict[str, Any]:
     value = read_compact_index(token_path(root), required=False) or {
@@ -236,14 +238,18 @@ def record_tokens(
         phase,
         {
             "input": 0, "output": 0, "cache_read": 0, "cache_write": 0,
-            "repeated_chars": 0, "samples": 0,
+            "reasoning": 0, "cost": 0, "repeated_chars": 0, "samples": 0,
         },
     )
+    item.setdefault("reasoning", 0)
+    item.setdefault("cost", 0)
     item["input"] += max(0, int(input_tokens))
     item["output"] += max(0, int(output_tokens))
+    item["reasoning"] += max(0, int(reasoning_tokens))
     item["cache_read"] += max(0, int(cache_read_tokens))
     item["cache_write"] += max(0, int(cache_write_tokens))
     item["repeated_chars"] += max(0, int(repeated_chars))
+    item["cost"] += max(0, float(cost))
     item["samples"] += 1
     item["source"] = source
     value["updated_at"] = utc_now()

@@ -19,6 +19,7 @@ from sdlc_core.adapter import (  # noqa: E402
 from sdlc_core.cli import execute  # noqa: E402
 from sdlc_core.common import SdlcError, git  # noqa: E402
 from sdlc_core.journal import begin_attempt, finish_attempt  # noqa: E402
+from sdlc_core.runs import record_tokens, token_summary  # noqa: E402
 from sdlc_core.specs import approve_spec, prepare_spec  # noqa: E402
 from sdlc_core.stores import (  # noqa: E402
     read_work_record,
@@ -423,8 +424,17 @@ class TaskFlowTests(unittest.TestCase):
             "schemas/candidate-revision.schema.json",
             "schemas/interactions/spec-work.schema.json",
             "schemas/interactions/rework.schema.json",
+            ".opencode/skills/sdlc-pipeline/SKILL.md",
         ):
             self.assertFalse((ROOT / path).exists(), path)
+
+        installer = (ROOT / "scripts/install_project.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            '".opencode/skills/sdlc-pipeline",',
+            installer,
+        )
 
     def test_plugin_surface_is_five_tools(self) -> None:
         plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(encoding="utf-8")
@@ -450,6 +460,20 @@ class TaskFlowTests(unittest.TestCase):
             self.assertIn("<user-input>", command, name)
             self.assertIn("$ARGUMENTS", command, name)
             self.assertIn("</user-input>", command, name)
+
+    def test_spec_command_observes_reads_without_a_hard_gate(self) -> None:
+        command = (ROOT / ".opencode/commands/sdlc-spec.md").read_text(
+            encoding="utf-8"
+        )
+        plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("不做权限门禁或固定次数限制", command)
+        self.assertIn("同一路径内容没有", command)
+        self.assertIn("不得为每个验收点生成独立测试文件", command)
+        self.assertNotIn("specToolViolation", plugin)
+        self.assertNotIn("SPEC_READ_LIMIT", plugin)
 
     def test_status_only_exposes_stage_relevant_contracts(self) -> None:
         record_input(self.root, "实现设备管理")
@@ -511,6 +535,7 @@ class TaskFlowTests(unittest.TestCase):
             self.assertIn("read: allow", agent)
             self.assertIn("edit: allow", agent)
             self.assertIn("bash: allow", agent)
+            self.assertIn("external_directory: allow", agent)
         coder_permissions = coder.split("---", 2)[1]
         tester_permissions = tester.split("---", 2)[1]
         self.assertNotIn("tests/**", coder_permissions)
@@ -672,6 +697,105 @@ class TaskFlowTests(unittest.TestCase):
         self.assertIn("code_reverify_available=true", command)
         self.assertIn("reverify_code", plugin)
         self.assertIn("compile_restart_verify", plugin)
+
+    def test_code_and_test_commands_keep_main_as_a_dispatcher(self) -> None:
+        main = (ROOT / ".opencode/agents/sdlc-main.md").read_text(
+            encoding="utf-8"
+        )
+        code = (ROOT / ".opencode/commands/sdlc-code.md").read_text(
+            encoding="utf-8"
+        )
+        test = (ROOT / ".opencode/commands/sdlc-test.md").read_text(
+            encoding="utf-8"
+        )
+
+        for content in (main, code, test):
+            self.assertIn("派发前禁止调用 `read`、`glob`、`grep`、`bash` 或 `edit`", content)
+        self.assertIn(
+            "Task 已位于 Test 时禁止再次调用 `review_passed`",
+            test,
+        )
+        self.assertIn(
+            "Task 位于 Human Review 时才调用一次 `review_passed`",
+            test,
+        )
+
+    def test_init_requires_status_as_the_first_tool_call(self) -> None:
+        command = (ROOT / ".opencode/commands/sdlc-init.md").read_text(
+            encoding="utf-8"
+        )
+        plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn(
+            "唯一允许的第一项工具调用必须是 `sdlc_status`",
+            command,
+        )
+        self.assertIn(
+            "init 前必须先调用 sdlc_status",
+            plugin,
+        )
+        for content in (command, plugin):
+            self.assertIn(
+                "失败后原样报告并停止",
+                content,
+            )
+        self.assertIn(
+            "禁止自行查端口、结束进程或同轮重试",
+            command,
+        )
+
+    def test_tester_brief_contains_verification_without_duplicate_documents(self) -> None:
+        record_input(self.root, "实现设备管理")
+        ready = prepare_spec(self.root, _spec())
+        approve_spec(
+            self.root,
+            _spec(),
+            content_hash=ready["content_hash"],
+            confirmed=True,
+        )
+
+        build_context_pack(self.root, "tester")
+        context = read_work_record(self.root, "context/tester")
+
+        verification = context["brief"]["verification"][0]
+        self.assertEqual("unit", verification["level"])
+        self.assertEqual("存在设备", verification["preconditions"])
+        self.assertTrue(verification["mandatory"])
+        self.assertFalse(any(
+            item["reason"] == "authoritative Verification"
+            for item in context["resources"]
+        ))
+
+    def test_plugin_records_completed_agent_token_usage_once(self) -> None:
+        plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn('"message.updated"', plugin)
+        self.assertIn("completedTokenMessages", plugin)
+        self.assertIn("info.time?.completed", plugin)
+        self.assertIn("reasoning_tokens", plugin)
+        self.assertIn("cost", plugin)
+
+    def test_token_summary_includes_reasoning_and_cost(self) -> None:
+        record_tokens(
+            self.root,
+            "tester",
+            input_tokens=11,
+            output_tokens=7,
+            reasoning_tokens=3,
+            cache_read_tokens=5,
+            cache_write_tokens=2,
+            cost=0.125,
+            source="opencode-message",
+        )
+
+        tester = token_summary(self.root)["phases"]["tester"]
+        self.assertEqual(3, tester["reasoning"])
+        self.assertEqual(0.125, tester["cost"])
+        self.assertEqual("opencode-message", tester["source"])
 
     def test_task_hook_preserves_main_prompt_and_stops_on_open_issues(self) -> None:
         plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(

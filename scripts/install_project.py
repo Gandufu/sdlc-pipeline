@@ -38,7 +38,6 @@ MANAGED = (
     (".opencode/commands/sdlc-spec.md", ".opencode/commands/sdlc-spec.md"),
     (".opencode/commands/sdlc-code.md", ".opencode/commands/sdlc-code.md"),
     (".opencode/commands/sdlc-test.md", ".opencode/commands/sdlc-test.md"),
-    (".opencode/skills/sdlc-pipeline/SKILL.md", ".opencode/skills/sdlc-pipeline/SKILL.md"),
     (
         ".opencode/skills/extract-project-template",
         ".opencode/skills/extract-project-template",
@@ -46,6 +45,7 @@ MANAGED = (
 )
 OBSOLETE_MANAGED = (
     ".opencode/agents/sdlc-executor.md",
+    ".opencode/skills/sdlc-pipeline",
     ".sdlc-pipeline/opencode",
     ".sdlc-pipeline/scripts",
     ".sdlc-pipeline/templates",

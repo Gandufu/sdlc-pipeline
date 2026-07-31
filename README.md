@@ -3,12 +3,27 @@
 面向 OpenCode 的轻量交付状态机。AI 负责需求、实现和测试判断；Python Core 只负责 Task 状态、
 正式 Spec、代码/测试门禁和最终固化。
 
-## 安装
+## 安装与升级
+
+在目标项目根目录执行远程安装：
+
+```powershell
+curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target .
+```
+
+升级已安装的插件：
+
+```powershell
+curl.exe -fsSL https://raw.githubusercontent.com/Gandufu/sdlc-pipeline/main/scripts/install_project.py | python - --target . --force
+```
+
+在本仓库开发或审计时，可直接使用固定的本地源码安装到隔离项目：
 
 ```powershell
 python scripts/install_project.py --target <project>
 ```
 
+`--force` 会覆盖插件管理的文件并清理安装器声明的旧布局，不要对需要保留旧运行现场的项目直接执行。
 安装后重启 OpenCode，执行 `/sdlc-init`。
 
 ## 最终流程

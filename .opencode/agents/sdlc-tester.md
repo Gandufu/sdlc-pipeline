@@ -6,6 +6,7 @@ permission:
   read: allow
   edit: allow
   bash: allow
+  external_directory: allow
   question: deny
   task:
     "*": deny

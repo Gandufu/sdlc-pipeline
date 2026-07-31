@@ -6,6 +6,7 @@ permission:
   read: allow
   edit: allow
   bash: allow
+  external_directory: allow
   task: deny
   sdlc_status: deny
   sdlc_task: deny

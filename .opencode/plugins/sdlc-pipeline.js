@@ -4,6 +4,11 @@ import { fileURLToPath } from "node:url"
 import path from "node:path"
 
 const AGENTS = { "sdlc-coder": "coder", "sdlc-tester": "tester" }
+const TOKEN_PHASES = {
+  "sdlc-main": "main",
+  "sdlc-coder": "coder",
+  "sdlc-tester": "tester",
+}
 const PLUGIN_PROJECT_ROOT = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)), "..", ".."
 )
@@ -122,6 +127,7 @@ async function logPluginEvent(client, message, extra = {}) {
 export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
   const { tool } = await import("@opencode-ai/plugin")
   const fallbackRoot = resolveProjectRoot({ directory, worktree })
+  const completedTokenMessages = new Set()
   const moduleSpec = tool.schema.object({
     name: tool.schema.string(),
     responsibility: tool.schema.string(),
@@ -180,6 +186,45 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
     verification: tool.schema.array(verification),
   })
   return {
+    event: async ({ event }) => {
+      if (event.type !== "message.updated") return
+      const info = event.properties?.info
+      const phase = TOKEN_PHASES[info?.agent]
+      if (
+        info?.role !== "assistant"
+        || !phase
+        || !info.id
+        || !info.time?.completed
+        || completedTokenMessages.has(info.id)
+      ) return
+      completedTokenMessages.add(info.id)
+      const tokens = info.tokens || {}
+      const cache = tokens.cache || {}
+      const cost = typeof info.cost === "number"
+        ? info.cost
+        : (typeof info.cost?.total === "number" ? info.cost.total : 0)
+      try {
+        await invoke(fallbackRoot, "publish", {
+          kind: "tokens",
+          payload: {
+            phase,
+            input_tokens: tokens.input || 0,
+            output_tokens: tokens.output || 0,
+            reasoning_tokens: tokens.reasoning || 0,
+            cache_read_tokens: cache.read || 0,
+            cache_write_tokens: cache.write || 0,
+            cost,
+            source: "opencode-message",
+          },
+        })
+      } catch (error) {
+        await logPluginEvent(client, "tokens.record_failed", {
+          session_id: info.sessionID,
+          message_id: info.id,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    },
     tool: {
       sdlc_status: tool({
         description: "读取当前 Task、门禁、预览进程和下一步。",
@@ -240,7 +285,12 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         },
       }),
       sdlc_lifecycle: tool({
-        description: "初始化项目，或对已有 Coder handoff 做一次确定性 Code 门禁复验。",
+        description: [
+          "初始化项目，或对已有 Coder handoff 做一次确定性 Code 门禁复验。",
+          "init 前必须先调用 sdlc_status；contracts 不存在时必须等待用户跨消息选择模板并传入 options.template。",
+          "严禁用无参数 init 探测状态。",
+          "任何 lifecycle 失败后原样报告并停止；禁止自行清理端口、结束进程或同轮重试。",
+        ].join(" "),
         args: {
           action: tool.schema.enum(["init", "reverify_code"]),
           options: tool.schema.object({

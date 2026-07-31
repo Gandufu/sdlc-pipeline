@@ -6,7 +6,8 @@ subtask: false
 
 执行无参数 SDLC init。
 
-第一步调用 `sdlc_status`：
+唯一允许的第一项工具调用必须是 `sdlc_status`。在取得状态结果前严禁调用
+`sdlc_lifecycle`，也不得把 init 当成状态探测。取得状态后严格按以下分支行动：
 
 1. `init_state.completed=true`：直接展示已有 init 状态和 evidence 时间并停止，不再调用
    `sdlc_lifecycle`。
@@ -23,6 +24,8 @@ subtask: false
 只有同一会话中随后到达的、明确选择模板的用户消息，才可以调用 init。
 
 不得接受 slash command 参数、路径、GitHub 地址或 ref。不得在用户选择前调用 init 做模式探测。
+`sdlc_lifecycle` 失败后原样报告并停止；禁止自行查端口、结束进程或同轮重试。端口或旧预览
+冲突必须交给用户或外部监督者确认目标后处理。
 `sdlc_lifecycle` 会继续执行既有的 template import、工具探测与受控安装、
 按模板 `rules` 生成 `.sdlc-pipeline/contracts/active-rules.json`，再执行
 install/compile/start/health/artifact/stop，并生成或保留 `AGENTS.md` 和 `init-report`。

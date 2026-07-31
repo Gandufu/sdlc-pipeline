@@ -154,10 +154,6 @@ def _context_resources(root: Path, role: str) -> list[dict[str, Any]]:
             candidates[item["content_ref"]] = (1, reason)
     if role == "tester":
         for item in spec["test_plan"]["items"]:
-            candidates[item["content_ref"]] = (
-                1,
-                "authoritative Verification",
-            )
             selector = item.get("selector")
             if selector and (root / selector).is_file():
                 candidates[selector] = (2, "declared test source")
@@ -319,9 +315,12 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
             "verification": [
                 {
                     "id": item["id"],
+                    "level": item["level"],
+                    "preconditions": item["preconditions"],
                     "command": item["command"],
                     "selector": item.get("selector"),
                     "expected": item["expected"],
+                    "mandatory": item["mandatory"],
                 }
                 for item in tests
             ],
@@ -437,14 +436,6 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
         )
     context = build_context_pack(root, role)
     requirement_count = len(load_current_spec(root)["requirements"]["items"])
-    from .runs import record_tokens
-
-    record_tokens(
-        root,
-        role,
-        repeated_chars=context["repeated_chars"],
-        source="context-pack",
-    )
     failure_ref = _active_failure_ref(root, role)
     if role == "coder":
         if failure_ref:

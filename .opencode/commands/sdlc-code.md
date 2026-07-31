@@ -15,6 +15,11 @@ $ARGUMENTS
 若当前处于 Human Review 或 Test 且用户报告实现问题，调用
 `sdlc_task(transition, implementation_issue)`。
 
+这是纯编排命令。派发前禁止调用 `read`、`glob`、`grep`、`bash` 或 `edit`，禁止读取
+input、Spec、业务源码、测试、handoff 或目录列表；这些内容由 hook 生成的 context manifest
+交给 Coder。main 只允许调用本命令要求的 `sdlc_status`、`sdlc_task`、
+`sdlc_lifecycle` 和一次 `task`。
+
 只有 Task 位于 Code 时行动。若 `sdlc_status.code_reverify_available=true`，先且只调用一次
 `sdlc_lifecycle(action=reverify_code)`，成功即进入 Human Review，失败原样报告并停止；
 不得派发 Coder。否则派发一次 `sdlc-coder`。task 描述保持简短；task prompt 必须逐字包含
