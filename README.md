@@ -64,7 +64,7 @@ flowchart LR
 
 `sdlc-main` 是拥有完整项目读写和命令能力的主会话，负责架构判断、状态流转、回退和派发。
 `sdlc-coder` 与 `sdlc-tester` 使用独立 context，分别交付实现和独立测试；它们不是受限目录执行器。
-角色通过模型、task prompt、context pack 和 handoff 区分，Core 不在工具调用前实施目录 ACL。
+角色通过模型、task prompt、紧凑阶段 brief 和 handoff 区分，Core 不在工具调用前实施目录 ACL。
 
 OpenCode 支持为每个 agent 单独选择模型。例如可在项目 `opencode.json` 中配置：
 
@@ -91,6 +91,8 @@ Electron 模板固定使用项目根目录 `assets/` 存放原型直接引用的
 .sdlc-pipeline/
   state/task.json
   work/input.md
+  work/pending-spec.md       # 仅等待 Spec 审批时存在
+  work/records/*-handoff.md
   evidence/task-events.jsonl
   evidence/records/
 
@@ -104,9 +106,11 @@ docs/sdlc/
     verification/
 ```
 
-- `input.md` 只追加用户原始需求、补充和缺陷反馈。
-- prepare 只在 `task.json` 保存待确认的 Spec hash，不保存临时正文。
-- approve 后直接发布正式 baseline。
+- `input.md` 只追加用户原始需求和需求补充；监督结果、实现缺陷和测试缺陷通过
+  `<sdlc-feedback>` 透传，不污染原始需求。
+- prepare 将待审批正文暂存为 `work/pending-spec.md`，`task.json` 只保存 hash。
+- approve 只提交 `content_hash + confirmed=true`；Core 校验 pending、发布正式 baseline，
+  随后删除 pending。
 - JSON 只保存状态、ID、路径和 hash；需求正文在 Markdown。
 - 外部文件由 OpenCode 按用户授权直接读取，插件不摄取、不复制、不建立 Source。
 - 插件不负责会话恢复；会话上下文属于 OpenCode。

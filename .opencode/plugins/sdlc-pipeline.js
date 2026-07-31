@@ -258,7 +258,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       }),
       sdlc_spec: tool({
         description: [
-          "一次性校验完整 Spec，或在用户确认后直接发布正式 baseline；未发布正文不落盘。",
+          "prepare 校验并暂存 pending Spec；approve 只提交 content_hash + confirmed=true，Core 校验暂存正文、发布 baseline 并删除 pending。",
           "不要提交 R/D/T/AC 的 id、design_ids、acceptance_criteria_ids、test_key 或 selector；它们全部由 Core 分配。",
           "不要提交 requirement_ids；Core 将 Design/Verification 关联到本次 Spec 的正式 Requirement。",
           "extension_points 只使用 sdlc_status.spec_contract 中列出的值；无法匹配时 Core 使用脚手架受控范围。",
@@ -266,7 +266,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
         ].join(" "),
         args: {
           action: tool.schema.enum(["prepare", "approve"]),
-          spec,
+          spec: spec.optional(),
           content_hash: tool.schema.string().optional(),
           confirmed: tool.schema.boolean().optional(),
         },
@@ -278,7 +278,7 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           }
           return JSON.stringify(await invoke(rootOf(context, fallbackRoot), "spec", {
             action: args.action,
-            spec: args.spec,
+            ...(args.action === "prepare" ? { spec: args.spec } : {}),
             content_hash: args.content_hash,
             confirmed: args.confirmed,
           }, { signal: context.abort }))
@@ -286,13 +286,13 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       }),
       sdlc_lifecycle: tool({
         description: [
-          "初始化项目，或对已有 Coder handoff 做一次确定性 Code 门禁复验。",
+          "初始化项目，或对已有 Coder/Tester handoff 做一次确定性门禁复验。",
           "init 前必须先调用 sdlc_status；contracts 不存在时必须等待用户跨消息选择模板并传入 options.template。",
           "严禁用无参数 init 探测状态。",
           "任何 lifecycle 失败后原样报告并停止；禁止自行清理端口、结束进程或同轮重试。",
         ].join(" "),
         args: {
-          action: tool.schema.enum(["init", "reverify_code"]),
+          action: tool.schema.enum(["init", "reverify_code", "reverify_test"]),
           options: tool.schema.object({
             template: tool.schema.string().optional(),
           }).optional(),
@@ -304,12 +304,18 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
           const result = await invoke(root, "lifecycle", {
             action: args.action === "reverify_code"
               ? "compile_restart_verify"
-              : args.action,
+              : args.action === "reverify_test"
+                ? "verify_delivery"
+                : args.action,
             ...options,
           }, { signal: context.abort })
           if (args.action === "reverify_code") {
             await invoke(root, "task-state", {
               action: "transition", event: "code_completed",
+            })
+          } else if (args.action === "reverify_test") {
+            await invoke(root, "task-state", {
+              action: "transition", event: "test_completed",
             })
           }
           return JSON.stringify(result)
@@ -346,14 +352,16 @@ export const SdlcPipelinePlugin = async ({ client, directory, worktree }) => {
       const delegatedPrompt = String(
         output.args?.prompt || output.args?.command || "",
       ).trim()
+      const feedbackMatch = delegatedPrompt.match(
+        /<sdlc-feedback>\s*([\s\S]*?)\s*<\/sdlc-feedback>/,
+      )
+      const feedback = feedbackMatch?.[1]?.trim() || ""
       delete output.args.command
-      output.args.prompt = `[SDLC context pack] ${result.context_pack.paths[0]}\n`
+      output.args.prompt = `[SDLC ${role} brief]\n`
+        + `${JSON.stringify(result.brief)}\n`
         + `${result.instruction}\n`
-        + (
-          delegatedPrompt
-            ? `主会话委派内容（原文）：\n${delegatedPrompt}\n`
-            : (objective ? `本次任务目标：${objective}。\n` : "")
-        )
+        + (feedback ? `[SDLC explicit feedback]\n${feedback}\n` : "")
+        + (!feedback && objective ? `本次任务目标：${objective}。\n` : "")
         + (
           role === "coder"
             ? "验证按既有测试、compile、lint/typecheck、必要时一次 package 的顺序闭环；"

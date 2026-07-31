@@ -208,6 +208,23 @@ def status(root: Path) -> dict[str, Any]:
             states={"failed", "blocked", "running"},
         )
     )
+    tester_handoff = read_work_record(root, "tester-handoff", required=False)
+    test_reverify_input_hash = sha256_json({"action": "verify_delivery"})
+    result["test_reverify_available"] = bool(
+        task_stage == "test"
+        and tester_handoff
+        and tester_handoff.get("task_id") == (task or {}).get("task_id")
+        and tester_handoff.get("stage_iteration")
+        == ((task or {}).get("iterations") or {}).get("test")
+        and not gates["test"]
+        and not has_attempt(
+            root,
+            operation="lifecycle",
+            step="verify_delivery",
+            input_hash=test_reverify_input_hash,
+            states={"running"},
+        )
+    )
     if task_stage in {None, "spec", "awaiting_spec_approval"}:
         result["spec_contract"] = {
             "core_assigned_fields": [

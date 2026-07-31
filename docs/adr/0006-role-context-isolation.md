@@ -14,8 +14,9 @@
 
 1. `sdlc-main` 是完整主会话，拥有项目读取、编辑和命令能力，负责生命周期决策、回退和派发。
 2. `sdlc-coder` 与 `sdlc-tester` 同样拥有完整项目读取、编辑和命令能力。
-3. 两个子代理通过 OpenCode task 获得独立 context，只接收各自的 task prompt、context pack
-   和必要的上一阶段 handoff，不继承主会话或另一子代理的推理。
+3. 两个子代理通过 OpenCode task 获得独立 context，只接收各自的 task prompt、Core
+   即时生成的紧凑阶段 brief 和必要的上一阶段 handoff 摘要，不继承主会话或另一子代理的推理；
+   brief 不作为文件持久化。
 4. 角色通过模型配置、任务目标、context 和 handoff 合约区分。项目可以在 `opencode.json`
    中分别为 main、coder、tester 选择模型。
 5. plugin 不再对 `read/edit/write/bash` 调用实施目录 ACL；Core 不再提供 `write-check`

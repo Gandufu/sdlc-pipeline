@@ -11,9 +11,13 @@ from .artifact_documents import (
     write_artifact_document,
 )
 from .common import SdlcError, atomic_write, read_json, sha256_file, sha256_json, utc_now
-from .layout import lifecycle_path, scaffold_path
+from .layout import lifecycle_path, scaffold_path, work_root
 from .lifecycle_contract import normalize_test_selector
-from .records import write_compact_index
+from .records import (
+    read_markdown_record,
+    write_compact_index,
+    write_markdown_record,
+)
 from .schema_validation import validate_schema_instance
 from .task_state import set_pending_spec, task_status, transition
 
@@ -25,6 +29,21 @@ def prepare_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
         raise SdlcError("当前 Task 不允许准备 Spec")
     bundle = _normalize_and_validate(root, payload)
     content_hash = sha256_json(bundle)
+    write_markdown_record(
+        _pending_spec_path(root),
+        {
+            "schema_version": "1.0",
+            "kind": "pending-spec",
+            "content_hash": content_hash,
+            "bundle": bundle,
+            "created_at": utc_now(),
+        },
+        title="Pending Spec",
+        summary_lines=[
+            "- State: `awaiting_spec_approval`",
+            f"- Content hash: `{content_hash}`",
+        ],
+    )
     set_pending_spec(root, content_hash)
     if stage == "spec":
         transition(root, "spec_prepared")
@@ -43,7 +62,6 @@ def prepare_spec(root: Path, payload: dict[str, Any]) -> dict[str, Any]:
 
 def approve_spec(
     root: Path,
-    payload: dict[str, Any],
     *,
     content_hash: str,
     confirmed: bool,
@@ -53,14 +71,28 @@ def approve_spec(
     task = task_status(root)
     if not task or task.get("stage") != "awaiting_spec_approval":
         raise SdlcError("当前 Task 不在 Awaiting Spec Approval")
-    bundle = _normalize_and_validate(root, payload)
+    pending = read_markdown_record(_pending_spec_path(root))
+    if (
+        pending.get("kind") != "pending-spec"
+        or pending.get("content_hash") != content_hash
+        or task.get("pending_spec_hash") != content_hash
+    ):
+        raise SdlcError("Spec hash 与待审批正文不一致；请重新预览")
+    bundle = pending.get("bundle")
+    if not isinstance(bundle, dict):
+        raise SdlcError("Pending Spec 缺少结构化正文；请重新预览")
     actual_hash = sha256_json(bundle)
-    if actual_hash != content_hash or task.get("pending_spec_hash") != content_hash:
-        raise SdlcError("Spec 内容已变化；请重新预览并确认最新 hash")
+    if actual_hash != content_hash:
+        raise SdlcError("Pending Spec 正文校验失败；请重新预览")
     published = _publish(root, bundle, content_hash)
-    set_pending_spec(root, None)
     transition(root, "spec_approved")
+    set_pending_spec(root, None)
+    _pending_spec_path(root).unlink(missing_ok=True)
     return {"ok": True, **published}
+
+
+def _pending_spec_path(root: Path) -> Path:
+    return work_root(root) / "pending-spec.md"
 
 
 def _normalize_and_validate(root: Path, payload: dict[str, Any]) -> dict[str, Any]:

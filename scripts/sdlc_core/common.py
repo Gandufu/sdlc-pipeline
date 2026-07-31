@@ -96,6 +96,23 @@ def relative(root: Path, path: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
 
 
+def run_native_capture(
+    argv: list[str],
+    *,
+    timeout: int,
+) -> subprocess.CompletedProcess[str]:
+    """Capture native output without assuming that it is valid UTF-8."""
+    return subprocess.run(
+        argv,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        shell=False,
+    )
+
+
 def run_command(
     argv: list[str],
     *,
@@ -126,12 +143,9 @@ def run_command(
             stdout, stderr = process.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
             if os.name == "nt":
-                subprocess.run(
+                run_native_capture(
                     ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                    capture_output=True,
-                    text=True,
                     timeout=15,
-                    shell=False,
                 )
             else:
                 os.killpg(process.pid, signal.SIGKILL)

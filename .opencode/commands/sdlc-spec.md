@@ -15,15 +15,16 @@ $ARGUMENTS
 
 只询问真正阻塞范围或验收的一项问题。信息充分后一次构造完整 R/D/T，并调用
 `sdlc_spec(prepare)`；展示 preview/hash 后停止。如果本次消息是对上一轮 preview 的明确发布确认，
-以相同 Spec 和 hash 调用 `sdlc_spec(approve, confirmed=true)`。
+只以该 hash 调用 `sdlc_spec(approve, content_hash, confirmed=true)`；禁止重新生成或提交 Spec 正文。
+成功后立即停止，不进入 Code。
 
 不得提交 R/D/T/AC ID、`requirement_ids`、`design_ids`、`acceptance_criteria_ids`、
 `test_key` 或 `selector`；Core 统一生成关联，
 extension point 只从 `sdlc_status.spec_contract.extension_points` 选择。
 若 `sdlc_spec` 返回错误，原样报告并立即停止，不搜索实现、不猜格式、不重试。
 
-优先读取 `input.md`、用户明确点名的参考文件和现有项目架构；判断影响范围时可按需读取
-项目源码、测试和配置，避免与当前需求无关的全目录扫描。完整 CSS/JS/图片可留给 Coder
+优先读取 `input.md`、用户明确点名的参考文件和项目根目录。Spec 只定义行为、验收与设计；
+只有修改既有功能且无法判断冲突时才读取相关源码。完整 CSS/JS/图片可留给 Coder
 实现时展开；大型协议优先搜索需求涉及的接口局部。
 
 Spec 读取只做提示和观测，不做权限门禁或固定次数限制。记录本轮已读取路径；同一路径内容没有

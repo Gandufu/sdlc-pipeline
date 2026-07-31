@@ -6,7 +6,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from .common import SdlcError, utc_now
+from .common import SdlcError, run_native_capture, utc_now
 from .layout import state_root
 from .records import read_compact_index, write_compact_index
 
@@ -193,12 +193,9 @@ def stop_active(root: Path, timeout: int = 15) -> dict[str, Any]:
         )
     try:
         if os.name == "nt":
-            result = subprocess.run(
+            result = run_native_capture(
                 ["taskkill", "/PID", str(pid), "/T", "/F"],
-                capture_output=True,
-                text=True,
                 timeout=timeout,
-                shell=False,
             )
             if result.returncode and pid_alive(pid):
                 raise SdlcError(result.stderr.strip() or f"taskkill failed: {pid}")

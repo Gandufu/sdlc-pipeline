@@ -12,13 +12,15 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from sdlc_core.artifacts import load_current_spec  # noqa: E402
 from sdlc_core.adapter import (  # noqa: E402
+    _extract_json,
     before_task,
-    build_context_pack,
+    build_stage_brief,
     validate_coder_handoff,
 )
 from sdlc_core.cli import execute  # noqa: E402
-from sdlc_core.common import SdlcError, git  # noqa: E402
+from sdlc_core.common import SdlcError, git, run_native_capture  # noqa: E402
 from sdlc_core.journal import begin_attempt, finish_attempt  # noqa: E402
+from sdlc_core.records import read_markdown_record  # noqa: E402
 from sdlc_core.runs import record_tokens, token_summary  # noqa: E402
 from sdlc_core.specs import approve_spec, prepare_spec  # noqa: E402
 from sdlc_core.stores import (  # noqa: E402
@@ -143,7 +145,7 @@ class TaskFlowTests(unittest.TestCase):
         self.assertEqual(created["task"]["previous_task_id"], previous)
         self.assertEqual(created["task"]["stage"], "spec")
 
-    def test_prepare_persists_only_hash_then_approve_publishes_baseline(self) -> None:
+    def test_prepare_persists_pending_markdown_then_hash_approval_publishes(self) -> None:
         record_input(self.root, "实现设备管理")
         spec = _spec()
         ready = prepare_spec(self.root, spec)
@@ -151,11 +153,19 @@ class TaskFlowTests(unittest.TestCase):
         work = self.root / ".sdlc-pipeline" / "work"
         self.assertEqual(
             sorted(path.name for path in work.iterdir()),
-            ["input.md"],
+            ["input.md", "pending-spec.md"],
+        )
+        pending = read_markdown_record(work / "pending-spec.md")
+        self.assertEqual(pending["content_hash"], ready["content_hash"])
+        self.assertEqual(pending["bundle"]["title"], spec["title"])
+        self.assertNotIn(
+            spec["title"],
+            (self.root / ".sdlc-pipeline/state/task.json").read_text(
+                encoding="utf-8"
+            ),
         )
         published = approve_spec(
             self.root,
-            spec,
             content_hash=ready["content_hash"],
             confirmed=True,
         )
@@ -163,6 +173,7 @@ class TaskFlowTests(unittest.TestCase):
         baseline = self.root / "docs/sdlc/baselines" / published["baseline_id"]
         self.assertTrue((baseline / "spec.md").is_file())
         self.assertTrue((baseline / "requirements/R-0001.md").is_file())
+        self.assertFalse((work / "pending-spec.md").exists())
         self.assertFalse((self.root / ".sdlc-pipeline/work/candidates").exists())
         self.assertFalse((self.root / ".sdlc-pipeline/work/sources").exists())
         loaded = load_current_spec(self.root)
@@ -191,7 +202,6 @@ class TaskFlowTests(unittest.TestCase):
         )
         published = approve_spec(
             self.root,
-            spec,
             content_hash=ready["content_hash"],
             confirmed=True,
         )
@@ -205,25 +215,25 @@ class TaskFlowTests(unittest.TestCase):
         )
         self.assertTrue(published["baseline_id"])
 
-    def test_approve_rejects_changed_or_unconfirmed_spec(self) -> None:
+    def test_approve_rejects_wrong_hash_or_unconfirmed_request(self) -> None:
         record_input(self.root, "实现设备管理")
         spec = _spec()
         ready = prepare_spec(self.root, spec)
-        changed = {**spec, "title": "变化后的需求"}
         with self.assertRaises(SdlcError):
             approve_spec(
                 self.root,
-                changed,
-                content_hash=ready["content_hash"],
+                content_hash="0" * 64,
                 confirmed=True,
             )
         with self.assertRaises(SdlcError):
             approve_spec(
                 self.root,
-                spec,
                 content_hash=ready["content_hash"],
                 confirmed=False,
             )
+        self.assertTrue(
+            (self.root / ".sdlc-pipeline/work/pending-spec.md").is_file()
+        )
 
     def test_awaiting_approval_accepts_revised_preview(self) -> None:
         record_input(self.root, "实现设备管理")
@@ -236,19 +246,17 @@ class TaskFlowTests(unittest.TestCase):
         with self.assertRaises(SdlcError):
             approve_spec(
                 self.root,
-                first,
                 content_hash=first_ready["content_hash"],
                 confirmed=True,
             )
         published = approve_spec(
             self.root,
-            revised,
             content_hash=revised_ready["content_hash"],
             confirmed=True,
         )
         self.assertTrue(published["baseline_id"])
 
-    def test_cli_spec_does_not_create_attempt_or_temporary_body(self) -> None:
+    def test_cli_spec_uses_pending_markdown_without_attempt_state(self) -> None:
         execute(self.root, "task-state", {
             "action": "record-input",
             "text": "实现设备管理",
@@ -258,8 +266,39 @@ class TaskFlowTests(unittest.TestCase):
             "spec": _spec(),
         })
         self.assertEqual(ready["state"], "awaiting_spec_approval")
+        pending_path = self.root / ".sdlc-pipeline/work/pending-spec.md"
+        self.assertTrue(pending_path.is_file())
+        approved = execute(self.root, "spec", {
+            "action": "approve",
+            "content_hash": ready["content_hash"],
+            "confirmed": True,
+        })
+        self.assertTrue(approved["baseline_id"])
+        self.assertFalse(pending_path.exists())
         self.assertFalse((self.root / ".sdlc-pipeline/state/runs").exists())
         self.assertFalse((self.root / ".sdlc-pipeline/work/runs").exists())
+
+    def test_cli_prepare_requires_body_but_approve_does_not_accept_one(self) -> None:
+        execute(self.root, "task-state", {
+            "action": "record-input",
+            "text": "实现设备管理",
+        })
+        with self.assertRaisesRegex(SdlcError, "spec prepare 缺少必填字段"):
+            execute(self.root, "spec", {"action": "prepare"})
+        plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("spec: spec.optional()", plugin)
+        self.assertIn(
+            '...(args.action === "prepare" ? { spec: args.spec } : {})',
+            plugin,
+        )
+        self.assertIn(
+            "审批时禁止重新生成、重新提交或修改 Spec 正文",
+            (ROOT / ".opencode/agents/sdlc-main.md").read_text(
+                encoding="utf-8"
+            ),
+        )
 
     def test_successful_attempt_does_not_duplicate_result_under_work(self) -> None:
         attempt = begin_attempt(
@@ -309,7 +348,6 @@ class TaskFlowTests(unittest.TestCase):
         ready = prepare_spec(self.root, _spec())
         approve_spec(
             self.root,
-            _spec(),
             content_hash=ready["content_hash"],
             confirmed=True,
         )
@@ -342,29 +380,21 @@ class TaskFlowTests(unittest.TestCase):
             title="Init",
         )
 
-        before_task(self.root, "coder")
+        receipt = before_task(self.root, "coder")
 
-        context = read_work_record(self.root, "context/coder")
-        failure_ref = context["brief"]["failure_ref"]
+        failure_ref = receipt["brief"]["failure_ref"]
         self.assertEqual(
             f".sdlc-pipeline/evidence/errors/{attempt['run_id']}/"
             f"{attempt['attempt_id']}.md",
             failure_ref,
         )
-        failure_resource = next(
-            item for item in context["resources"]
-            if item["path"] == failure_ref
-        )
-        self.assertEqual(0, failure_resource["tier"])
         self.assertEqual(
             ".sdlc-pipeline/work/input.md",
-            context["brief"]["input_ref"],
+            receipt["brief"]["input_ref"],
         )
-        input_resource = next(
-            item for item in context["resources"]
-            if item["path"] == context["brief"]["input_ref"]
+        self.assertIsNone(
+            read_work_record(self.root, "context/coder", required=False)
         )
-        self.assertEqual("original user requirement", input_resource["reason"])
 
     def test_coder_context_ignores_failure_for_old_source(self) -> None:
         git(self.root, "init")
@@ -372,7 +402,6 @@ class TaskFlowTests(unittest.TestCase):
         ready = prepare_spec(self.root, _spec())
         approve_spec(
             self.root,
-            _spec(),
             content_hash=ready["content_hash"],
             confirmed=True,
         )
@@ -406,14 +435,12 @@ class TaskFlowTests(unittest.TestCase):
             title="Init",
         )
 
-        before_task(self.root, "coder")
+        receipt = before_task(self.root, "coder")
 
-        context = read_work_record(self.root, "context/coder")
-        self.assertNotIn("failure_ref", context["brief"])
-        self.assertFalse(any(
-            item["reason"] == "latest code-gate failure evidence"
-            for item in context["resources"]
-        ))
+        self.assertNotIn("failure_ref", receipt["brief"])
+        self.assertIsNone(
+            read_work_record(self.root, "context/coder", required=False)
+        )
 
     def test_removed_subsystems_are_not_shipped(self) -> None:
         for path in (
@@ -460,6 +487,12 @@ class TaskFlowTests(unittest.TestCase):
             self.assertIn("<user-input>", command, name)
             self.assertIn("$ARGUMENTS", command, name)
             self.assertIn("</user-input>", command, name)
+        for name in ("sdlc-code.md", "sdlc-test.md"):
+            command = (ROOT / ".opencode" / "commands" / name).read_text(
+                encoding="utf-8"
+            )
+            self.assertIn("绝对不得写入", command, name)
+            self.assertIn("完整的\n`<sdlc-feedback>", command, name)
 
     def test_spec_command_observes_reads_without_a_hard_gate(self) -> None:
         command = (ROOT / ".opencode/commands/sdlc-spec.md").read_text(
@@ -483,7 +516,6 @@ class TaskFlowTests(unittest.TestCase):
         ready = prepare_spec(self.root, _spec())
         approve_spec(
             self.root,
-            _spec(),
             content_hash=ready["content_hash"],
             confirmed=True,
         )
@@ -544,9 +576,15 @@ class TaskFlowTests(unittest.TestCase):
         self.assertNotIn("主会话禁止读取或修改业务源码", main)
         self.assertNotIn('"write-check"', plugin)
         self.assertNotIn('"path-check"', plugin)
-        self.assertIn("不要反复 start 或深挖发布包", plugin)
+        self.assertIn("不要自行反复运行", coder)
+        self.assertIn("JSON.stringify(result.brief)", plugin)
+        self.assertNotIn("context_pack", plugin)
         self.assertIn("handoff rejected", plugin)
         self.assertIn("本次命令必须停止", plugin)
+        self.assertIn(
+            "不得在 handoff 前运行完整 `pnpm test`、compile、lint、package 或 start",
+            tester,
+        )
         self.assertLess(
             plugin.index("handoff rejected"),
             plugin.index("receipt?.handoff?.open_issues"),
@@ -557,7 +595,6 @@ class TaskFlowTests(unittest.TestCase):
         ready = prepare_spec(self.root, _spec())
         approve_spec(
             self.root,
-            _spec(),
             content_hash=ready["content_hash"],
             confirmed=True,
         )
@@ -592,44 +629,66 @@ class TaskFlowTests(unittest.TestCase):
             receipt["handoff"]["changed_files"],
         )
 
+    def test_handoff_extracts_trailing_json_from_task_result(self) -> None:
+        handoff = _extract_json(
+            "<task_result>\n"
+            "检查结果：compile、lint、test 均通过。\n"
+            '{"summary":"测试交付完成","open_issues":[],'
+            '"full_scan":false,"full_scan_reason":null}\n'
+            "</task_result>"
+        )
+
+        self.assertEqual("测试交付完成", handoff["summary"])
+        self.assertEqual([], handoff["open_issues"])
+
+    def test_native_capture_replaces_non_utf8_output(self) -> None:
+        result = run_native_capture(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.stdout.buffer.write(bytes([0xb3]))",
+            ],
+            timeout=5,
+        )
+
+        self.assertEqual(0, result.returncode)
+        self.assertEqual("\ufffd", result.stdout)
+
     def test_tester_context_references_previous_coder_handoff(self) -> None:
         record_input(self.root, "实现设备管理")
         ready = prepare_spec(self.root, _spec())
         approve_spec(
             self.root,
-            _spec(),
             content_hash=ready["content_hash"],
             confirmed=True,
         )
-        index = write_work_record(
+        write_work_record(
             self.root,
             "coder-handoff",
-            {"summary": "implemented", "open_issues": []},
+            {
+                "summary": "implemented",
+                "open_issues": [],
+                "changed_files": ["src/app.ts"],
+            },
             state="validated",
             title="Coder handoff",
         )
 
-        build_context_pack(self.root, "tester")
-        context = read_work_record(self.root, "context/tester")
+        brief = build_stage_brief(self.root, "tester")
 
-        self.assertEqual(["assets"], context["brief"]["asset_paths"])
-        self.assertEqual(
-            index["content_ref"],
-            context["brief"]["previous_handoff_ref"],
+        self.assertEqual(["src/app.ts"], brief["changed_files"])
+        self.assertNotIn("input_ref", brief)
+        self.assertNotIn("requirements", brief)
+        self.assertNotIn("design", brief)
+        self.assertIsNone(
+            read_work_record(self.root, "context/tester", required=False)
         )
-        resource = next(
-            item for item in context["resources"]
-            if item["path"] == index["content_ref"]
-        )
-        self.assertEqual(0, resource["tier"])
-        self.assertEqual("previous coder handoff", resource["reason"])
 
     def test_human_review_rollback_invalidates_the_previous_coder_handoff(self) -> None:
         record_input(self.root, "实现设备管理")
         ready = prepare_spec(self.root, _spec())
         approve_spec(
             self.root,
-            _spec(),
             content_hash=ready["content_hash"],
             confirmed=True,
         )
@@ -660,7 +719,6 @@ class TaskFlowTests(unittest.TestCase):
         ready = prepare_spec(self.root, _spec())
         approve_spec(
             self.root,
-            _spec(),
             content_hash=ready["content_hash"],
             confirmed=True,
         )
@@ -697,6 +755,41 @@ class TaskFlowTests(unittest.TestCase):
         self.assertIn("code_reverify_available=true", command)
         self.assertIn("reverify_code", plugin)
         self.assertIn("compile_restart_verify", plugin)
+
+    def test_test_command_prefers_deterministic_reverification(self) -> None:
+        record_input(self.root, "实现设备管理")
+        ready = prepare_spec(self.root, _spec())
+        approve_spec(
+            self.root,
+            content_hash=ready["content_hash"],
+            confirmed=True,
+        )
+        transition(self.root, "code_completed")
+        transition(self.root, "review_passed")
+        current = task_status(self.root)
+        write_work_record(
+            self.root,
+            "tester-handoff",
+            {
+                "summary": "tests delivered",
+                "open_issues": [],
+                "task_id": current["task_id"],
+                "stage_iteration": current["iterations"]["test"],
+            },
+            state="validated",
+            title="Tester handoff",
+        )
+
+        self.assertTrue(execute(self.root, "status", {})["test_reverify_available"])
+        command = (ROOT / ".opencode/commands/sdlc-test.md").read_text(
+            encoding="utf-8"
+        )
+        plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("test_reverify_available=true", command)
+        self.assertIn("reverify_test", plugin)
+        self.assertIn("verify_delivery", plugin)
 
     def test_code_and_test_commands_keep_main_as_a_dispatcher(self) -> None:
         main = (ROOT / ".opencode/agents/sdlc-main.md").read_text(
@@ -751,22 +844,17 @@ class TaskFlowTests(unittest.TestCase):
         ready = prepare_spec(self.root, _spec())
         approve_spec(
             self.root,
-            _spec(),
             content_hash=ready["content_hash"],
             confirmed=True,
         )
 
-        build_context_pack(self.root, "tester")
-        context = read_work_record(self.root, "context/tester")
+        brief = build_stage_brief(self.root, "tester")
 
-        verification = context["brief"]["verification"][0]
+        verification = brief["verification"][0]
         self.assertEqual("unit", verification["level"])
         self.assertEqual("存在设备", verification["preconditions"])
         self.assertTrue(verification["mandatory"])
-        self.assertFalse(any(
-            item["reason"] == "authoritative Verification"
-            for item in context["resources"]
-        ))
+        self.assertNotIn("resources", brief)
 
     def test_plugin_records_completed_agent_token_usage_once(self) -> None:
         plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(
@@ -797,12 +885,15 @@ class TaskFlowTests(unittest.TestCase):
         self.assertEqual(0.125, tester["cost"])
         self.assertEqual("opencode-message", tester["source"])
 
-    def test_task_hook_preserves_main_prompt_and_stops_on_open_issues(self) -> None:
+    def test_task_hook_only_preserves_explicit_feedback_and_stops_on_open_issues(self) -> None:
         plugin = (ROOT / ".opencode/plugins/sdlc-pipeline.js").read_text(
             encoding="utf-8"
         )
         self.assertIn("delegatedPrompt", plugin)
-        self.assertIn("主会话委派内容（原文）", plugin)
+        self.assertIn("<sdlc-feedback>", plugin)
+        self.assertIn("[SDLC explicit feedback]", plugin)
+        self.assertNotIn("主会话委派内容（原文）", plugin)
+        self.assertIn("[SDLC ${role} brief]", plugin)
         self.assertIn("receipt?.handoff?.open_issues", plugin)
         self.assertIn("未执行后续 gate，也未推进 Task", plugin)
         self.assertLess(

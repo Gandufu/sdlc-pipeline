@@ -2,17 +2,23 @@
 
 ## Unreleased
 
-- main/coder/tester 改为完整项目读写能力；以不同模型、独立 context、task prompt 和 handoff
-  区分角色，删除 plugin/Core 的工具前目录 ACL。
-- tester context 显式引用 coder handoff；main 状态返回轻量 artifact refs，便于检查上一阶段产物。
-- task hook 保留 main 的完整委派原文；handoff 存在 `open_issues` 时停止 gate 和状态推进。
-- Electron 模板通过 `brief.asset_paths` 约定项目根目录 `assets/`，外部原型资产保持原格式复制，
-  不进入 Source 摄取或 Core 内容处理。
-- 采用最终 Task 状态图，支持 Code/Human Review/Test/Spec 的显式返工循环。
-- 只追加用户原始 `input.md`；删除 Source、Spec Work、Candidate revision、Feedback 和会话恢复。
-- Spec prepare 只保存待确认 hash；approve 后直接生成正式 Markdown baseline。
-- 对外工具收缩为 status、task、spec、lifecycle、finalize。
-- 删除约 8900 行旧实现和过时回归，保留快速状态图、Spec 发布和 lifecycle 合同测试。
+## 0.25.0 - 2026-07-31
+
+### Changed
+
+- Coder/Tester 改用按角色生成的紧凑阶段 brief，不再持久化或重复读取 context pack；
+  Tester 只接收 Verification、Coder 变更范围、测试目标和 preflight 路径。
+- task hook 只透传显式 `<sdlc-feedback>`，不再附加 main 生成的委派正文和重复读取清单。
+- Spec prepare 将规范化正文暂存为 `work/pending-spec.md`，状态 JSON 只保留 hash；
+  approve 只接收 `content_hash + confirmed=true`，发布后删除 pending，避免模型在确认时重新生成正文。
+- 阶段监督结果和缺陷修复 feedback 不再追加到 `input.md`；原始输入只保存需求与需求补充。
+
+### Fixed
+
+- 修复 Windows 原生 `taskkill` 输出不是 UTF-8 时触发 `UnicodeDecodeError` 并中断门禁的问题。
+- Code/Test gate 失败但 handoff 已有效时提供确定性 reverify，避免重复派发子代理和重复生成测试。
+- 修复 OpenCode task 结果被包装或附带尾部文本时无法提取 handoff JSON 的问题。
+- Test 返工保持真正的独立 Tester context，并在 `open_issues` 非空时停止后续 gate 与状态推进。
 
 ## 0.15.4 - 2026-07-28
 

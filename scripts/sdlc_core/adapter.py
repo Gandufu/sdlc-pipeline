@@ -1,24 +1,20 @@
 from __future__ import annotations
 
-import fnmatch
 import json
 import re
 from pathlib import Path
 from typing import Any
 
 from .artifacts import load_current_spec, require_code_ready
-from .artifact_store import current_baseline
-from .common import SdlcError, read_json, sha256_file, sha256_json, utc_now
+from .common import SdlcError, read_json, sha256_json, utc_now
 from .journal import active_run
-from .layout import contracts_root, rules_root, runtime_root, state_root
+from .layout import state_root
 from .records import read_compact_index
 from .stores import (
     read_work_record,
-    record_index,
     write_work_record,
 )
 from .trace import (
-    TOOLING_CONFIG_PATHS,
     changed_path_fingerprints,
     implementation_fingerprint,
     validate_diff,
@@ -26,9 +22,6 @@ from .trace import (
 )
 
 from .schema_validation import validate_schema_instance
-
-MAX_CONTEXT_RESOURCES = 10
-MAX_IMPLEMENTATION_RESOURCES = 6
 
 
 def _active_failure_ref(root: Path, role: str) -> str | None:
@@ -111,207 +104,43 @@ def _extract_json(text: str) -> dict[str, Any]:
                 return value
         except json.JSONDecodeError:
             continue
+    decoder = json.JSONDecoder()
+    embedded: list[dict[str, Any]] = []
+    for match in re.finditer(r"\{", text):
+        try:
+            value, _ = decoder.raw_decode(text, match.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(value, dict):
+            embedded.append(value)
+    if embedded:
+        return embedded[-1]
     raise SdlcError("subagent 输出中没有可解析的 JSON handoff")
 
 
-def _context_resources(root: Path, role: str) -> list[dict[str, Any]]:
+def build_stage_brief(root: Path, role: str) -> dict[str, Any]:
     spec = load_current_spec(root)
-    selected = current_baseline(root)
-    if not selected:
-        raise SdlcError("缺少已发布的 spec baseline")
-    baseline, _ = selected
-    candidates: dict[str, tuple[int, str]] = {
-        (baseline / "spec.md").relative_to(root).as_posix(): (
-            1,
-            "authoritative Spec preview",
-        ),
-    }
-    from .task_state import task_status
-
-    task = task_status(root) or {}
-    input_ref = task.get("input_ref")
-    if isinstance(input_ref, str) and input_ref:
-        candidates[input_ref] = (1, "original user requirement")
-    failure_ref = _active_failure_ref(root, role)
-    if failure_ref:
-        candidates[failure_ref] = (0, "latest code-gate failure evidence")
-    if role == "tester":
-        coder_handoff = record_index(
-            root,
-            "coder-handoff",
-            required=False,
-        )
-        if coder_handoff:
-            candidates[coder_handoff["content_ref"]] = (
-                0,
-                "previous coder handoff",
-            )
-    for group, reason in (
-        ("requirements", "authoritative Requirement"),
-        ("design", "authoritative Design"),
-    ):
-        for item in spec[group]["items"]:
-            candidates[item["content_ref"]] = (1, reason)
-    if role == "tester":
-        for item in spec["test_plan"]["items"]:
-            selector = item.get("selector")
-            if selector and (root / selector).is_file():
-                candidates[selector] = (2, "declared test source")
-    implementation_candidates: set[str] = set()
-    for item in spec["design"]["items"]:
-        for pattern in item["allowed_paths"]:
-            if _is_test_path(pattern.rstrip("/") + "/"):
-                continue
-            wildcard = min(
-                [index for token in ("*", "?", "[") if (index := pattern.find(token)) >= 0],
-                default=len(pattern),
-            )
-            prefix = pattern[:wildcard].rstrip("/")
-            path = root / prefix if prefix else root
-            if path.is_file():
-                implementation_candidates.add(path.relative_to(root).as_posix())
-                continue
-            directory = path if path.is_dir() else path.parent
-            if not directory.is_dir():
-                continue
-            for candidate in sorted(directory.rglob("*")):
-                if len(implementation_candidates) >= MAX_IMPLEMENTATION_RESOURCES:
-                    break
-                if (
-                    candidate.is_file()
-                    and candidate.stat().st_size <= 80_000
-                    and runtime_root(root).as_posix() not in candidate.as_posix()
-                    and ".opencode" not in candidate.parts
-                    and ".sdlc-pipeline" not in candidate.parts
-                    and not _is_test_path(
-                        candidate.relative_to(root).as_posix()
-                    )
-                    and any(
-                        fnmatch.fnmatch(candidate.relative_to(root).as_posix(), allowed)
-                        or candidate.relative_to(root).as_posix() == allowed.rstrip("/")
-                        or candidate.relative_to(root).as_posix().startswith(
-                            allowed.rstrip("/") + "/"
-                        )
-                        for allowed in item["allowed_paths"]
-                    )
-                ):
-                    implementation_candidates.add(
-                        candidate.relative_to(root).as_posix()
-                    )
-    for name in sorted(implementation_candidates)[:MAX_IMPLEMENTATION_RESOURCES]:
-        candidates[name] = (2, "design-allowed business implementation candidate")
-    active_rules = read_json(
-        contracts_root(root) / "active-rules.json", required=False
-    ) or {"rules": []}
-    for rule in active_rules.get("rules", []):
-        path = rule.get("path")
-        if (
-            not isinstance(path, str)
-            or not path.startswith(".sdlc-pipeline/runtime/rules/")
-            or not path.endswith(".md")
-        ):
-            raise SdlcError(f"active rule 路径非法: {path!r}")
-        rule_path = root / path
-        try:
-            rule_path.resolve().relative_to(
-                rules_root(root).resolve()
-            )
-        except ValueError as exc:
-            raise SdlcError(f"active rule 越出规则目录: {path}") from exc
-        if not rule_path.is_file() or sha256_file(rule_path) != rule.get("sha256"):
-            raise SdlcError(f"active rule 缺失或 hash 漂移: {path}")
-        candidates[path] = (3, "active guidance; read only for the matching stack")
-    resources = []
-    for name, (tier, reason) in sorted(
-        candidates.items(), key=lambda item: (item[1][0], item[0])
-    )[:MAX_CONTEXT_RESOURCES]:
-        path = root / name
-        if not path.is_file():
-            if tier == 1:
-                raise SdlcError(f"权威 context resource 缺失或不可读: {name}")
-            continue
-        try:
-            digest = sha256_file(path)
-            size = path.stat().st_size
-        except OSError as exc:
-            raise SdlcError(f"context resource 不可读: {name}: {exc}") from exc
-        resources.append({
-            "path": name,
-            "sha256": digest,
-            "size": size,
-            "tier": tier,
-            "reason": reason,
-        })
-    return resources
-
-
-def build_context_pack(root: Path, role: str) -> dict[str, Any]:
-    spec = load_current_spec(root)
-    scaffold_contract = read_json(contracts_root(root) / "scaffold.json")
     requirements = spec["requirements"]["items"]
     designs = spec["design"]["items"]
     tests = spec["test_plan"]["items"]
-    first_requirement = requirements[0] if requirements else None
-    first_requirement_id = first_requirement["id"] if first_requirement else None
-    first_delivery = None
-    if first_requirement_id:
-        first_delivery = {
-            "requirement_id": first_requirement_id,
-            "design_ids": [
-                item["id"] for item in designs
-                if first_requirement_id in item["requirement_ids"]
-            ],
-        }
-    brief = {
-        "requirement_ids": [item["id"] for item in requirements],
-        "goals": [
-            {"id": item["id"], "title": item["title"], "description": item["description"]}
-            for item in requirements
-        ],
-        "design_ids": [item["id"] for item in designs],
-        "extension_points": sorted({
-            item["extension_point"] for item in designs
-        }),
-        "scope_paths": sorted({
-            path for item in designs for path in item["allowed_paths"]
-            if not _is_test_path(path.rstrip("/") + "/")
-        }),
-        "tooling_paths": TOOLING_CONFIG_PATHS,
-        "first_delivery": first_delivery,
-        "acceptance": [
-            criterion
-            for item in requirements
-            for criterion in item["acceptance_criteria"]
-        ],
-    }
-    asset_paths = sorted({
-        item["path"]
-        for item in scaffold_contract.get("extension_points", [])
-        if isinstance(item, dict)
-        and item.get("id") == "renderer-assets"
-        and isinstance(item.get("path"), str)
-    })
-    if asset_paths:
-        brief["asset_paths"] = asset_paths
     from .task_state import task_status
 
     task = task_status(root) or {}
-    input_ref = task.get("input_ref")
-    if isinstance(input_ref, str) and input_ref:
-        brief["input_ref"] = input_ref
-    failure_ref = _active_failure_ref(root, role)
-    if failure_ref:
-        brief["failure_ref"] = failure_ref
+    iterations = task.get("iterations") or {}
+    brief: dict[str, Any] = {
+        "schema_version": "1.0",
+        "role": role,
+        "task_id": task.get("task_id"),
+        "stage": task.get("stage"),
+        "iteration": int(iterations.get("test" if role == "tester" else "code", 0)),
+    }
     if role == "tester":
-        coder_handoff = record_index(
+        coder_handoff = read_work_record(
             root,
             "coder-handoff",
             required=False,
-        )
+        ) or {}
         brief.update({
-            "test_ids": [item["id"] for item in tests],
-            "test_targets": sorted(_tester_writable_paths(root)),
-            "preflight_unit_test_paths": sorted(_preflight_unit_test_paths(root)),
             "verification": [
                 {
                     "id": item["id"],
@@ -324,42 +153,47 @@ def build_context_pack(root: Path, role: str) -> dict[str, Any]:
                 }
                 for item in tests
             ],
+            "changed_files": coder_handoff.get("changed_files", []),
+            "test_targets": sorted(_tester_writable_paths(root)),
+            "preflight_unit_test_paths": sorted(_preflight_unit_test_paths(root)),
         })
-        if coder_handoff:
-            brief["previous_handoff_ref"] = coder_handoff["content_ref"]
-    pack = {
-        "schema_version": "1.0",
-        "mode": "progressive",
-        "role": role,
-        "brief": brief,
-        "resources": _context_resources(root, role),
-        "instruction": (
-            "以 brief 为实现事实；只在修改需要时读取 resources。"
-            "brief.input_ref 存在时先读取原始需求 Markdown，"
-            "保留其中明确指定的外部参考路径和验收措辞。"
-            "brief.failure_ref 存在时先读取该 Markdown，它是本次修复反馈。"
-            "resources 是独立 context 的优先阅读清单，不是目录权限列表。"
-            "业务任务通常无需读取 .sdlc-pipeline/runtime/scripts/**。"
-            "tier=1 是权威契约，tier=2 是业务实现候选，tier=3 是 active rule。"
-        ),
-    }
-    write_work_record(
-        root,
-        f"context/{role}",
-        pack,
-        state="ready",
-        title=f"{role} context manifest",
-    )
-    index = record_index(root, f"context/{role}")
-    characters = len(json.dumps(pack, ensure_ascii=False))
-    return {
-        "paths": [index["content_ref"]],
-        "parts": 1,
-        "characters": characters,
-        "repeated_chars": 0,
-        "resource_count": len(pack["resources"]),
-        "mode": "progressive",
-    }
+        return brief
+
+    input_ref = task.get("input_ref")
+    if isinstance(input_ref, str) and input_ref:
+        brief["input_ref"] = input_ref
+    failure_ref = _active_failure_ref(root, "coder")
+    if failure_ref:
+        brief["failure_ref"] = failure_ref
+    brief.update({
+        "requirements": [
+            {
+                "id": item["id"],
+                "title": item["title"],
+                "goal": item["goal"],
+                "scope": item["scope"],
+                "non_goals": item["non_goals"],
+                "acceptance": item["acceptance_criteria"],
+            }
+            for item in requirements
+        ],
+        "design": [
+            {
+                "id": item["id"],
+                "modules": [
+                    {
+                        "name": module["name"],
+                        "responsibility": module["responsibility"],
+                    }
+                    for module in item["modules"]
+                ],
+                "allowed_paths": item["allowed_paths"],
+                "extension_point": item["extension_point"],
+            }
+            for item in designs
+        ],
+    })
+    return brief
 
 
 def before_task(root: Path, role: str) -> dict[str, Any]:
@@ -434,52 +268,15 @@ def before_task(root: Path, role: str) -> dict[str, Any]:
             state="captured",
             title=f"{role} task before snapshot",
         )
-    context = build_context_pack(root, role)
+    brief = build_stage_brief(root, role)
     requirement_count = len(load_current_spec(root)["requirements"]["items"])
-    failure_ref = _active_failure_ref(root, role)
-    if role == "coder":
-        if failure_ref:
-            recovery_instruction = (
-                "brief.failure_ref 存在时第一步读取错误 Markdown；"
-                "若当前代码已不存在该错误，禁止 no-op 编辑或重复失败工具，"
-                "直接返回 JSON handoff 交给 Core 复验；否则只修复已证实问题；"
-            )
-        else:
-            recovery_instruction = (
-                "brief.input_ref 存在时第一步读取原始需求 Markdown；"
-                "其中明确指定的 HTML、协议或资源路径必须按需读取，禁止自行替代设计；"
-                "再以 brief.first_delivery 指定的 R/D 作为第一个纵向交付切片；"
-                "读取 manifest 后按需检查与当前任务相关的项目内容；"
-            )
-        role_instruction = (
-            recovery_instruction
-            +
-            "coder 拥有完整项目读写与命令能力，以业务实现为本阶段主要交付；"
-            "可以读取、运行并按公开接口变化更新既有测试，但不要扩展验收范围或替代 tester；"
-            "验证只做一轮受影响测试、compile、lint/typecheck，必要时一次 package；"
-            "任一检查失败必须先闭环或写入 open_issues，禁止绕过失败反复 start、深挖发布包；"
-            "handoff 后 Core 统一执行权威 compile、package、start 与 readiness，并保留预览进程。"
-            "TypeScript hard policy 会拒绝 : any、as any、<any>；"
-            "只实现已确认 R/D/AC，不为臆造的无效输入使用类型逃逸。"
-        )
-    else:
-        role_instruction = (
-            "tester 拥有完整项目读写与命令能力，并以独立 context 检查 coder handoff 和实现；"
-            "测试阶段主要交付 brief.test_targets 对应的 Verification 测试；"
-            "发现实现问题时在 open_issues 中报告，由 main 决定回退到 Code；"
-            "handoff 后 Core 停止预览并确认端口释放，再由 Playwright 脚本启动、测试和 cleanup。"
-        )
     return {
         "ok": True,
         "role": role,
         "requirement_count": requirement_count,
         "baseline": "reused" if reuse_baseline else "created",
-        "context_pack": context,
-        "instruction": (
-            "先读取 context manifest 的 brief，再按需读取 resources，禁止预读全部文件。"
-            + role_instruction
-            + "最终只返回约定 JSON handoff；open_issues 必须是字符串数组，禁止返回对象。"
-        ),
+        "brief": brief,
+        "instruction": "严格按 brief 完成本阶段，并返回 Agent 约定的裸 JSON handoff。",
     }
 
 

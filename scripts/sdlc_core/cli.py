@@ -57,7 +57,13 @@ def _input() -> dict[str, Any]:
 
 def _validate_request(operation: str, payload: dict[str, Any]) -> None:
     """Reject structurally incomplete requests before they can affect a Run."""
-    if operation != "spec" or payload.get("action") != "approve":
+    if operation != "spec":
+        return
+    if payload.get("action") == "prepare":
+        if not isinstance(payload.get("spec"), dict):
+            raise SdlcError("spec prepare 缺少必填字段: spec")
+        return
+    if payload.get("action") != "approve":
         return
     missing = [
         field
@@ -91,7 +97,6 @@ def _execute(root: Path, operation: str, payload: dict[str, Any]) -> dict[str, A
         if action == "approve":
             return approve_spec(
                 root,
-                payload["spec"],
                 content_hash=payload["content_hash"],
                 confirmed=bool(payload.get("confirmed")),
             )
